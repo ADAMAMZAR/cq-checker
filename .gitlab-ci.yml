@@ -7,6 +7,22 @@ test_backend:
   image: python:3.10-slim
   before_script:
     - cd backend
+    # Force python to use pure Python implementation of Protobuf in CI environment
+    - export PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
     - pip install --no-cache-dir -r requirements.txt
   script:
-    - pytest
+    - python -m pytest
+
+# Test Chrome Extension using Node Playwright
+test_extension:
+  stage: test
+  image: mcr.microsoft.com/playwright:v1.44.0-jammy
+  cache:
+    paths:
+      - extension/node_modules/
+  before_script:
+    - cd extension
+    - npm ci
+  script:
+    - npx playwright test
+

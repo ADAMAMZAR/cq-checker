@@ -1,5 +1,12 @@
-import json
+import sys
+# Force python to raise ImportError when attempting to load the incompatible C-extension
+sys.modules['google._upb._message'] = None
+
 import os
+# Force pure Python implementation of Protobuf to bypass Python 3.14 C-extension incompatibilities
+os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
+
+import json
 import shutil
 from datetime import datetime
 from typing import List, Optional
@@ -9,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.schemas import AuditLogEntry, AuditResultResponse
-from app.services import sheets
+from app.services import sheets, gemini
 
 app = FastAPI(
     title="GPO Automatic Certificate Auditor API",
@@ -52,7 +59,7 @@ async def run_audit(
 ):
     """
     Main endpoint called by the Chrome Extension.
-    Saves attachments locally, triggers the audit (mocked for Phase 1),
+    Saves attachments locally, triggers the audit,
     and records results in Google Sheets.
     """
     # Create supplier-specific subdirectories for evidence
@@ -78,11 +85,28 @@ async def run_audit(
         # Construct access URL
         screenshot_url = f"/static/{safe_supplier_name}/{screenshot_filename}"
 
-    # For Phase 1: Mocked Audit Pipeline
-    # Real Gemini integration will be added in Phase 2
-    mock_result = "Match"
-    mock_expiration_date = "2029-12-31"
-    mock_comment = f"Audit completed successfully. Supplier: {supplier_name}. Files verified: {', '.join(saved_filenames)}."
+    # For Phase 2: Live Gemini Audit Pipeline
+    # 1. Read files and extract text/JSON from each certificate using Gemini 2.5 Flash
+    extracted_docs = []
+    for file in files:
+        # Seek to start in case stream was partially consumed
+        await file.seek(0)
+        file_bytes = await file.read()
+        mime_type = file.content_type or "application/pdf"
+        
+        extracted_data = gemini.extract_certificate_data(file_bytes, mime_type)
+        extracted_docs.append({
+            "filename": file.filename,
+            "extracted_data": extracted_data
+        })
+    
+    # 2. Compare extracted data against QA form inputs using Gemini 2.5 Flash
+    compiled_json_text = json.dumps(extracted_docs, indent=2)
+    audit_report = gemini.run_audit_comparison(qa_data, compiled_json_text)
+    
+    audit_result = audit_report.get("result", "Mismatch")
+    expiration_date = audit_report.get("expiration_date", "N/A")
+    suggested_comment = audit_report.get("suggested_comment", "No comments.")
 
     # Write log entry to Google Sheets
     timestamp = datetime.now().strftime("%d/%m/%Y, %H:%M:%S")
@@ -92,23 +116,24 @@ async def run_audit(
         workspace_title=workspace_title,
         cert_type=cert_type,
         filename=", ".join(saved_filenames),
-        result=mock_result,
-        expiration_date=mock_expiration_date,
-        suggested_comment=mock_comment
+        result=audit_result,
+        expiration_date=expiration_date,
+        suggested_comment=suggested_comment
     )
     
     success = sheets.append_audit_log(log_entry)
     if not success:
-        # We don't fail the request, but log it and warn the extension
-        mock_comment += " (Warning: Google Sheets database log failed)"
+        # Log error locally, but do not fail the network request
+        suggested_comment += " (Warning: Google Sheets database log failed)"
 
     return AuditResultResponse(
         supplier_name=supplier_name,
         workspace_title=workspace_title,
         cert_type=cert_type,
         filename=", ".join(saved_filenames),
-        result=mock_result,
-        expiration_date=mock_expiration_date,
-        suggested_comment=mock_comment,
+        result=audit_result,
+        expiration_date=expiration_date,
+        suggested_comment=suggested_comment,
         screenshot_url=screenshot_url
     )
+
