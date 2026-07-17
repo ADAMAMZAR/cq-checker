@@ -33,3 +33,6 @@ frontend/build/
 .idea/
 .DS_Store
 Thumbs.db
+
+MVP.md
+PRD.md
