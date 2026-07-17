@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "GPO Automatic Certificate Auditor",
+  "version": "1.0.0",
+  "description": "Scrapes compliance data from SAP Ariba and uploads certificates to the audit backend.",
+  "permissions": [
+    "scripting",
+    "downloads",
+    "storage",
+    "debugger",
+    "tabs"
+  ],
+  "host_permissions": [
+    "*://*.ariba.com/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "action": {
+    "default_popup": "popup/popup.html"
+  },
+  "background": {
+    "service_worker": "background/background.js"
+  }
+}

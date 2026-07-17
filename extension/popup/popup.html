@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GPO Auditor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="card">
+    <div class="header">
+      <div class="logo">
+        <div class="pulse-ring"></div>
+        <div class="logo-icon">🔍</div>
+      </div>
+      <div class="title-section">
+        <h1>GPO Certificate Auditor</h1>
+        <p class="subtitle">API & Google Sheets Edition</p>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="content">
+      <div class="status-box" id="statusBox">
+        <p class="status-text" id="statusText">Ready to audit supplier profile.</p>
+      </div>
+
+      <div class="progress-container hidden" id="progressContainer">
+        <div class="step" id="step1">
+          <div class="step-dot"></div>
+          <span class="step-label">Scraping questionnaire inputs</span>
+        </div>
+        <div class="step" id="step2">
+          <div class="step-dot"></div>
+          <span class="step-label">Downloading attachments into RAM</span>
+        </div>
+        <div class="step" id="step3">
+          <div class="step-dot"></div>
+          <span class="step-label">Running Gemini AI compliance check</span>
+        </div>
+        <div class="step" id="step4">
+          <div class="step-dot"></div>
+          <span class="step-label">Writing log records to Sheets</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="action-section">
+      <button class="btn btn-primary" id="runBtn">
+        <span class="btn-text">Run Automatic Audit</span>
+        <span class="btn-shine"></span>
+      </button>
+    </div>
+    
+    <div class="footer">
+      <p>Secure pipeline powered by FastAPI & Gemini</p>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

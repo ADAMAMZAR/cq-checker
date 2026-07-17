@@ -37,4 +37,11 @@ Thumbs.db
 MVP.md
 PRD.md
 
-extension/node_modules/
+# Next.js & Extension Node dependencies
+node_modules/
+
+# Playwright Test Artifacts & Cache
+extension/.temp-user-data/
+extension/test-results/
+playwright-report/
+.playwright-artifacts/
