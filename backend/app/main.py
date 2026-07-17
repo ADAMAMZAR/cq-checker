@@ -137,3 +137,32 @@ async def run_audit(
         screenshot_url=screenshot_url
     )
 
+@app.get("/api/logs/{supplier_name}/assets")
+def get_supplier_assets(supplier_name: str):
+    """
+    Scans the local storage uploads directory for files and screenshots
+    belonging to a specific supplier name.
+    """
+    safe_supplier_name = "".join(c for c in supplier_name if c.isalnum() or c in (" ", "_", "-")).strip()
+    supplier_dir = os.path.join(settings.upload_dir, safe_supplier_name)
+    
+    if not os.path.exists(supplier_dir):
+        return {"screenshots": [], "documents": []}
+        
+    files = os.listdir(supplier_dir)
+    screenshots = []
+    documents = []
+    
+    for f in files:
+        file_path = f"/static/{safe_supplier_name}/{f}"
+        if f.startswith("screenshot_") and f.endswith(".png"):
+            screenshots.append(file_path)
+        elif not f.startswith(".") and f != "dummy_cert.pdf":
+            documents.append({
+                "name": f,
+                "url": file_path
+            })
+            
+    return {"screenshots": screenshots, "documents": documents}
+
+

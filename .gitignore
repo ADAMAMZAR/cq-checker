@@ -41,7 +41,9 @@ PRD.md
 node_modules/
 
 # Playwright Test Artifacts & Cache
-extension/.temp-user-data/
-extension/test-results/
+.temp-user-data/
+test-results/
 playwright-report/
 .playwright-artifacts/
+.agents/
+skills-lock.json

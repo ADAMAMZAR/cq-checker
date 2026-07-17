@@ -26,3 +26,18 @@ test_extension:
   script:
     - npx playwright test
 
+# Verify Next.js Frontend Compilation
+test_frontend:
+  stage: test
+  image: node:18-alpine
+  cache:
+    paths:
+      - frontend/node_modules/
+      - frontend/.next/cache/
+  before_script:
+    - cd frontend
+    - npm ci
+  script:
+    - npm run build
+
+
