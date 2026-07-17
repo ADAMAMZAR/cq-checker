@@ -1,0 +1,12 @@
+stages:
+  - test
+
+# Test FastAPI Python Backend
+test_backend:
+  stage: test
+  image: python:3.10-slim
+  before_script:
+    - cd backend
+    - pip install --no-cache-dir -r requirements.txt
+  script:
+    - pytest
