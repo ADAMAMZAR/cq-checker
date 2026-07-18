@@ -12,6 +12,10 @@ class Settings(BaseSettings):
     # Optional raw JSON string for credentials (useful for CI/CD or cloud deployment env vars)
     google_creds_json: str = Field(default="", env="GOOGLE_CREDS_JSON")
 
+    # Vertex AI Configuration
+    vertex_project: str = Field(default="", env="VERTEX_PROJECT")
+    vertex_location: str = Field(default="us-central1", env="VERTEX_LOCATION")
+
     # Local Storage Configuration
     upload_dir: str = Field(default="uploads", env="UPLOAD_DIR")
 

@@ -48,10 +48,26 @@ def get_worksheet(client: gspread.Client) -> gspread.Worksheet:
 def append_audit_log(entry: AuditLogEntry) -> bool:
     """
     Appends an AuditLogEntry to the Google Sheet.
+    Initializes standard headers if the sheet is completely empty.
     """
     try:
         client = get_sheets_client()
         sheet = get_worksheet(client)
+        
+        # Auto-initialize headers if the sheet is completely empty
+        values = sheet.get_all_values()
+        if not values or len(values) == 0:
+            headers = [
+                "Timestamp",
+                "Supplier Name",
+                "Workspace Title",
+                "Certificate Type",
+                "Filename",
+                "Audit Result (Match/Mismatch)",
+                "Expiration Date",
+                "Suggested Comments"
+            ]
+            sheet.append_row(headers)
         
         # Append a new row containing the audit logs
         row = [
@@ -69,7 +85,7 @@ def append_audit_log(entry: AuditLogEntry) -> bool:
     except Exception as e:
         logger.error(f"Failed to append row to Google Sheets: {e}")
         return False
-
+ 
 def get_audit_logs() -> List[AuditLogEntry]:
     """
     Fetches all audit log entries from Google Sheets.
@@ -78,6 +94,11 @@ def get_audit_logs() -> List[AuditLogEntry]:
         client = get_sheets_client()
         sheet = get_worksheet(client)
         
+        # Safe check for empty sheet to prevent gspread errors
+        values = sheet.get_all_values()
+        if not values or len(values) <= 1:
+            return []
+            
         # Get all records (skipping header)
         records = sheet.get_all_records()
         logs = []

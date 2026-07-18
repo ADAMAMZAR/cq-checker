@@ -11,22 +11,38 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true; // Keep message channel open
 });
 
+let pendingAuditTimeout = null;
+
 // Step 1: Inject constants, content styles, and content script into the active tab
 async function startScrapingPipeline(tabId) {
   try {
-    // Inject stylesheet
+    if (pendingAuditTimeout) {
+      clearTimeout(pendingAuditTimeout);
+    }
+
+    // Inject stylesheet into all frames
     await chrome.scripting.insertCSS({
-      target: { tabId: tabId },
+      target: { tabId: tabId, allFrames: true },
       files: ['content/content.css']
     });
 
-    // Inject scripts sequentially (constants first, then scraper)
+    // Inject scripts sequentially into all frames (constants first, then scraper)
     await chrome.scripting.executeScript({
-      target: { tabId: tabId },
+      target: { tabId: tabId, allFrames: true },
       files: ['shared/constants.js', 'content/content.js']
     });
 
-    console.log('[Ariba SW] Scraper injected successfully.');
+    console.log('[Ariba SW] Scraper injected successfully in all frames.');
+
+    // Set a 30-second timeout. If no frame sends PROCESS_AUDIT_DATA within 30 seconds, raise an error.
+    pendingAuditTimeout = setTimeout(() => {
+      chrome.runtime.sendMessage({
+        type: 'AUDIT_ERROR',
+        error: 'The audit automation timed out. No compliance document attachments or Q&A data could be retrieved from the page.'
+      }).catch(() => {});
+      pendingAuditTimeout = null;
+    }, 30000);
+
   } catch (err) {
     console.error('[Ariba SW] Injection failed:', err);
     chrome.runtime.sendMessage({ type: 'AUDIT_ERROR', error: 'Failed to inject content scraper: ' + err.message });
@@ -38,6 +54,12 @@ async function handleAuditData(tabId, data) {
   const { supplierName, rawSupplierName, workspaceTitle, files, extractedQAData } = data;
   
   try {
+    // Clear the timeout as we successfully received data from at least one frame
+    if (pendingAuditTimeout) {
+      clearTimeout(pendingAuditTimeout);
+      pendingAuditTimeout = null;
+    }
+
     // 1. Notify progress
     sendProgress(1, 'Downloading compliance files into RAM...');
     
@@ -124,16 +146,18 @@ async function handleAuditData(tabId, data) {
     const safeSupplier = supplierName.replace(/[^a-z0-9]/gi, '_');
     
     for (const fb of fileBlobs) {
+      const fileDataUrl = await blobToDataURL(fb.blob);
       chrome.downloads.download({
-        url: URL.createObjectURL(fb.blob),
+        url: fileDataUrl,
         filename: `${safeSupplier}/${fb.filename}`,
         conflictAction: 'overwrite'
       });
     }
 
     if (screenshotBlob) {
+      const screenshotDataUrl = await blobToDataURL(screenshotBlob);
       chrome.downloads.download({
-        url: URL.createObjectURL(screenshotBlob),
+        url: screenshotDataUrl,
         filename: `${safeSupplier}/verification_screenshot.png`,
         conflictAction: 'overwrite'
       });
@@ -248,4 +272,14 @@ function base64ToBlob(base64, mimeType) {
     ia[i] = byteString.charCodeAt(i);
   }
   return new Blob([ab], { type: mimeType });
+}
+
+// Helper: Blob to base64 Data URL converter (works in MV3 service workers)
+function blobToDataURL(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = (e) => reject(e);
+    reader.readAsDataURL(blob);
+  });
 }

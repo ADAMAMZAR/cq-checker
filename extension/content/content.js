@@ -149,11 +149,6 @@
 
   const allAnchors = Array.from(document.querySelectorAll('.file-name-container a.file-name'));
 
-  if (allButtons.length === 0 && !supplierElement && allAnchors.length === 0) {
-    window.__aribaAutomationRunning = false;
-    return;
-  }
-
   // Listen for control actions from background.js
   chrome.runtime.onMessage.addListener((message) => {
     if (message.action === 'showToast') {
@@ -197,6 +192,14 @@
   }
 
   try {
+    console.log(`[Ariba Scraper] Starting audit. Found ${allButtons.length} expand buttons, supplierElement:`, supplierElement, `anchors: ${allAnchors.length}`);
+
+    if (allButtons.length === 0 && !supplierElement && allAnchors.length === 0) {
+      console.log('[Ariba Scraper] Silence exit: no elements found in this frame.');
+      window.__aribaAutomationRunning = false;
+      return;
+    }
+
     showOverlay();
     showToast('Initializing scraper pipeline...');
 
@@ -241,6 +244,10 @@
     if (finalAnchors.length === 0) {
       showToast('No compliance documents found.', true);
       hideOverlay();
+      chrome.runtime.sendMessage({
+        type: 'AUDIT_ERROR',
+        error: 'No compliance documents (attachments) were detected on this page. Please ensure you are viewing a questionnaire with uploaded certificate files.'
+      }).catch(() => {});
       window.__aribaAutomationRunning = false;
       return;
     }
@@ -322,6 +329,10 @@
     console.error('[Ariba Ext] Scraping failed:', err);
     showToast('Automation Error: ' + err.message, true);
     hideOverlay();
+    chrome.runtime.sendMessage({
+      type: 'AUDIT_ERROR',
+      error: err.message
+    }).catch(() => {});
   } finally {
     window.__aribaAutomationRunning = false;
   }

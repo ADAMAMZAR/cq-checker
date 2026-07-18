@@ -62,9 +62,9 @@ def extract_certificate_data(file_bytes: bytes, mime_type: str) -> Dict[str, Any
         
         prompt = (
             "Extract the following details from this certificate: "
-            "Supplier Name, Issuer, Certificate Type, Certificate Number, Expiration Date, Effective Date. "
+            "Certificate Owner Name, Issuer, Certificate Type, Certificate Number, Expiration Date, Effective Date. "
             "Return strictly as a JSON object matching these keys: "
-            "supplierName, issuerName, certificateType, certificateNumber, expirationDate, effectiveDate."
+            "certificateOwnerName, issuerName, certificateType, certificateNumber, expirationDate, effectiveDate."
         )
         
         response = model.generate_content(
@@ -96,7 +96,7 @@ def extract_certificate_data(file_bytes: bytes, mime_type: str) -> Dict[str, Any
 
 def run_audit_comparison(qa_text: str, compiled_json_text: str) -> Dict[str, Any]:
     """
-    Calls Gemini 2.5 Flash to compare extracted certificate metadata with QA input fields, returning structured results.
+    Calls Gemini 3.5 Flash to compare extracted certificate metadata with QA input fields, returning structured results.
     """
     if not settings.gemini_api_key:
         logger.warning("Gemini API key is not configured. Returning mock comparison report.")
@@ -114,9 +114,9 @@ def run_audit_comparison(qa_text: str, compiled_json_text: str) -> Dict[str, Any
         }
 
     try:
-        # Using gemini-2.5-flash for the text auditing comparison
+        # Using gemini-3.5-flash for the text auditing comparison
         model = genai.GenerativeModel(
-            "gemini-2.5-flash",
+            "gemini-3.5-flash",
             system_instruction=DEFAULT_SYSTEM_INSTRUCTION
         )
         
