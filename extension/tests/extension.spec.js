@@ -55,27 +55,24 @@ test('Chrome Extension loads background worker and popup, and triggers audit', a
 
     // 3. Open the extension popup panel URL directly
     const popupTab = await context.newPage();
-    await popupTab.goto(`chrome-extension://${extensionId}/popup/popup.html`);
+    await popupTab.goto(`chrome-extension://${extensionId}/panel/panel.html`);
 
-    // Verify popup UI is rendered
-    const title = popupTab.locator('.title-section h1');
+    // Verify panel UI is rendered
+    const title = popupTab.locator('.panel-header h2');
     await expect(title).toHaveText('GPO Certificate Auditor');
 
-    const runBtn = popupTab.locator('#runBtn');
+    const runBtn = popupTab.locator('#download-btn');
     await expect(runBtn).toBeVisible();
 
     // Bring the mock Ariba tab to the front so it becomes the active tab in the context
     await aribaTab.bringToFront();
 
-    // 4. Click the audit trigger button on the popup tab
+    // 4. Click the audit trigger button on the panel tab
     await runBtn.click();
 
-    // Verify the popup transitions to progress-tracking state
-    const progressContainer = popupTab.locator('#progressContainer');
-    await expect(progressContainer).toBeVisible();
-
-    const step1 = popupTab.locator('#step1');
-    await expect(step1).toHaveClass(/active|completed/);
+    // Verify the panel transitions to logging state
+    const logEntries = popupTab.locator('#log-entries');
+    await expect(logEntries).toBeVisible();
 
     console.log('E2E automation flow completed successfully.');
   } finally {

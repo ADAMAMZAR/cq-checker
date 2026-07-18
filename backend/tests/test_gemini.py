@@ -21,10 +21,12 @@ def test_extract_certificate_data_no_key():
     # Test fallback behavior when no API Key is provided
     with patch("app.services.gemini.settings") as mock_settings:
         mock_settings.gemini_api_key = ""
-        result = gemini.extract_certificate_data(b"some content", "application/pdf")
+        result, in_t, out_t, cost = gemini.extract_certificate_data(b"some content", "application/pdf")
         
-        assert result["supplierName"] == "MOCK SUPPLIER"
-        assert result["expirationDate"] == "2029-12-31"
+        assert result["certificateOwnerName"] == "MOCK SUPPLIER"
+        assert result["expirationDate"] == "31/12/2029"
+        assert result["certificateLocation"] == "Selangor, Malaysia"
+        assert in_t == 150
 
 def test_extract_certificate_data_success(mock_gemini_model):
     with patch("app.services.gemini.settings") as mock_settings:
@@ -32,13 +34,13 @@ def test_extract_certificate_data_success(mock_gemini_model):
         
         # Mock successful Gemini JSON response
         mock_response = MagicMock()
-        mock_response.text = '{"supplierName": "Target Supplier Inc", "expirationDate": "2028-06-30"}'
+        mock_response.text = '{"certificateOwnerName": "Target Supplier Inc", "expirationDate": "30/06/2028"}'
         mock_gemini_model.generate_content.return_value = mock_response
         
-        result = gemini.extract_certificate_data(b"pdfbytes", "application/pdf")
+        result, in_t, out_t, cost = gemini.extract_certificate_data(b"pdfbytes", "application/pdf")
         
-        assert result["supplierName"] == "Target Supplier Inc"
-        assert result["expirationDate"] == "2028-06-30"
+        assert result["certificateOwnerName"] == "Target Supplier Inc"
+        assert result["expirationDate"] == "30/06/2028"
 
 def test_extract_certificate_data_failure(mock_gemini_model):
     with patch("app.services.gemini.settings") as mock_settings:
@@ -47,10 +49,10 @@ def test_extract_certificate_data_failure(mock_gemini_model):
         # Make generate_content throw an exception
         mock_gemini_model.generate_content.side_effect = Exception("API Quota Blocked")
         
-        result = gemini.extract_certificate_data(b"pdfbytes", "application/pdf")
+        result, in_t, out_t, cost = gemini.extract_certificate_data(b"pdfbytes", "application/pdf")
         
         # Should return fallback dict containing the error message
-        assert result["supplierName"] == "Extraction Failed"
+        assert result["certificateOwnerName"] == "Extraction Failed"
         assert "API Quota Blocked" in result["error"]
 
 def test_run_audit_comparison_success(mock_gemini_model):
@@ -61,7 +63,7 @@ def test_run_audit_comparison_success(mock_gemini_model):
         mock_response.text = '{"result": "Match", "expiration_date": "2028-06-30", "suggested_comment": "Verification OK"}'
         mock_gemini_model.generate_content.return_value = mock_response
         
-        result = gemini.run_audit_comparison("qa form data", "extracted document JSON")
+        result, in_t, out_t, cost = gemini.run_audit_comparison("qa form data", "extracted document JSON")
         
         assert result["result"] == "Match"
         assert result["expiration_date"] == "2028-06-30"
@@ -73,7 +75,7 @@ def test_run_audit_comparison_failure(mock_gemini_model):
         
         mock_gemini_model.generate_content.side_effect = Exception("Model Overloaded")
         
-        result = gemini.run_audit_comparison("qa form data", "extracted document JSON")
+        result, in_t, out_t, cost = gemini.run_audit_comparison("qa form data", "extracted document JSON")
         
         assert result["result"] == "Mismatch"
         assert "Model Overloaded" in result["suggested_comment"]

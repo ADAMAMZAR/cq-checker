@@ -8,6 +8,7 @@
     "downloads",
     "storage",
     "debugger",
+    "alarms",
     "tabs"
   ],
   "host_permissions": [
@@ -15,10 +16,18 @@
     "http://127.0.0.1/*",
     "http://localhost/*"
   ],
-  "action": {
-    "default_popup": "popup/popup.html"
-  },
+  "action": {},
   "background": {
     "service_worker": "background/background.js"
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "content/content.css"
+      ],
+      "matches": [
+        "*://*.ariba.com/*"
+      ]
+    }
+  ]
 }

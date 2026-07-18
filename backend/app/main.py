@@ -7,6 +7,7 @@ import os
 os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 
 import json
+import asyncio
 import shutil
 from datetime import datetime
 from typing import List, Optional
@@ -15,7 +16,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
-from app.schemas import AuditLogEntry, AuditResultResponse
+from app.schemas import AuditLogEntry, AuditResultResponse, DocumentEvidence, UpdateEvidenceRequest
+import uuid
 from app.services import sheets, gemini
 
 app = FastAPI(
@@ -47,6 +49,51 @@ def get_logs():
     """
     logs = sheets.get_audit_logs()
     return logs
+
+@app.get("/api/evidence", response_model=List[DocumentEvidence])
+def get_evidence():
+    """
+    Fetches all historical document evidence logs (extracted file details) from Google Sheets.
+    Useful for populating supplier selection dropdowns and performing cost calculations.
+    """
+    evidence = sheets.get_document_evidence_logs()
+    return evidence
+
+@app.put("/api/evidence")
+def update_evidence(payload: UpdateEvidenceRequest):
+    """
+    Updates the extracted certificate details (JSON metadata) for a specific document evidence
+    record identified by its Audit ID and Filename.
+    """
+    success = sheets.update_document_evidence(
+        audit_id=payload.audit_id,
+        filename=payload.filename,
+        updated_metadata=payload.updated_metadata
+    )
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Matching document evidence record not found or update failed."
+        )
+    return {"status": "success", "message": "Document evidence updated successfully in Google Sheets."}
+
+@app.post("/api/test/extract")
+async def test_extract_file(file: UploadFile = File(...)):
+    """
+    Test endpoint to upload a file and return raw Gemini OCR extraction data (JSON).
+    """
+    file_bytes = await file.read()
+    mime_type = file.content_type or "application/pdf"
+    
+    extracted_data, in_t, out_t, cost = gemini.extract_certificate_data(file_bytes, mime_type)
+    return {
+        "extracted_data": extracted_data,
+        "usage": {
+            "input_tokens": in_t,
+            "output_tokens": out_t,
+            "estimated_cost_usd": cost
+        }
+    }
 
 @app.post("/api/audit", response_model=AuditResultResponse)
 async def run_audit(
@@ -85,48 +132,133 @@ async def run_audit(
         # Construct access URL
         screenshot_url = f"/static/{safe_supplier_name}/{screenshot_filename}"
 
-    # For Phase 2: Live Gemini Audit Pipeline
-    # 1. Read files and extract text/JSON from each certificate using Gemini 2.5 Flash
-    extracted_docs = []
-    for file in files:
-        # Seek to start in case stream was partially consumed
-        await file.seek(0)
-        file_bytes = await file.read()
-        mime_type = file.content_type or "application/pdf"
-        
-        extracted_data = gemini.extract_certificate_data(file_bytes, mime_type)
-        extracted_docs.append({
-            "filename": file.filename,
-            "extracted_data": extracted_data
-        })
-    
-    # 2. Compare extracted data against QA form inputs using Gemini 2.5 Flash
-    compiled_json_text = json.dumps(extracted_docs, indent=2)
-    audit_report = gemini.run_audit_comparison(qa_data, compiled_json_text)
-    
-    audit_result = audit_report.get("result", "Mismatch")
-    expiration_date = audit_report.get("expiration_date", "N/A")
-    suggested_comment = audit_report.get("suggested_comment", "No comments.")
+    # Save QA data as a JSON file locally in the supplier folder
+    qa_data_path = os.path.join(supplier_dir, "qa_data.json")
+    with open(qa_data_path, "w", encoding="utf-8") as f:
+        f.write(qa_data)
 
-    # Write log entry to Google Sheets
+    # Relational Database Auditing Setup (Initial temp ID)
+    temp_audit_id = f"TEMP_{uuid.uuid4()}"
     timestamp = datetime.now().strftime("%d/%m/%Y, %H:%M:%S")
-    log_entry = AuditLogEntry(
-        timestamp=timestamp,
-        supplier_name=supplier_name,
-        workspace_title=workspace_title,
-        cert_type=cert_type,
-        filename=", ".join(saved_filenames),
-        result=audit_result,
-        expiration_date=expiration_date,
-        suggested_comment=suggested_comment
-    )
+
+    # Parse QA list to link questions/responses to specific files
+    try:
+        qa_list = json.loads(qa_data)
+        if isinstance(qa_list, dict):
+            qa_list = [qa_list]
+        elif not isinstance(qa_list, list):
+            qa_list = []
+    except Exception:
+        qa_list = []
+
+    file_contexts = []
+    file_tasks = []
+
+    for file in files:
+        # Look up matching QA block by filename matching
+        matching_block = None
+        for block in qa_list:
+            attached = block.get("attachedFile", "")
+            if attached and (attached.lower() in file.filename.lower() or file.filename.lower() in attached.lower()):
+                matching_block = block
+                break
+        
+        if matching_block:
+            ariba_question_label = matching_block.get("questionLabel", "")
+            ariba_qa_answers = json.dumps(matching_block.get("answers", []))
+        else:
+            ariba_question_label = "General Attachment"
+            ariba_qa_answers = "[]"
+
+        # Read saved file bytes from local uploads folder to avoid empty stream pointers
+        file_path = os.path.join(supplier_dir, file.filename)
+        with open(file_path, "rb") as f:
+            file_bytes = f.read()
+
+        file_contexts.append({
+            "filename": file.filename,
+            "content_type": file.content_type or "application/octet-stream",
+            "ariba_question_label": ariba_question_label,
+            "ariba_qa_answers": ariba_qa_answers
+        })
+        
+        # Schedule Gemini OCR extraction concurrently in thread
+        task = asyncio.to_thread(
+            gemini.extract_certificate_data,
+            file_bytes,
+            file.content_type or "application/pdf"
+        )
+        file_tasks.append(task)
+
+    # Await parallel execution of all file extractions
+    extraction_results = await asyncio.gather(*file_tasks)
+
+    doc_evidences = []
+    extracted_docs = []
+    total_extraction_cost = 0.0
+
+    for ctx, (extracted_data, in_t, out_t, cost) in zip(file_contexts, extraction_results):
+        extracted_docs.append({
+            "filename": ctx["filename"],
+            "extracted_data": extracted_data,
+            "input_tokens": in_t,
+            "output_tokens": out_t,
+            "cost_usd": cost
+        })
+        
+        gemini_supp_name = extracted_data.get("certificateOwnerName", supplier_name)
+        total_extraction_cost += cost
+
+        doc_evidence = DocumentEvidence(
+            audit_id=temp_audit_id,
+            supplier_id=0,  # Populated by sheets service
+            timestamp=timestamp,
+            supplier_name=supplier_name,
+            filename=ctx["filename"],
+            ariba_question_label=ctx["ariba_question_label"],
+            ariba_qa_answers=ctx["ariba_qa_answers"],
+            gemini_extracted_supplier_name=gemini_supp_name,
+            gemini_extracted_metadata=json.dumps(extracted_data),
+            file_content_type=ctx["content_type"],
+            input_tokens=in_t,
+            output_tokens=out_t,
+            cost_usd=cost
+        )
+        doc_evidences.append(doc_evidence)
+
+    # Commented out the audit path to end the flow at document extraction as requested
+    # Run overall validation comparison report using Gemini
+    # comparison, comp_in_t, comp_out_t, comp_cost = await asyncio.to_thread(
+    #     gemini.run_audit_comparison,
+    #     qa_data,
+    #     json.dumps(extracted_docs)
+    # )
     
-    success = sheets.append_audit_log(log_entry)
-    if not success:
-        # Log error locally, but do not fail the network request
+    # Placeholder values because comparison audit is skipped
+    comp_in_t = 0
+    comp_out_t = 0
+    comp_cost = 0.0
+    audit_result = "Extracted"
+    suggested_comment = "Document extraction completed successfully (Comparison skipped)."
+    
+    # Try to extract expiration date from first document
+    expiration_date = "N/A"
+    if extracted_docs:
+        expiration_date = extracted_docs[0]["extracted_data"].get("expirationDate", "N/A")
+
+    total_run_cost = total_extraction_cost + comp_cost
+
+    # Save log records to Supplier_List and Document_Evidence only (Audit_Results skipped)
+    resolved_audit_id = sheets.log_audit_run(supplier_name, doc_evidences, None)
+    supplier_id = doc_evidences[0].supplier_id if doc_evidences else 0
+    
+    if not resolved_audit_id:
+        resolved_audit_id = temp_audit_id
         suggested_comment += " (Warning: Google Sheets database log failed)"
 
     return AuditResultResponse(
+        audit_id=resolved_audit_id,
+        supplier_id=supplier_id,
         supplier_name=supplier_name,
         workspace_title=workspace_title,
         cert_type=cert_type,
@@ -134,7 +266,11 @@ async def run_audit(
         result=audit_result,
         expiration_date=expiration_date,
         suggested_comment=suggested_comment,
-        screenshot_url=screenshot_url
+        screenshot_url=screenshot_url,
+        comparison_input_tokens=comp_in_t,
+        comparison_output_tokens=comp_out_t,
+        comparison_cost_usd=comp_cost,
+        total_run_cost_usd=total_run_cost
     )
 
 @app.get("/api/logs/{supplier_name}/assets")
