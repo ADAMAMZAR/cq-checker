@@ -84,7 +84,7 @@ For expiration_date return: the certificate's expiry in YYYY-MM-DD, 'Expired' if
 For comparison_table return: a markdown table with headers (Field Name | QA Value | Certificate Value | Status).
 """
 
-def extract_certificate_data(file_bytes: bytes, mime_type: str) -> tuple[Dict[str, Any], int, int, float]:
+def extract_certificate_data(file_bytes: bytes, mime_type: str, question_label: Optional[str] = None) -> tuple[Dict[str, Any], int, int, float]:
     """
     Calls Gemini 2.5 Flash to perform OCR and extract certificate data as JSON.
     Returns: (extracted_data_dict, input_tokens, output_tokens, cost_usd)
@@ -106,11 +106,17 @@ def extract_certificate_data(file_bytes: bytes, mime_type: str) -> tuple[Dict[st
         # Use gemini-2.5-flash-lite for cost-efficient OCR extraction
         model = genai.GenerativeModel("gemini-2.5-flash-lite")
         
+        section_context = f" for the section '{question_label}'" if question_label else ""
+        merged_instruction = (
+            f"\nNote: If this document contains multiple different certificates merged together, "
+            f"only extract the metadata for the specific certificate relevant to '{question_label}'."
+        ) if question_label else ""
+        
         prompt = (
-            "OCR this certificate. Extract every field exactly as written. "
+            f"OCR this certificate{section_context}. Extract every field exactly as written. "
             "Use 'N/A' for any field not found. "
             "Dates must be formatted as DD/MM/YYYY. "
-            "certificateLocation must be 'State, Country' (e.g. Selangor, Malaysia)."
+            f"certificateLocation must be 'State, Country' (e.g. Selangor, Malaysia).{merged_instruction}"
         )
         
         response = model.generate_content(

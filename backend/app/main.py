@@ -187,7 +187,7 @@ async def run_audit(
         file_hash = hashlib.sha256(file_bytes).hexdigest()
 
         # Check if already processed (cache hit)
-        cached_record = sheets.find_metadata_by_hash(file_hash)
+        cached_record = sheets.find_metadata_by_hash(file_hash, ariba_question_label)
         if cached_record:
             # Reconstruct dummy/empty task for gather since we have a hit
             try:
@@ -205,7 +205,8 @@ async def run_audit(
             task = asyncio.to_thread(
                 gemini.extract_certificate_data,
                 file_bytes,
-                file.content_type or "application/pdf"
+                file.content_type or "application/pdf",
+                ariba_question_label
             )
 
         # Upload file to Supabase Storage if enabled

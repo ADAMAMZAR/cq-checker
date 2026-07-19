@@ -410,15 +410,15 @@ def update_document_evidence(audit_id: str, filename: str, updated_metadata: Dic
         logger.error(f"Failed to update document evidence in Google Sheets: {e}")
         return False
 
-def find_metadata_by_hash(file_hash: str) -> Optional[Dict[str, Any]]:
+def find_metadata_by_hash(file_hash: str, ariba_question_label: str) -> Optional[Dict[str, Any]]:
     """
-    Searches Document_Evidence sheet for a record with the given file hash.
+    Searches Document_Evidence sheet for a record with the given file hash and question label.
     Returns the most recent Gemini Extracted Supplier Name and Gemini Extracted Metadata if found.
     """
     if settings.supabase_url and settings.supabase_key:
-        return find_metadata_by_hash_via_supabase(file_hash)
+        return find_metadata_by_hash_via_supabase(file_hash, ariba_question_label)
     if settings.google_apps_script_url:
-        return find_metadata_by_hash_via_apps_script(file_hash)
+        return find_metadata_by_hash_via_apps_script(file_hash, ariba_question_label)
     try:
         client = get_sheets_client()
         doc_headers = [
@@ -432,7 +432,8 @@ def find_metadata_by_hash(file_hash: str) -> Optional[Dict[str, Any]]:
         # Search backwards (latest first)
         for r in reversed(records):
             r_hash = str(r.get("File Hash", "")).strip()
-            if r_hash and r_hash == file_hash:
+            r_label = str(r.get("Ariba Question Label", "")).strip()
+            if r_hash and r_hash == file_hash and r_label == ariba_question_label:
                 return {
                     "gemini_extracted_supplier_name": str(r.get("Gemini Extracted Supplier Name", "")),
                     "gemini_extracted_metadata": str(r.get("Gemini Extracted Metadata", ""))
@@ -718,8 +719,12 @@ def update_document_evidence_via_supabase(audit_id: str, filename: str, updated_
         
     return call_supabase_update("document_evidence", filters, updates)
 
-def find_metadata_by_hash_via_supabase(file_hash: str) -> Optional[Dict[str, Any]]:
-    records = call_supabase_select("document_evidence", {"file_hash": f"eq.{file_hash}", "order": "id.desc"})
+def find_metadata_by_hash_via_supabase(file_hash: str, ariba_question_label: str) -> Optional[Dict[str, Any]]:
+    records = call_supabase_select("document_evidence", {
+        "file_hash": f"eq.{file_hash}",
+        "ariba_question_label": f"eq.{ariba_question_label}",
+        "order": "id.desc"
+    })
     if records:
         r = records[0]
         return {
@@ -998,11 +1003,12 @@ def update_document_evidence_via_apps_script(audit_id: str, filename: str, updat
         "updated_metadata": json.dumps(updated_metadata)
     })
 
-def find_metadata_by_hash_via_apps_script(file_hash: str) -> Optional[Dict[str, Any]]:
+def find_metadata_by_hash_via_apps_script(file_hash: str, ariba_question_label: str) -> Optional[Dict[str, Any]]:
     records = call_apps_script_get("Document_Evidence")
     for r in reversed(records):
         r_hash = str(r.get("File Hash", "")).strip()
-        if r_hash and r_hash == file_hash:
+        r_label = str(r.get("Ariba Question Label", "")).strip()
+        if r_hash and r_hash == file_hash and r_label == ariba_question_label:
             return {
                 "gemini_extracted_supplier_name": str(r.get("Gemini Extracted Supplier Name", "")),
                 "gemini_extracted_metadata": str(r.get("Gemini Extracted Metadata", ""))
