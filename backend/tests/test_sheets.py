@@ -73,8 +73,8 @@ def test_log_audit_run_failure(mock_sheets_client, mock_worksheet, mock_get_or_c
 
 def test_get_audit_logs_success(mock_sheets_client, mock_worksheet):
     mock_worksheet.get_all_values.return_value = [
-        ["Audit ID", "Supplier ID", "Timestamp", "Supplier Name", "Workspace Title", "Certificate Type", "Complete QA Data Dump", "Compiled Extracted Data", "Audit Result Verdict", "Expiration Date", "Suggested Comments", "Screenshot URL"],
-        ["audit-uuid", 1, "17/07/2026, 11:00:00", "ACME Corp", "Workspace A", "QSHE", "[]", "[]", "Match", "2029-12-31", "All match.", "http://screenshot"]
+        ["Audit ID", "Supplier ID", "Timestamp", "Supplier Name", "Compiled Extracted Data", "Suggested Comments", "Screenshot URL", "Comparison Table JSON"],
+        ["audit-uuid", 1, "17/07/2026, 11:00:00", "ACME Corp", "[]", "All match.", "http://screenshot", '{"tables": []}']
     ]
     mock_worksheet.get_all_records.return_value = [
         {
@@ -82,14 +82,10 @@ def test_get_audit_logs_success(mock_sheets_client, mock_worksheet):
             "Supplier ID": 1,
             "Timestamp": "17/07/2026, 11:00:00",
             "Supplier Name": "ACME Corp",
-            "Workspace Title": "Workspace A",
-            "Certificate Type": "QSHE",
-            "Complete QA Data Dump": "[]",
             "Compiled Extracted Data": "[]",
-            "Audit Result Verdict": "Match",
-            "Expiration Date": "2029-12-31",
             "Suggested Comments": "All match.",
-            "Screenshot URL": "http://screenshot"
+            "Screenshot URL": "http://screenshot",
+            "Comparison Table JSON": '{"tables": []}'
         }
     ]
     
@@ -100,7 +96,8 @@ def test_get_audit_logs_success(mock_sheets_client, mock_worksheet):
     assert logs[0].supplier_id == 1
     assert logs[0].supplier_name == "ACME Corp"
     assert logs[0].result == "Match"
-    assert logs[0].expiration_date == "2029-12-31"
+    assert logs[0].expiration_date == "N/A"
+    assert logs[0].comparison_table == {"tables": []}
 
 def test_get_audit_logs_failure(mock_sheets_client, mock_worksheet):
     mock_worksheet.get_all_records.side_effect = Exception("API Out of Quota")

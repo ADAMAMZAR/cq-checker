@@ -27,11 +27,12 @@ def test_get_logs(mock_get_logs):
     assert response.json() == []
     mock_get_logs.assert_called_once()
 
+@patch("app.services.sheets.upload_file_to_supabase_storage")
 @patch("app.services.sheets.find_metadata_by_hash")
-@patch("app.services.gemini.run_audit_comparison")
 @patch("app.services.gemini.extract_certificate_data")
 @patch("app.services.sheets.log_audit_run")
-def test_run_audit(mock_log_audit, mock_extract, mock_comparison, mock_find_hash):
+def test_run_audit(mock_log_audit, mock_extract, mock_find_hash, mock_upload):
+    mock_upload.return_value = "http://127.0.0.1:8000/mock/test_cert.pdf"
     mock_find_hash.return_value = None
     mock_log_audit.return_value = "AUDIT_0001"
     mock_extract.return_value = ({
@@ -62,17 +63,18 @@ def test_run_audit(mock_log_audit, mock_extract, mock_comparison, mock_find_hash
     assert "audit_id" in json_data
     assert "supplier_id" in json_data
     assert json_data["supplier_name"] == "ACME Corp"
-    assert json_data["result"] == "Extracted"
+    assert json_data["result"] == "Mismatch"
     assert json_data["expiration_date"] == "31/12/2029"
     assert "test_cert.pdf" in json_data["filename"]
     mock_log_audit.assert_called_once()
     mock_extract.assert_called_once()
-    mock_comparison.assert_not_called()
 
+@patch("app.services.sheets.upload_file_to_supabase_storage")
 @patch("app.services.sheets.find_metadata_by_hash")
 @patch("app.services.gemini.extract_certificate_data")
 @patch("app.services.sheets.log_audit_run")
-def test_run_audit_cache_hit(mock_log_audit, mock_extract, mock_find_hash):
+def test_run_audit_cache_hit(mock_log_audit, mock_extract, mock_find_hash, mock_upload):
+    mock_upload.return_value = "http://127.0.0.1:8000/mock/test_cert.pdf"
     mock_find_hash.return_value = {
         "gemini_extracted_supplier_name": "ACME Cached Corp",
         "gemini_extracted_metadata": '{"certificateOwnerName": "ACME Cached Corp", "expirationDate": "01/01/2030"}'
@@ -96,13 +98,78 @@ def test_run_audit_cache_hit(mock_log_audit, mock_extract, mock_find_hash):
     json_data = response.json()
     assert json_data["audit_id"] == "AUDIT_0002"
     assert json_data["supplier_name"] == "ACME Corp"
-    assert json_data["result"] == "Extracted"
+    assert json_data["result"] == "Mismatch"
     assert json_data["expiration_date"] == "01/01/2030"
     assert json_data["total_run_cost_usd"] == 0.0
     
     mock_log_audit.assert_called_once()
     # extract_certificate_data should NOT be called due to cache hit
     mock_extract.assert_not_called()
+
+@patch("app.services.sheets.upload_file_to_supabase_storage")
+@patch("app.services.sheets.find_metadata_by_hash")
+@patch("app.services.gemini.extract_certificate_data")
+@patch("app.services.sheets.log_audit_run")
+def test_run_audit_duplicate_file_different_questions(mock_log_audit, mock_extract, mock_find_hash, mock_upload):
+    import json
+    mock_upload.return_value = "http://127.0.0.1:8000/mock/test_cert.pdf"
+    mock_find_hash.return_value = None
+    mock_log_audit.return_value = "AUDIT_0003"
+    
+    mock_extract.side_effect = [
+        ({
+            "certificateOwnerName": "ACME Corp",
+            "issuerName": "CIDB Issuer",
+            "certificateType": "CIDB",
+            "certificateNumber": "CIDB-111",
+            "expirationDate": "31/12/2029",
+            "effectiveDate": "01/01/2026",
+            "certificateLocation": "Selangor"
+        }, 100, 20, 0.000015),
+        ({
+            "certificateOwnerName": "ACME Corp",
+            "issuerName": "BEM Issuer",
+            "certificateType": "BEM",
+            "certificateNumber": "BEM-222",
+            "expirationDate": "30/06/2028",
+            "effectiveDate": "01/01/2025",
+            "certificateLocation": "Kuala Lumpur"
+        }, 100, 20, 0.000015)
+    ]
+    
+    files = [
+        ("files", ("test_cert.pdf", b"pdfcontent", "application/pdf"))
+    ]
+    qa_list = [
+        {
+            "questionLabel": "1.1 CIDB",
+            "attachedFile": "test_cert.pdf",
+            "answers": [{"label": "certificate type", "value": "CIDB"}]
+        },
+        {
+            "questionLabel": "1.2 BEM",
+            "attachedFile": "test_cert.pdf",
+            "answers": [{"label": "certificate type", "value": "BEM"}]
+        }
+    ]
+    data = {
+        "supplier_name": "ACME Corp",
+        "workspace_title": "Workspace 123",
+        "cert_type": "QSHE",
+        "qa_data": json.dumps(qa_list)
+    }
+    
+    response = client.post("/api/audit", data=data, files=files)
+    
+    assert response.status_code == 200
+    json_data = response.json()
+    assert json_data["audit_id"] == "AUDIT_0003"
+    assert mock_extract.call_count == 2
+    
+    first_call_args = mock_extract.call_args_list[0][0]
+    second_call_args = mock_extract.call_args_list[1][0]
+    assert first_call_args[2] == "1.1 CIDB"
+    assert second_call_args[2] == "1.2 BEM"
 
 @patch("app.services.gemini.extract_certificate_data")
 def test_extract_endpoint(mock_extract):

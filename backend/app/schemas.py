@@ -29,12 +29,12 @@ class AuditLogEntry(BaseModel):
     supplier_id: int = Field(..., description="Supplier ID referencing SupplierEntry")
     timestamp: str = Field(..., description="Timestamp of the audit")
     supplier_name: str = Field(..., description="Supplier Name")
-    workspace_title: str = Field(..., description="Workspace Title")
-    cert_type: str = Field(..., description="Certificate Type")
-    complete_qa_data_dump: str = Field(..., description="JSON string of all QA pairs scraped from the page")
+    workspace_title: Optional[str] = Field(default="Ariba Workspace", description="Workspace Title")
+    cert_type: Optional[str] = Field(default="Relational evidence", description="Certificate Type")
+    complete_qa_data_dump: Optional[str] = Field(default="[]", description="JSON string of all QA pairs scraped from the page")
     compiled_extracted_data: str = Field(..., description="JSON string of compiled metadata from all documents")
-    result: str = Field(..., description="Audit Result (Match/Mismatch)")
-    expiration_date: str = Field(..., description="Expiration Date of the certificate")
+    result: Optional[str] = Field(default="Mismatch", description="Audit Result (Match/Mismatch)")
+    expiration_date: Optional[str] = Field(default="N/A", description="Expiration Date of the certificate")
     suggested_comment: str = Field(..., description="Suggested feedback or comments")
     screenshot_url: Optional[str] = Field(None, description="Hosting path for verification screenshot")
     comparison_input_tokens: int = Field(default=0, description="Gemini prompt input tokens for comparison audit")
@@ -43,16 +43,17 @@ class AuditLogEntry(BaseModel):
     comparison_cost_myr: float = Field(default=0.0, description="Calculated MYR cost of comparison audit call")
     total_run_cost_usd: float = Field(default=0.0, description="Combined USD cost of all files + comparison run")
     total_run_cost_myr: float = Field(default=0.0, description="Combined MYR cost of all files + comparison run")
+    comparison_table: Optional[dict] = Field(default=None, description="Structured JSON comparison table data")
 
 class AuditResultResponse(BaseModel):
     audit_id: str
     supplier_id: int
     supplier_name: str
-    workspace_title: str
-    cert_type: str
+    workspace_title: Optional[str] = "Ariba Workspace"
+    cert_type: Optional[str] = "Relational evidence"
     filename: str
-    result: str  # Match/Mismatch
-    expiration_date: str
+    result: Optional[str] = "Mismatch"
+    expiration_date: Optional[str] = "N/A"
     suggested_comment: str
     screenshot_url: Optional[str] = None
     comparison_input_tokens: int = 0
@@ -61,6 +62,7 @@ class AuditResultResponse(BaseModel):
     comparison_cost_myr: float = 0.0
     total_run_cost_usd: float = 0.0
     total_run_cost_myr: float = 0.0
+    comparison_table: Optional[dict] = None
 
 class UpdateEvidenceRequest(BaseModel):
     audit_id: str = Field(..., description="Audit ID of the document to update")

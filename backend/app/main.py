@@ -115,13 +115,24 @@ async def run_audit(
     supplier_dir = os.path.join(settings.upload_dir, safe_supplier_name)
     os.makedirs(supplier_dir, exist_ok=True)
     
-    # Save the files
+    # Save the files and keep their bytes in memory
     saved_filenames = []
+    file_bytes_map = {}  # filename_lower -> bytes
+    file_content_type_map = {}
+    
     for file in files:
+        # Read the file bytes asynchronously
+        file_bytes = await file.read()
+        await file.seek(0)
+        
         file_path = os.path.join(supplier_dir, file.filename)
         with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+            buffer.write(file_bytes)
         saved_filenames.append(file.filename)
+        
+        # Store in map (lowercased key for matching)
+        file_bytes_map[file.filename.lower()] = file_bytes
+        file_content_type_map[file.filename.lower()] = file.content_type or "application/pdf"
         
     # Save screenshot if provided
     screenshot_url = None
@@ -163,26 +174,67 @@ async def run_audit(
     file_contexts = []
     file_tasks = []
 
-    for file in files:
-        # Look up matching QA block by filename matching
-        matching_block = None
-        for block in qa_list:
-            attached = block.get("attachedFile", "")
-            if attached and (attached.lower() in file.filename.lower() or file.filename.lower() in attached.lower()):
-                matching_block = block
-                break
-        
-        if matching_block:
-            ariba_question_label = matching_block.get("questionLabel", "")
-            ariba_qa_answers = json.dumps(matching_block.get("answers", []))
-        else:
-            ariba_question_label = "General Attachment"
-            ariba_qa_answers = "[]"
+    # Keep track of which uploaded files were matched to question blocks
+    matched_file_keys = set()
+    items_to_process = []
 
-        # Read saved file bytes from local uploads folder to avoid empty stream pointers
-        file_path = os.path.join(supplier_dir, file.filename)
-        with open(file_path, "rb") as f:
-            file_bytes = f.read()
+    if qa_list:
+        for block in qa_list:
+            attached = block.get("attachedFile", "").strip()
+            q_label = block.get("questionLabel", "General Question")
+            q_answers = json.dumps(block.get("answers", []))
+            
+            matching_file_tuple = None
+            if attached:
+                # Find matching file in file_bytes_map
+                for fname_lower, fbytes in file_bytes_map.items():
+                    # Check substring match both ways to be resilient
+                    if attached.lower() in fname_lower or fname_lower in attached.lower():
+                        matching_file_tuple = (fname_lower, fbytes, file_content_type_map[fname_lower])
+                        matched_file_keys.add(fname_lower)
+                        break
+            
+            if matching_file_tuple:
+                fname_lower, fbytes, ctype = matching_file_tuple
+                orig_fname = next((n for n in saved_filenames if n.lower() == fname_lower), attached)
+                items_to_process.append({
+                    "question_label": q_label,
+                    "qa_answers": q_answers,
+                    "filename": orig_fname,
+                    "file_bytes": fbytes,
+                    "content_type": ctype
+                })
+
+    # Now add any uploaded files that were NOT matched to any question block as General Attachments
+    for fname_lower, fbytes in file_bytes_map.items():
+        if fname_lower not in matched_file_keys:
+            orig_fname = next((n for n in saved_filenames if n.lower() == fname_lower), fname_lower)
+            items_to_process.append({
+                "question_label": "General Attachment",
+                "qa_answers": "[]",
+                "filename": orig_fname,
+                "file_bytes": fbytes,
+                "content_type": file_content_type_map[fname_lower]
+            })
+
+    # Fallback if no items matched (e.g. no qa_list or empty): process all uploaded files
+    if not items_to_process:
+        for fname_lower, fbytes in file_bytes_map.items():
+            orig_fname = next((n for n in saved_filenames if n.lower() == fname_lower), fname_lower)
+            items_to_process.append({
+                "question_label": "General Attachment",
+                "qa_answers": "[]",
+                "filename": orig_fname,
+                "file_bytes": fbytes,
+                "content_type": file_content_type_map[fname_lower]
+            })
+
+    for item in items_to_process:
+        ariba_question_label = item["question_label"]
+        ariba_qa_answers = item["qa_answers"]
+        file_bytes = item["file_bytes"]
+        filename = item["filename"]
+        content_type = item["content_type"]
 
         file_hash = hashlib.sha256(file_bytes).hexdigest()
 
@@ -196,8 +248,8 @@ async def run_audit(
                 metadata_dict = {}
             task = asyncio.to_thread(lambda: (
                 metadata_dict,
-                0, # input tokens
-                0, # output tokens
+                0,  # input tokens
+                0,  # output tokens
                 0.0 # cost
             ))
         else:
@@ -205,7 +257,7 @@ async def run_audit(
             task = asyncio.to_thread(
                 gemini.extract_certificate_data,
                 file_bytes,
-                file.content_type or "application/pdf",
+                content_type,
                 ariba_question_label
             )
 
@@ -213,12 +265,12 @@ async def run_audit(
         file_url = None
         if settings.supabase_url and settings.supabase_key:
             file_url = sheets.upload_file_to_supabase_storage(
-                file_bytes, safe_supplier_name, file.filename, file.content_type or "application/pdf"
+                file_bytes, safe_supplier_name, filename, content_type
             )
 
         file_contexts.append({
-            "filename": file.filename,
-            "content_type": file.content_type or "application/octet-stream",
+            "filename": filename,
+            "content_type": content_type,
             "ariba_question_label": ariba_question_label,
             "ariba_qa_answers": ariba_qa_answers,
             "file_hash": file_hash,
@@ -273,27 +325,54 @@ async def run_audit(
     #     qa_data,
     #     json.dumps(extracted_docs)
     # )
-    
-    # Placeholder values because comparison audit is skipped
-    comp_in_t = 0
-    comp_out_t = 0
-    comp_cost = 0.0
-    comp_cost_myr = 0.0
-    audit_result = "Extracted"
-    suggested_comment = "Document extraction completed successfully (Comparison skipped)."
-    
+
     # Try to extract expiration date from first document
     expiration_date = "N/A"
     if extracted_docs:
         expiration_date = extracted_docs[0]["extracted_data"].get("expirationDate", "N/A")
 
+    # Run programmatic comparison locally
+    audit_result, suggested_comment, comparison_table_dict = gemini.run_programmatic_audit(
+        supplier_name,
+        file_contexts,
+        [d["extracted_data"] for d in extracted_docs]
+    )
+
+    comp_in_t = 0
+    comp_out_t = 0
+    comp_cost = 0.0
+    comp_cost_myr = 0.0
+
     total_run_cost = total_extraction_cost + comp_cost
     total_run_cost_myr = total_run_cost * 4.70
 
-    # Save log records to Supplier_List and Document_Evidence only (Audit_Results skipped)
-    resolved_audit_id = sheets.log_audit_run(supplier_name, doc_evidences, None)
+    # Build the AuditLogEntry record
+    audit_log = AuditLogEntry(
+        audit_id=temp_audit_id,
+        supplier_id=0,  # Populated by sheets service
+        timestamp=timestamp,
+        supplier_name=supplier_name,
+        workspace_title=workspace_title,
+        cert_type=cert_type,
+        complete_qa_data_dump=qa_data,
+        compiled_extracted_data=json.dumps(extracted_docs),
+        result=audit_result,
+        expiration_date=expiration_date,
+        suggested_comment=suggested_comment,
+        screenshot_url=screenshot_url,
+        comparison_input_tokens=0,
+        comparison_output_tokens=0,
+        comparison_cost_usd=0.0,
+        comparison_cost_myr=0.0,
+        total_run_cost_usd=total_run_cost,
+        total_run_cost_myr=total_run_cost_myr,
+        comparison_table=comparison_table_dict
+    )
+
+    # Save log records to Supplier_List, Document_Evidence and Audit_Results
+    resolved_audit_id = sheets.log_audit_run(supplier_name, doc_evidences, audit_log)
     supplier_id = doc_evidences[0].supplier_id if doc_evidences else 0
-    
+
     if not resolved_audit_id:
         resolved_audit_id = temp_audit_id
         suggested_comment += " (Warning: Google Sheets database log failed)"
@@ -314,7 +393,8 @@ async def run_audit(
         comparison_cost_usd=comp_cost,
         comparison_cost_myr=comp_cost_myr,
         total_run_cost_usd=total_run_cost,
-        total_run_cost_myr=total_run_cost_myr
+        total_run_cost_myr=total_run_cost_myr,
+        comparison_table=comparison_table_dict
     )
 
 @app.get("/api/logs/{supplier_name}/assets")

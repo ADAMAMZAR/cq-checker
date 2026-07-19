@@ -16,7 +16,8 @@ import {
   IconEdit,
   IconCoin,
   IconChevronDown,
-  IconChevronLeft
+  IconChevronLeft,
+  IconList
 } from "@tabler/icons-react";
 
 interface AuditLog {
@@ -31,6 +32,7 @@ interface AuditLog {
   result: string;
   expiration_date: string;
   suggested_comment: string;
+  comparison_table?: any;
   comparison_input_tokens?: number;
   comparison_output_tokens?: number;
   comparison_cost_usd?: number;
@@ -54,8 +56,10 @@ export default function Dashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [activeTab, setActiveTab] = useState<"comparison" | "qa_data" | "assets">("comparison");
+  const [activeTab, setActiveTab] = useState<"comparison" | "assets">("comparison");
   const [selectedScreenshot, setSelectedScreenshot] = useState<string | null>(null);
+  const [activeTableIdx, setActiveTableIdx] = useState<number | null>(null);
+  const [expandedQaIdx, setExpandedQaIdx] = useState<number | null>(0);
 
   // New States for Data Editor & Cost tabs
   interface DocumentEvidence {
@@ -248,6 +252,8 @@ export default function Dashboard() {
 
   const handleSelectLog = async (log: AuditLog) => {
     setSelectedLog(log);
+    setActiveTableIdx(null);
+    setExpandedQaIdx(0);
     setAssets({ screenshots: [], documents: [] });
     setAssetsLoading(true);
     setActiveTab("comparison");
@@ -272,24 +278,77 @@ export default function Dashboard() {
   };
 
   // Parse suggested comment & comparison table
+  interface ComparisonTable {
+    label: string;
+    headers: string[];
+    rows: string[][];
+  }
+
   const getCommentAndTable = (fullComment: string) => {
-    if (!fullComment) return { comment: "", table: null };
-    const parts = fullComment.split(" | Comparison: ");
-    const comment = parts[0];
-    const rawTable = parts[1] || "";
+    if (!fullComment) return { comment: "", table: null, tables: [] as ComparisonTable[] };
 
-    // Parse markdown table to structured object
-    if (!rawTable || !rawTable.includes("|")) return { comment, table: null };
+    // Check if it's the old format
+    if (fullComment.includes(" | Comparison: ")) {
+      const parts = fullComment.split(" | Comparison: ");
+      const comment = parts[0];
+      const rawTable = parts[1] || "";
+      if (!rawTable || !rawTable.includes("|")) return { comment, table: null, tables: [] as ComparisonTable[] };
+      const lines = rawTable.split("\n").map(l => l.trim()).filter(l => l.startsWith("|"));
+      if (lines.length < 2) return { comment, table: null, tables: [] as ComparisonTable[] };
+      const headers = lines[0].split("|").map(h => h.trim()).filter(h => h !== "");
+      const rows = lines.slice(2).map(line => {
+        return line.split("|").map(cell => cell.trim()).filter((_, idx, arr) => idx > 0 && idx < arr.length - 1);
+      });
+      return { comment, table: { headers, rows }, tables: [] as ComparisonTable[] };
+    }
 
-    const lines = rawTable.split("\n").map(l => l.trim()).filter(l => l.startsWith("|"));
-    if (lines.length < 2) return { comment, table: null };
+    // New format (multiple tables possible, or custom formatted suggested_comment)
+    // We want to extract any markdown tables alongside their preceding label/headers.
+    const lines = fullComment.split("\n");
+    const tables: ComparisonTable[] = [];
+    let currentLabel = "";
+    let currentTableLines: string[] = [];
+    const commentLines: string[] = [];
 
-    const headers = lines[0].split("|").map(h => h.trim()).filter(h => h !== "");
-    const rows = lines.slice(2).map(line => {
-      return line.split("|").map(cell => cell.trim()).filter((_, idx, arr) => idx > 0 && idx < arr.length - 1);
-    });
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (line.startsWith("|")) {
+        currentTableLines.push(line);
+      } else {
+        if (currentTableLines.length > 0) {
+          if (currentTableLines.length >= 2) {
+            const headers = currentTableLines[0].split("|").map(h => h.trim()).filter(h => h !== "");
+            const rows = currentTableLines.slice(2).map(l => {
+              return l.split("|").map(cell => cell.trim()).filter((_, idx, arr) => idx > 0 && idx < arr.length - 1);
+            });
+            tables.push({ label: currentLabel, headers, rows });
+          }
+          currentTableLines = [];
+          currentLabel = "";
+        }
 
-    return { comment, table: { headers, rows } };
+        if (line) {
+          if (line.startsWith("Supplier:")) {
+            commentLines.push(line);
+          } else {
+            // Assume it's a label for the next table
+            currentLabel = line;
+          }
+        }
+      }
+    }
+
+    // Handle table at the end of text
+    if (currentTableLines.length >= 2) {
+      const headers = currentTableLines[0].split("|").map(h => h.trim()).filter(h => h !== "");
+      const rows = currentTableLines.slice(2).map(l => {
+        return l.split("|").map(cell => cell.trim()).filter((_, idx, arr) => idx > 0 && idx < arr.length - 1);
+      });
+      tables.push({ label: currentLabel, headers, rows });
+    }
+
+    const comment = commentLines.join("\n");
+    return { comment, table: null, tables };
   };
 
   const getSupplierCosts = () => {
@@ -423,118 +482,102 @@ export default function Dashboard() {
       ) : activeMainTab === "registry" ? (
         /* ==================== AUDIT REGISTRY TAB ==================== */
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch">
-          {/* Left Column: Audit Log Registry (Grid 5 spans) */}
-          <section className="lg:col-span-5 flex flex-col min-h-[600px] double-bezel">
-            <div className="double-bezel-inner flex-1 flex flex-col h-full">
-              {/* Search and Filters */}
-              <div className="mb-6 space-y-4">
-                <div className="relative">
-                  <IconSearch className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-500 h-4.5 w-4.5" />
-                  <input
-                    type="text"
-                    placeholder="Search supplier or certificate..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-11 pr-4 py-2.5 rounded-xl bg-black/40 border border-white/5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-emerald-500/30 transition-all font-sans"
-                  />
-                </div>
-                <div className="flex gap-2">
-                  {(["ALL", "MATCH", "MISMATCH"] as const).map(f => (
-                    <button
-                      key={f}
-                      onClick={() => setStatusFilter(f)}
-                      className={`px-4 py-1.5 rounded-full text-xs font-semibold tracking-wider transition-all duration-300 ease-out cursor-pointer active:scale-[0.97] ${statusFilter === f
-                        ? "bg-emerald-600/10 text-emerald-400 border border-emerald-500/20 shadow-md"
-                        : "bg-white/5 text-gray-400 hover:bg-white/10"
-                        }`}
-                    >
-                      {f}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Log List */}
-              <div className="flex-1 overflow-y-auto space-y-3 max-h-[620px] pr-2">
-                {isLoading ? (
-                  Array.from({ length: 4 }).map((_, idx) => (
-                    <div key={idx} className="p-4 rounded-xl border border-white/5 bg-white/[0.01] animate-pulse">
-                      <div className="h-4 w-3/4 bg-white/10 rounded mb-2"></div>
-                      <div className="h-3 w-1/2 bg-white/10 rounded"></div>
-                    </div>
-                  ))
-                ) : filteredLogs.length === 0 ? (
-                  <div className="text-center py-12 text-gray-500">
-                    <p className="text-sm">No audit logs match current filters.</p>
+          {!selectedLog && (
+            <section className="lg:col-span-5 flex flex-col min-h-[600px] double-bezel">
+              <div className="double-bezel-inner flex-1 flex flex-col h-full">
+                {/* Search and Filters */}
+                <div className="mb-6 space-y-4">
+                  <div className="relative">
+                    <IconSearch className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-500 h-4.5 w-4.5" />
+                    <input
+                      type="text"
+                      placeholder="Search supplier"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full pl-11 pr-4 py-2.5 rounded-xl bg-black/40 border border-white/5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-emerald-500/30 transition-all font-sans"
+                    />
                   </div>
-                ) : (
-                  filteredLogs.map((log) => {
-                    const isSelected = selectedLog?.timestamp === log.timestamp && selectedLog?.supplier_name === log.supplier_name;
-                    const isMatch = log.result.toLowerCase() === "match";
-                    return (
-                      <div
-                        key={`${log.timestamp}-${log.supplier_name}`}
-                        onClick={() => handleSelectLog(log)}
-                        className={`p-4 rounded-xl border transition-all duration-300 cursor-pointer relative group overflow-hidden ${isSelected
-                          ? "bg-white/[0.03] border-emerald-500/20 glow-success"
-                          : "bg-white/[0.01] border-white/5 hover:border-white/15 hover:bg-white/[0.02]"
+                  <div className="flex gap-2">
+                    {(["ALL", "MATCH", "MISMATCH"] as const).map(f => (
+                      <button
+                        key={f}
+                        onClick={() => setStatusFilter(f)}
+                        className={`px-4 py-1.5 rounded-full text-xs font-semibold tracking-wider transition-all duration-300 ease-out cursor-pointer active:scale-[0.97] ${statusFilter === f
+                          ? "bg-emerald-600/10 text-emerald-400 border border-emerald-500/20 shadow-md"
+                          : "bg-white/5 text-gray-400 hover:bg-white/10"
                           }`}
                       >
-                        <div className="absolute left-0 top-0 bottom-0 w-[3px] bg-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                        <div className="flex justify-between items-start mb-2">
-                          <div>
-                            <div className="flex items-center gap-1.5 mb-1 text-[9px] text-gray-500 font-mono tracking-wider">
-                              <span>SUPP_{String(log.supplier_id).padStart(4, '0')}</span>
-                              <span>•</span>
-                              <span>{log.audit_id}</span>
-                            </div>
-                            <h4 className="font-semibold text-sm text-white group-hover:text-emerald-400 transition-colors">
-                              {log.supplier_name}
-                            </h4>
-                          </div>
-                          <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wider uppercase shrink-0 ${isMatch
-                            ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                            : "bg-rose-500/10 text-rose-400 border border-rose-500/20"
-                            }`}>
-                            {log.result}
-                          </span>
-                        </div>
-                        <div className="flex justify-between items-center text-xs text-gray-500 font-medium">
-                          <span>{log.cert_type}</span>
-                          <span>{log.timestamp.split(" ")[0]}</span>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-          </section>
+                        {f}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
-          {/* Right Column: Inspect & Audit Details Pane (Grid 7 spans) */}
-          <section className="lg:col-span-7 flex flex-col double-bezel">
+                {/* Log List */}
+                <div className="flex-1 overflow-y-auto space-y-3 max-h-[620px] pr-2">
+                  {isLoading ? (
+                    Array.from({ length: 4 }).map((_, idx) => (
+                      <div key={idx} className="p-4 rounded-xl border border-white/5 bg-white/[0.01] animate-pulse">
+                        <div className="h-4 w-3/4 bg-white/10 rounded mb-2"></div>
+                        <div className="h-3 w-1/2 bg-white/10 rounded"></div>
+                      </div>
+                    ))
+                  ) : filteredLogs.length === 0 ? (
+                    <div className="text-center py-12 text-gray-500">
+                      <p className="text-sm">No audit logs match current filters.</p>
+                    </div>
+                  ) : (
+                    filteredLogs.map((log) => {
+                      const isSelected = selectedLog?.timestamp === log.timestamp && selectedLog?.supplier_name === log.supplier_name;
+                      const isMatch = log.result.toLowerCase() === "match";
+                      return (
+                        <div
+                          key={`${log.timestamp}-${log.supplier_name}`}
+                          onClick={() => handleSelectLog(log)}
+                          className={`p-4 rounded-xl border transition-all duration-300 cursor-pointer relative group overflow-hidden ${isSelected
+                            ? "bg-white/[0.03] border-emerald-500/20 glow-success"
+                            : "bg-white/[0.01] border-white/5 hover:border-white/15 hover:bg-white/[0.02]"
+                            }`}
+                        >
+                          <div className="absolute left-0 top-0 bottom-0 w-[3px] bg-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                          <div className="flex justify-between items-start mb-2">
+                            <div>
+                              <h4 className="font-semibold text-sm text-white group-hover:text-emerald-400 transition-colors">
+                                {log.supplier_name}
+                              </h4>
+                            </div>
+                            <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wider uppercase shrink-0 ${isMatch
+                              ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                              : "bg-rose-500/10 text-rose-400 border border-rose-500/20"
+                              }`}>
+                              {log.result}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            </section>
+          )}
+
+          {/* Right Column: Inspect & Audit Details Pane */}
+          <section className={`${selectedLog ? "lg:col-span-12" : "lg:col-span-7"} flex flex-col double-bezel`}>
             <div className="double-bezel-inner flex-1 flex flex-col h-full">
               {selectedLog ? (
                 <div className="flex-1 flex flex-col h-full">
-                  <div className="flex justify-between items-start mb-6 pb-4 border-b border-white/5">
-                    <div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-[9px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-500/[0.04] border border-emerald-500/15 px-2 py-0.5 rounded-full">
-                          Workspace Audit Record
-                        </span>
-                        <span className="text-[10px] text-gray-500 font-medium">{selectedLog.timestamp}</span>
-                      </div>
+                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 pb-4 border-b border-white/5 gap-4">
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => setSelectedLog(null)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 text-xs font-semibold text-gray-300 hover:text-white transition-all cursor-pointer active:scale-95 shrink-0"
+                      >
+                        <IconChevronLeft className="h-4 w-4" />
+                        Back to List
+                      </button>
                       <h2 className="text-xl font-bold text-white tracking-tight">{selectedLog.supplier_name}</h2>
-                      <p className="text-xs text-gray-500 mt-0.5">Audit run ID: <code className="px-1 rounded bg-black/45 text-gray-400 font-mono text-[10px]">{selectedLog.audit_id}</code></p>
                     </div>
-                    {(selectedLog.total_run_cost_myr || selectedLog.total_run_cost_usd) ? (
-                      <div className="text-right">
-                        <p className="text-[10px] uppercase font-bold tracking-wider text-gray-500">Execution Cost</p>
-                        <p className="text-sm font-bold text-white mt-0.5 tabular-nums">
-                          RM{(selectedLog.total_run_cost_myr || (selectedLog.total_run_cost_usd ? selectedLog.total_run_cost_usd * 4.70 : 0.0)).toFixed(4)} MYR
-                        </p>
-                      </div>
-                    ) : null}
                   </div>
 
                   {/* Details Sub Tabs */}
@@ -549,28 +592,19 @@ export default function Dashboard() {
                       Comparison Results
                     </button>
                     <button
-                      onClick={() => setActiveTab("qa_data")}
-                      className={`pb-2.5 px-0.5 text-xs font-semibold tracking-wider uppercase border-b-2 transition-all duration-300 ease-out cursor-pointer active:scale-[0.97] ${activeTab === "qa_data"
-                        ? "border-emerald-500 text-white font-bold"
-                        : "border-transparent text-gray-500 hover:text-gray-400"
-                        }`}
-                    >
-                      Scraped Questionnaire Q&A
-                    </button>
-                    <button
                       onClick={() => setActiveTab("assets")}
                       className={`pb-2.5 px-0.5 text-xs font-semibold tracking-wider uppercase border-b-2 transition-all duration-300 ease-out cursor-pointer active:scale-[0.97] ${activeTab === "assets"
                         ? "border-emerald-500 text-white font-bold"
                         : "border-transparent text-gray-500 hover:text-gray-400"
                         }`}
                     >
-                      Audit evidence files
+                      Evidence & Q&A
                     </button>
                   </div>
 
                   {/* TAB Content */}
                   {activeTab === "comparison" && (
-                    <div className="flex-1 flex flex-col gap-6 overflow-y-auto max-h-[500px] pr-2">
+                    <div className="flex-1 flex flex-col gap-6 overflow-y-auto max-h-[620px] pr-2">
                       <div className="p-4 rounded-xl border border-white/5 bg-black/40">
                         <h4 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-3">Overall Auditor Verdict</h4>
                         <div className="flex items-center gap-2">
@@ -589,12 +623,14 @@ export default function Dashboard() {
                       </div>
 
                       {(() => {
-                        const { comment, table } = getCommentAndTable(selectedLog.suggested_comment);
+                        const { comment, table, tables } = getCommentAndTable(selectedLog.suggested_comment);
+                        const hasJsonTable = selectedLog.comparison_table &&
+                          Array.isArray(selectedLog.comparison_table.tables);
                         return (
                           <>
                             <div className="p-4 rounded-xl border border-white/5 bg-black/40 relative">
-                              <h4 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2">Auditor suggested comment</h4>
-                              <p className="text-sm text-gray-300 italic font-medium pr-10 leading-relaxed">
+                              <h4 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2">Suggested comment</h4>
+                              <p className="text-sm text-gray-300 italic font-medium pr-10 leading-relaxed whitespace-pre-wrap">
                                 "{comment || "No detailed comments provided."}"
                               </p>
                               <button
@@ -606,48 +642,209 @@ export default function Dashboard() {
                               </button>
                             </div>
 
-                            {table && (
-                              <div className="p-4 rounded-xl border border-white/5 bg-black/40 overflow-hidden">
-                                <h4 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-3">QA Form vs Certificate Comparison</h4>
-                                <div className="overflow-x-auto">
-                                  <table className="min-w-full text-left text-xs font-sans text-gray-300">
-                                    <thead>
-                                      <tr className="border-b border-white/5 font-bold text-gray-400">
-                                        {table.headers.map((h, i) => (
-                                          <th key={i} className="py-2.5 px-3 uppercase tracking-wider text-[10px]">{h}</th>
-                                        ))}
-                                      </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-white/5">
-                                      {table.rows.map((row, rIdx) => (
-                                        <tr key={rIdx} className="hover:bg-white/[0.01]">
-                                          {row.map((cell, cIdx) => {
-                                            const isStatusCell = cIdx === row.length - 1;
-                                            const cleanCell = cell.trim();
-                                            const isMatch = cleanCell.toLowerCase() === "match";
-                                            const isMismatch = cleanCell.toLowerCase() === "mismatch";
-                                            return (
-                                              <td key={cIdx} className="py-2.5 px-3 text-gray-300 font-medium">
-                                                {isStatusCell ? (
-                                                  <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${isMatch
-                                                    ? "bg-emerald-500/10 text-emerald-400"
-                                                    : isMismatch
-                                                      ? "bg-rose-500/10 text-rose-400"
-                                                      : "bg-amber-500/10 text-amber-400"
-                                                    }`}>
-                                                    {cleanCell}
-                                                  </span>
-                                                ) : (
-                                                  cleanCell
-                                                )}
-                                              </td>
-                                            );
-                                          })}
-                                        </tr>
-                                      ))}
-                                    </tbody>
-                                  </table>
+                            {hasJsonTable ? (
+                              <div className="p-5 rounded-xl border border-white/5 bg-black/40 space-y-6">
+                                <div className="border-b border-white/5 pb-3">
+
+                                  <h4 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2">Comparison Tables</h4>
+                                  <h3 className="text-sm font-bold text-white tracking-wide">
+                                    Supplier Name: <span className="text-emerald-400">{selectedLog.comparison_table.supplier_name || selectedLog.supplier_name}</span>
+                                  </h3>
                                 </div>
+
+                                {selectedLog.comparison_table.tables.map((t: any, tIdx: number) => {
+                                  const isActive = activeTableIdx === tIdx;
+                                  const matchingDoc = t.attached_file
+                                    ? assets.documents.find(doc =>
+                                      doc.name.toLowerCase() === t.attached_file.toLowerCase() ||
+                                      t.attached_file.toLowerCase().includes(doc.name.toLowerCase()) ||
+                                      doc.name.toLowerCase().includes(t.attached_file.toLowerCase())
+                                    )
+                                    : null;
+                                  const pdfUrl = matchingDoc ? `http://127.0.0.1:8000${matchingDoc.url}` : null;
+
+                                  return (
+                                    <div
+                                      key={tIdx}
+                                      onClick={() => setActiveTableIdx(isActive ? null : tIdx)}
+                                      className={`p-4 rounded-xl border transition-all duration-300 cursor-pointer ${isActive
+                                        ? "bg-emerald-500/[0.02] border-emerald-500/30 shadow-[0_0_15px_rgba(16,185,129,0.04)]"
+                                        : "bg-white/[0.01] border-white/5 hover:bg-white/[0.02] hover:border-emerald-500/15"
+                                        }`}
+                                    >
+                                      <div className={isActive && pdfUrl ? "grid grid-cols-1 xl:grid-cols-12 gap-6" : "space-y-3"}>
+                                        {isActive && pdfUrl && (
+                                          <div
+                                            className="xl:col-span-5 h-[400px] border border-white/5 bg-black/40 rounded-lg overflow-hidden flex flex-col"
+                                            onClick={(e) => e.stopPropagation()}
+                                          >
+                                            <div className="px-3 py-1.5 border-b border-white/5 bg-white/[0.02] flex justify-between items-center text-[10px] text-gray-400 font-mono">
+                                              <span className="truncate pr-4">{t.attached_file}</span>
+                                              <a
+                                                href={pdfUrl}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="text-emerald-400 hover:underline flex items-center gap-1 hover:text-emerald-300 transition-colors"
+                                              >
+                                                Open PDF <IconExternalLink className="h-3 w-3" />
+                                              </a>
+                                            </div>
+                                            <iframe
+                                              src={`${pdfUrl}#toolbar=0`}
+                                              className="w-full flex-1 border-0"
+                                              title="PDF Document Viewer"
+                                            />
+                                          </div>
+                                        )}
+
+                                        <div className={isActive && pdfUrl ? "xl:col-span-7 space-y-3" : "space-y-3"}>
+                                          {t.question_label && (
+                                            <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-2 mt-1">
+                                              <h4 className="text-xs font-bold text-gray-200 tracking-wide">
+                                                {t.question_label}
+                                              </h4>
+                                            </div>
+                                          )}
+                                          <div className="overflow-x-auto rounded-lg border border-white/5 bg-black/20">
+                                            <table className="min-w-full text-left text-xs font-sans text-gray-300">
+                                              <thead>
+                                                <tr className="border-b border-emerald-500/20 font-bold text-emerald-400 bg-emerald-950/35 backdrop-blur-sm">
+                                                  <th className="py-2.5 px-3 uppercase tracking-wider text-[10px]">Field</th>
+                                                  <th className="py-2.5 px-3 uppercase tracking-wider text-[10px]">Value in Evidence</th>
+                                                  <th className="py-2.5 px-3 uppercase tracking-wider text-[10px]">Value in QA Data</th>
+                                                  <th className="py-2.5 px-3 uppercase tracking-wider text-[10px]">Result</th>
+                                                </tr>
+                                              </thead>
+                                              <tbody className="divide-y divide-white/5">
+                                                {t.comparison_rows.map((row: any, rIdx: number) => {
+                                                  const isMatch = row.result.toLowerCase() === "match";
+                                                  const isMismatch = row.result.toLowerCase() === "mismatch";
+                                                  return (
+                                                    <tr key={rIdx} className="hover:bg-white/[0.01]">
+                                                      <td className="py-2.5 px-3 text-gray-300 font-medium">{row.field_name}</td>
+                                                      <td className="py-2.5 px-3 text-gray-300 font-medium">{row.value_evidence}</td>
+                                                      <td className="py-2.5 px-3 text-gray-300 font-medium">{row.value_qa}</td>
+                                                      <td className="py-2.5 px-3 text-gray-300 font-medium">
+                                                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${isMatch
+                                                          ? "bg-emerald-500/10 text-emerald-400"
+                                                          : isMismatch
+                                                            ? "bg-rose-500/10 text-rose-400"
+                                                            : "bg-amber-500/10 text-amber-400"
+                                                          }`}>
+                                                          {row.result}
+                                                        </span>
+                                                      </td>
+                                                    </tr>
+                                                  );
+                                                })}
+                                              </tbody>
+                                            </table>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              <div className="p-5 rounded-xl border border-white/5 bg-black/40 space-y-6">
+                                <div className="border-b border-white/5 pb-3">
+                                  <h3 className="text-sm font-bold text-white tracking-wide">
+                                    Supplier Name: <span className="text-emerald-400">{selectedLog.supplier_name}</span>
+                                  </h3>
+                                </div>
+                                {table && (
+                                  <div className="p-4 rounded-xl border border-white/5 bg-white/[0.01] hover:bg-white/[0.02] hover:border-emerald-500/15 transition-all duration-300 space-y-3 cursor-pointer">
+                                    <div className="overflow-x-auto rounded-lg border border-white/5 bg-black/20">
+                                      <table className="min-w-full text-left text-xs font-sans text-gray-300">
+                                        <thead>
+                                          <tr className="border-b border-emerald-500/20 font-bold text-emerald-400 bg-emerald-950/35 backdrop-blur-sm">
+                                            {table.headers.map((h, i) => (
+                                              <th key={i} className="py-2.5 px-3 uppercase tracking-wider text-[10px]">{h}</th>
+                                            ))}
+                                          </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-white/5">
+                                          {table.rows.map((row, rIdx) => (
+                                            <tr key={rIdx} className="hover:bg-white/[0.01]">
+                                              {row.map((cell, cIdx) => {
+                                                const isStatusCell = cIdx === row.length - 1;
+                                                const cleanCell = cell.trim();
+                                                const isMatch = cleanCell.toLowerCase() === "match";
+                                                const isMismatch = cleanCell.toLowerCase() === "mismatch";
+                                                return (
+                                                  <td key={cIdx} className="py-2.5 px-3 text-gray-300 font-medium">
+                                                    {isStatusCell ? (
+                                                      <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${isMatch
+                                                        ? "bg-emerald-500/10 text-emerald-400"
+                                                        : isMismatch
+                                                          ? "bg-rose-500/10 text-rose-400"
+                                                          : "bg-amber-500/10 text-amber-400"
+                                                        }`}>
+                                                        {cleanCell}
+                                                      </span>
+                                                    ) : (
+                                                      cleanCell
+                                                    )}
+                                                  </td>
+                                                );
+                                              })}
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {tables && tables.map((t, tIdx) => (
+                                  <div key={tIdx} className="p-4 rounded-xl border border-white/5 bg-white/[0.01] hover:bg-white/[0.02] hover:border-emerald-500/15 transition-all duration-300 space-y-3 cursor-pointer">
+                                    {t.label && (
+                                      <h4 className="text-xs font-bold text-gray-200 tracking-wide mt-2">
+                                        {t.label}
+                                      </h4>
+                                    )}
+                                    <div className="overflow-x-auto rounded-lg border border-white/5 bg-black/20">
+                                      <table className="min-w-full text-left text-xs font-sans text-gray-300">
+                                        <thead>
+                                          <tr className="border-b border-emerald-500/20 font-bold text-emerald-400 bg-emerald-950/35 backdrop-blur-sm">
+                                            {t.headers.map((h, i) => (
+                                              <th key={i} className="py-2.5 px-3 uppercase tracking-wider text-[10px]">{h}</th>
+                                            ))}
+                                          </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-white/5">
+                                          {t.rows.map((row, rIdx) => (
+                                            <tr key={rIdx} className="hover:bg-white/[0.01]">
+                                              {row.map((cell, cIdx) => {
+                                                const isStatusCell = cIdx === row.length - 1;
+                                                const cleanCell = cell.trim();
+                                                const isMatch = cleanCell.toLowerCase() === "match";
+                                                const isMismatch = cleanCell.toLowerCase() === "mismatch";
+                                                return (
+                                                  <td key={cIdx} className="py-2.5 px-3 text-gray-300 font-medium">
+                                                    {isStatusCell ? (
+                                                      <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${isMatch
+                                                        ? "bg-emerald-500/10 text-emerald-400"
+                                                        : isMismatch
+                                                          ? "bg-rose-500/10 text-rose-400"
+                                                          : "bg-amber-500/10 text-amber-400"
+                                                        }`}>
+                                                        {cleanCell}
+                                                      </span>
+                                                    ) : (
+                                                      cleanCell
+                                                    )}
+                                                  </td>
+                                                );
+                                              })}
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  </div>
+                                ))}
                               </div>
                             )}
                           </>
@@ -657,175 +854,202 @@ export default function Dashboard() {
                   )}
 
                   {activeTab === "assets" && (
-                    <div className="flex-1 flex flex-col gap-6 overflow-y-auto max-h-[500px] pr-2">
-                      <div>
-                        <h4 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-1.5">
-                          <IconFiles className="h-4.5 w-4.5 text-emerald-400" />
-                          Audited Attachments ({assets.documents.length})
-                        </h4>
-                        {assetsLoading ? (
-                          <div className="h-12 bg-white/[0.02] border border-white/5 rounded-xl animate-pulse"></div>
-                        ) : assets.documents.length === 0 ? (
-                          <p className="text-sm text-gray-500 italic">No certificate documents found inside local storage path.</p>
-                        ) : (
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {assets.documents.map((doc, idx) => {
-                              let geminiData = null;
-                              let docUsage = null;
+                    <div className="flex-1 flex flex-col gap-6 overflow-y-auto max-h-[620px] pr-2">
+                      {/* Paired Q&A and Audited Attachments List */}
+                      <div className="space-y-6">
+                        {(() => {
+                          try {
+                            const matchingEvidence = evidenceLogs.filter(e => e.audit_id === selectedLog.audit_id);
+                            const visibleDocs = assets.documents.filter(doc => doc.name.toLowerCase() !== "qa_data.json");
+                            
+                            // Reconstruct the Q&A blocks from the evidence logs matching this audit_id
+                            const parsedQA = matchingEvidence.map(e => {
+                              let answers = [];
                               try {
-                                const parsed = JSON.parse(selectedLog.compiled_extracted_data || '[]');
-                                const match = parsed.find((item: any) =>
-                                  item.filename.toLowerCase() === doc.name.toLowerCase() ||
-                                  doc.name.toLowerCase().includes(item.filename.toLowerCase()) ||
-                                  item.filename.toLowerCase().includes(doc.name.toLowerCase())
-                                );
-                                if (match) {
-                                  geminiData = match.extracted_data;
-                                  docUsage = {
-                                    input_tokens: match.input_tokens || 0,
-                                    output_tokens: match.output_tokens || 0,
-                                    cost_usd: match.cost_usd || 0.0
-                                  };
-                                }
-                              } catch (e) {
-                                console.error(e);
+                                answers = JSON.parse(e.ariba_qa_answers || "[]");
+                              } catch (err) {
+                                console.error(err);
+                              }
+                              return {
+                                questionLabel: e.ariba_question_label,
+                                filename: e.filename,
+                                answers: answers,
+                                original_evidence: e
+                              };
+                            });
+
+                            // Sort blocks by question number prefix
+                            const getLabelSortKey = (label: string): number[] => {
+                              const match = label.trim().match(/^(\d+(?:\.\d+)*)/);
+                              if (match) {
+                                return match[1].split('.').map(Number);
+                              }
+                              return [999];
+                            };
+
+                            parsedQA.sort((a, b) => {
+                              const keyA = getLabelSortKey(a.questionLabel);
+                              const keyB = getLabelSortKey(b.questionLabel);
+                              for (let i = 0; i < Math.max(keyA.length, keyB.length); i++) {
+                                const valA = keyA[i] ?? 0;
+                                const valB = keyB[i] ?? 0;
+                                if (valA !== valB) return valA - valB;
+                              }
+                              return 0;
+                            });
+
+                            if (parsedQA.length === 0) {
+                              return <p className="text-sm text-gray-500 italic">No evidence records found.</p>;
+                            }
+
+                            return parsedQA.map((item: any, idx: number) => {
+                              const ev = item.original_evidence;
+                              const matchingDoc = visibleDocs.find(d => 
+                                d.name.toLowerCase() === ev.filename.toLowerCase() ||
+                                ev.filename.toLowerCase().includes(d.name.toLowerCase()) ||
+                                d.name.toLowerCase().includes(ev.filename.toLowerCase())
+                              );
+
+                              let geminiData = null;
+                              try {
+                                geminiData = JSON.parse(ev.gemini_extracted_metadata || "{}");
+                              } catch (err) {
+                                console.error(err);
                               }
 
                               return (
-                                <div key={idx} className="p-4 rounded-xl border border-white/5 bg-black/40 flex flex-col gap-3 hover:border-emerald-500/20 hover:bg-white/[0.01] transition-all duration-300 group">
-                                  <div className="flex justify-between items-start">
-                                    <div className="truncate pr-4">
-                                      <p className="text-xs font-semibold text-white truncate">{doc.name}</p>
-                                      <p className="text-[10px] text-gray-500 font-medium">PDF Document</p>
-                                    </div>
-                                    <a
-                                      href={`http://127.0.0.1:8000${doc.url}`}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="p-1.5 rounded bg-white/5 hover:bg-white/10 transition-all duration-300 cursor-pointer active:scale-95"
-                                      title="Open document"
-                                    >
-                                      <IconArrowUpRight className="h-4 w-4 text-gray-400 group-hover:text-emerald-400 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all" />
-                                    </a>
+                                <div key={idx} className="p-4 rounded-xl border border-white/5 bg-black/40 space-y-4">
+                                  {/* Title section: Filename and Question Label */}
+                                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-white/5 pb-2.5">
+                                    <h4 className="text-xs font-bold text-white truncate max-w-full sm:max-w-[450px]">
+                                      {ev.filename}
+                                    </h4>
+                                    {ev.ariba_question_label && (
+                                      <span className="text-[9px] uppercase font-bold text-emerald-400 tracking-wider px-2 py-0.5 rounded bg-emerald-500/[0.04] border border-emerald-500/10 shrink-0">
+                                        {ev.ariba_question_label}
+                                      </span>
+                                    )}
                                   </div>
 
-                                  {geminiData && (
-                                    <div className="p-2.5 rounded-lg bg-white/[0.02] border border-white/5 text-[11px] space-y-1.5 font-mono text-gray-400">
-                                      <div className="flex justify-between gap-2">
-                                        <span>Extracted Supplier:</span>
-                                        <span className="text-white truncate max-w-[130px] font-sans">{geminiData.certificateOwnerName || 'N/A'}</span>
-                                      </div>
-                                      <div className="flex justify-between">
-                                        <span>Cert Number:</span>
-                                        <span className="text-white">{geminiData.certificateNumber || 'N/A'}</span>
-                                      </div>
-                                      <div className="flex justify-between gap-2">
-                                        <span>Location:</span>
-                                        <span className="text-white truncate max-w-[150px] font-sans">{geminiData.certificateLocation || 'N/A'}</span>
-                                      </div>
-                                      <div className="flex justify-between">
-                                        <span>Expiration Date:</span>
-                                        <span className="text-white">{geminiData.expirationDate || 'N/A'}</span>
-                                      </div>
-                                      {docUsage && docUsage.cost_usd > 0 && (
-                                        <>
-                                          <div className="flex justify-between border-t border-white/5 pt-1.5 mt-1.5">
-                                            <span>Tokens:</span>
-                                            <span className="text-white tabular-nums">{docUsage.input_tokens + docUsage.output_tokens} (In: {docUsage.input_tokens} | Out: {docUsage.output_tokens})</span>
-                                          </div>
-                                          <div className="flex justify-between">
-                                            <span>Est. Cost:</span>
-                                            <span className="text-white tabular-nums">RM{(docUsage.cost_myr || (docUsage.cost_usd ? docUsage.cost_usd * 4.70 : 0.0)).toFixed(4)} MYR</span>
-                                          </div>
-                                        </>
+                                  {/* Grid side-by-side: Q&A on Left, Document details on Right */}
+                                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                                    {/* Left Panel: Questionnaire Answers */}
+                                    <div className="lg:col-span-6 space-y-2.5">
+                                      <h5 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Questionnaire Answers</h5>
+                                      {item.answers.length === 0 ? (
+                                        <p className="text-xs text-gray-500 italic">No Q&A Answers available.</p>
+                                      ) : (
+                                        <div className="p-3 rounded-lg bg-white/[0.01] border border-white/5 space-y-2">
+                                          {item.answers.map((ans: any, aIdx: number) => (
+                                            <div key={aIdx} className="text-xs flex gap-2">
+                                              <span className="text-gray-500 font-medium shrink-0">{ans.label}:</span>
+                                              <span className="text-gray-300 font-medium">{ans.value}</span>
+                                            </div>
+                                          ))}
+                                        </div>
                                       )}
                                     </div>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
 
-                      <div>
-                        <h4 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-1.5">
-                          <IconPhoto className="h-4.5 w-4.5 text-emerald-400" />
-                          Audit Validation Screen Captures ({assets.screenshots.length})
-                        </h4>
-                        {assetsLoading ? (
-                          <div className="h-32 bg-white/[0.02] border border-white/5 rounded-xl animate-pulse"></div>
-                        ) : assets.screenshots.length === 0 ? (
-                          <p className="text-sm text-gray-500 italic">No evidence validation screenshots found inside local storage path.</p>
-                        ) : (
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {assets.screenshots.map((shot, idx) => {
-                              const fullShotUrl = shot.startsWith("http") ? shot : `http://127.0.0.1:8000${shot}`;
-                              return (
-                                <div
-                                  key={idx}
-                                  onClick={() => setSelectedScreenshot(fullShotUrl)}
-                                  className="border border-white/5 rounded-xl bg-black/40 overflow-hidden relative aspect-video group cursor-zoom-in"
-                                >
-                                  <img
-                                    src={fullShotUrl}
-                                    alt="Audit verification capture"
-                                    className="w-full h-full object-cover group-hover:scale-102 transition-all duration-500"
-                                  />
-                                  <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all duration-300">
-                                    <span className="text-xs font-semibold text-white tracking-wide flex items-center gap-1">
-                                      Expand Evidence Screenshot
-                                      <IconExternalLink className="h-3.5 w-3.5" />
-                                    </span>
+                                    {/* Right Panel: Extracted Document Details */}
+                                    <div className="lg:col-span-6 space-y-2.5">
+                                      <div className="flex justify-between items-center">
+                                        <h5 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Extracted Metadata</h5>
+                                        {matchingDoc && (
+                                          <a
+                                            href={`http://127.0.0.1:8000${matchingDoc.url}`}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="flex items-center gap-1 text-[9px] text-emerald-400 hover:underline hover:text-emerald-300 transition-colors"
+                                          >
+                                            Open PDF <IconArrowUpRight className="h-3 w-3" />
+                                          </a>
+                                        )}
+                                      </div>
+                                      {geminiData && Object.keys(geminiData).length > 0 ? (
+                                        <div className="p-2.5 rounded-lg bg-white/[0.02] border border-white/5 text-[11px] space-y-1.5 font-mono text-gray-400">
+                                          <div className="flex justify-between gap-2">
+                                            <span>Extracted Supplier:</span>
+                                            <span className="text-white truncate max-w-[140px] font-sans">{geminiData.certificateOwnerName || 'N/A'}</span>
+                                          </div>
+                                          <div className="flex justify-between gap-2">
+                                            <span>Issuer Name:</span>
+                                            <span className="text-white truncate max-w-[140px] font-sans">{geminiData.issuerName || 'N/A'}</span>
+                                          </div>
+                                          <div className="flex justify-between gap-2">
+                                            <span>Cert Type:</span>
+                                            <span className="text-white truncate max-w-[140px] font-sans">{geminiData.certificateType || 'N/A'}</span>
+                                          </div>
+                                          <div className="flex justify-between">
+                                            <span>Cert Number:</span>
+                                            <span className="text-white">{geminiData.certificateNumber || 'N/A'}</span>
+                                          </div>
+                                          <div className="flex justify-between gap-2">
+                                            <span>Location:</span>
+                                            <span className="text-white truncate max-w-[150px] font-sans">{geminiData.certificateLocation || 'N/A'}</span>
+                                          </div>
+                                          <div className="flex justify-between">
+                                            <span>Effective Date:</span>
+                                            <span className="text-white">{geminiData.effectiveDate || 'N/A'}</span>
+                                          </div>
+                                          <div className="flex justify-between">
+                                            <span>Expiration Date:</span>
+                                            <span className="text-white">{geminiData.expirationDate || 'N/A'}</span>
+                                          </div>
+                                          <div className="flex justify-between">
+                                            <span>Publication Year:</span>
+                                            <span className="text-white">{geminiData.yearOfPublication || 'N/A'}</span>
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <p className="text-xs text-gray-500 italic">No extracted metadata available.</p>
+                                      )}
+                                    </div>
                                   </div>
                                 </div>
                               );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {activeTab === "qa_data" && (
-                    <div className="flex-1 flex flex-col gap-4 overflow-y-auto max-h-[500px] pr-2">
-                      {(() => {
-                        try {
-                          const parsedQA = JSON.parse(selectedLog.complete_qa_data_dump || "[]");
-                          if (!Array.isArray(parsedQA) || parsedQA.length === 0) {
-                            return <p className="text-sm text-gray-500 italic">No scraped Q&A form data recorded for this run.</p>;
+                            });
+                          } catch (err) {
+                            console.error(err);
+                            return <p className="text-sm text-rose-400 italic">Failed to build paired comparison blocks.</p>;
                           }
-                          return parsedQA.map((block: any, bIdx: number) => (
-                            <div key={bIdx} className="p-4 rounded-xl border border-white/5 bg-black/40 space-y-3">
-                              <div className="flex justify-between items-start border-b border-white/5 pb-2 gap-4">
-                                <div>
-                                  {block.sectionLabel && (
-                                    <span className="text-[9px] uppercase font-bold text-emerald-400 tracking-wider block">
-                                      {block.sectionLabel}
-                                    </span>
-                                  )}
-                                  <h5 className="text-xs font-semibold text-white mt-0.5 leading-tight">{block.questionLabel}</h5>
-                                </div>
-                                {block.attachedFile && (
-                                  <span className="text-[9px] px-2 py-0.5 rounded bg-white/5 border border-white/10 font-mono text-gray-400 shrink-0">
-                                    Attachment: {block.attachedFile}
-                                  </span>
-                                )}
-                              </div>
-                              <div className="space-y-2">
-                                {block.answers && block.answers.map((ans: any, aIdx: number) => (
-                                  <div key={aIdx} className="text-xs flex gap-2">
-                                    <span className="text-gray-500 font-medium shrink-0">{ans.label}:</span>
-                                    <span className="text-gray-300 font-medium">{ans.value}</span>
+                        })()}
+                      </div>
+
+                      {/* Screenshots Section at bottom, taking 10% width */}
+                      {assets.screenshots.length > 0 && (
+                        <div className="border-t border-white/5 pt-6 mt-6">
+                          <h4 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                            <IconPhoto className="h-4.5 w-4.5 text-emerald-400" />
+                            Audit Validation Screen Captures ({assets.screenshots.length})
+                          </h4>
+                          {assetsLoading ? (
+                            <div className="h-16 bg-white/[0.02] border border-white/5 rounded-xl animate-pulse"></div>
+                          ) : (
+                            <div className="flex flex-wrap gap-3">
+                              {assets.screenshots.map((shot, idx) => {
+                                const fullShotUrl = shot.startsWith("http") ? shot : `http://127.0.0.1:8000${shot}`;
+                                return (
+                                  <div
+                                    key={idx}
+                                    onClick={() => setSelectedScreenshot(fullShotUrl)}
+                                    className="w-[10%] min-w-[80px] aspect-video border border-white/5 rounded overflow-hidden relative group cursor-zoom-in bg-black/40"
+                                    title="Expand capture"
+                                  >
+                                    <img
+                                      src={fullShotUrl}
+                                      alt="Audit verification capture"
+                                      className="w-full h-full object-cover group-hover:scale-105 transition-all duration-300"
+                                    />
+                                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all duration-300">
+                                      <IconExternalLink className="h-3 w-3 text-white" />
+                                    </div>
                                   </div>
-                                ))}
-                              </div>
+                                );
+                              })}
                             </div>
-                          ));
-                        } catch (e) {
-                          return <p className="text-sm text-rose-400 italic">Failed to parse Q&A JSON data dump.</p>;
-                        }
-                      })()}
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1072,87 +1296,107 @@ export default function Dashboard() {
         ) : (
           /* ── No certificate selected: supplier selector + empty state ── */
           <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch min-h-[600px]">
-            {/* Left Column: Dropdown search & file list */}
-            <section className="lg:col-span-4 flex flex-col double-bezel">
-              <div className="double-bezel-inner flex-1 flex flex-col h-full relative">
-                <h3 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-4">Supplier Selector</h3>
-
-                {/* Custom Searchable Supplier Dropdown */}
-                <div className="relative mb-6">
-                  <label className="text-[9px] uppercase font-bold text-emerald-400 tracking-wider block mb-1">Search Supplier Name</label>
-                  <div
-                    className="flex justify-between items-center w-full px-4 py-2.5 rounded-xl bg-black/40 border border-white/5 text-sm text-gray-200 focus-within:border-emerald-500/30 transition-all duration-300 cursor-pointer"
-                    onClick={() => setIsSupplierDropdownOpen(!isSupplierDropdownOpen)}
-                  >
-                    <input
-                      type="text"
-                      placeholder="Search supplier..."
-                      value={supplierSearchQuery}
-                      onChange={(e) => {
-                        setSupplierSearchQuery(e.target.value);
-                        setIsSupplierDropdownOpen(true);
-                      }}
-                      onClick={(e) => e.stopPropagation()}
-                      className="w-full bg-transparent border-none text-sm text-gray-200 focus:outline-none placeholder-gray-600 font-sans"
-                    />
-                    <IconChevronDown className="h-4 w-4 text-gray-500 shrink-0" />
-                  </div>
-
-                  {/* Dropdown Menu List */}
-                  {isSupplierDropdownOpen && (
-                    <div className="absolute top-full left-0 right-0 mt-1.5 z-40 max-h-52 overflow-y-auto rounded-xl border border-white/10 bg-gray-950/95 backdrop-blur-md shadow-2xl py-1">
+            {/* Left Column: Supplier list and certificate list */}
+            <section className="lg:col-span-4 flex flex-col min-h-[600px] double-bezel">
+              <div className="double-bezel-inner flex-1 flex flex-col h-full">
+                {!selectedSupplierName ? (
+                  <>
+                    <h3 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-4">Supplier Registry</h3>
+                    {/* Search Supplier input */}
+                    <div className="relative mb-6">
+                      <IconSearch className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-500 h-4.5 w-4.5" />
+                      <input
+                        type="text"
+                        placeholder="Search supplier..."
+                        value={supplierSearchQuery}
+                        onChange={(e) => setSupplierSearchQuery(e.target.value)}
+                        className="w-full pl-11 pr-4 py-2.5 rounded-xl bg-black/40 border border-white/5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-emerald-500/30 transition-all font-sans"
+                      />
+                    </div>
+                    {/* List of Suppliers */}
+                    <div className="flex-1 overflow-y-auto space-y-3 max-h-[480px] pr-2">
                       {isEvidenceLoading ? (
-                        <div className="px-4 py-3 text-xs text-gray-500 flex items-center gap-2">
-                          <IconLoader2 className="h-3.5 w-3.5 animate-spin" /> Loading list...
-                        </div>
+                        Array.from({ length: 3 }).map((_, idx) => (
+                          <div key={idx} className="p-4 rounded-xl border border-white/5 bg-white/[0.01] animate-pulse">
+                            <div className="h-4 w-3/4 bg-white/10 rounded mb-2"></div>
+                          </div>
+                        ))
                       ) : filteredSuppliers.length === 0 ? (
-                        <div className="px-4 py-3 text-xs text-gray-500 italic">No matching suppliers found</div>
+                        <div className="text-center py-12 text-gray-500">
+                          <p className="text-sm">No suppliers found.</p>
+                        </div>
                       ) : (
                         filteredSuppliers.map((name) => (
                           <div
                             key={name}
                             onClick={() => {
                               setSelectedSupplierName(name);
-                              setSupplierSearchQuery(name);
-                              setIsSupplierDropdownOpen(false);
                               setSelectedEvidence(null);
                             }}
-                            className={`px-4 py-2 text-xs text-gray-300 hover:bg-white/5 cursor-pointer transition-colors ${selectedSupplierName === name ? "bg-emerald-600/10 font-medium text-emerald-400" : ""
-                              }`}
+                            className="p-4 rounded-xl border border-white/5 bg-white/[0.01] hover:border-white/15 hover:bg-white/[0.02] transition-all duration-300 cursor-pointer relative group overflow-hidden"
                           >
-                            {name}
+                            <div className="absolute left-0 top-0 bottom-0 w-[3px] bg-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                            <h4 className="font-semibold text-sm text-white group-hover:text-emerald-400 transition-colors">
+                              {name}
+                            </h4>
                           </div>
                         ))
                       )}
                     </div>
-                  )}
-                </div>
-
-                {/* Supplier Audited Attachments List */}
-                {selectedSupplierName && (
-                  <div className="flex-1 flex flex-col">
-                    <h4 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-1.5">
-                      <IconFiles className="h-4 w-4 text-emerald-400" />
-                      Available Certificates ({supplierFiles.length})
-                    </h4>
-                    <div className="flex-1 overflow-y-auto space-y-2.5 max-h-[350px] pr-2">
-                      {supplierFiles.map((ev) => {
-                        const isSelected = selectedEvidence?.audit_id === ev.audit_id && selectedEvidence?.filename === ev.filename;
-                        return (
-                          <div
-                            key={`${ev.audit_id}-${ev.filename}`}
-                            onClick={() => handleSelectEvidence(ev)}
-                            className={`p-3 rounded-lg border transition-all duration-300 cursor-pointer ${isSelected
-                              ? "bg-white/[0.03] border-emerald-500/20 glow-success"
-                              : "bg-white/[0.01] border-white/5 hover:border-white/10 hover:bg-white/[0.02]"
-                              }`}
-                          >
-                            <p className="text-xs font-semibold text-white truncate">{ev.filename}</p>
-                          </div>
-                        );
-                      })}
+                  </>
+                ) : (
+                  <>
+                    {/* Supplier selected: show their files */}
+                    <div className="flex items-center gap-3 mb-6 pb-4 border-b border-white/5">
+                      <button
+                        onClick={() => {
+                          setSelectedSupplierName("");
+                          setSupplierSearchQuery("");
+                          setSelectedEvidence(null);
+                        }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-xs font-semibold text-gray-300 hover:text-white hover:bg-white/10 transition-all cursor-pointer active:scale-95 shrink-0"
+                      >
+                        <IconChevronLeft className="h-4 w-4" />
+                        Back to Suppliers
+                      </button>
                     </div>
-                  </div>
+                    <div className="flex-1 flex flex-col">
+                      <h3 className="text-sm font-bold text-white mb-1 truncate">
+                        Supplier: <span className="text-emerald-400">{selectedSupplierName}</span>
+                      </h3>
+                      <h4 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-4 mt-2 flex items-center gap-1.5">
+                        <IconFiles className="h-4 w-4 text-emerald-400" />
+                        Available Certificates ({supplierFiles.length})
+                      </h4>
+                      <div className="flex-1 overflow-y-auto space-y-3 max-h-[420px] pr-2">
+                        {supplierFiles.length === 0 ? (
+                          <p className="text-xs text-gray-500 italic">No certificates recorded for this supplier.</p>
+                        ) : (
+                          supplierFiles.map((ev) => {
+                            const isSelected = selectedEvidence?.audit_id === ev.audit_id && selectedEvidence?.filename === ev.filename;
+                            return (
+                              <div
+                                key={`${ev.audit_id}-${ev.filename}`}
+                                onClick={() => handleSelectEvidence(ev)}
+                                className={`p-4 rounded-xl border transition-all duration-300 cursor-pointer relative group overflow-hidden ${isSelected
+                                  ? "bg-white/[0.03] border-emerald-500/20 glow-success"
+                                  : "bg-white/[0.01] border-white/15 hover:border-white/20 hover:bg-white/[0.02]"
+                                  }`}
+                              >
+                                <div className="absolute left-0 top-0 bottom-0 w-[3px] bg-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                                <div className="flex justify-between items-start mb-1.5">
+                                  <p className="text-xs font-semibold text-white truncate pr-2">{ev.filename}</p>
+                                </div>
+                                <div className="text-[10px] text-gray-500 font-medium truncate">
+                                  {ev.ariba_question_label}
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  </>
                 )}
               </div>
             </section>
@@ -1165,7 +1409,7 @@ export default function Dashboard() {
                 </div>
                 <h3 className="text-md font-semibold text-white">Select a certificate</h3>
                 <p className="text-sm text-gray-500 max-w-xs mt-1">
-                  Select a supplier name and pick one of their certificates on the left to verify or edit raw OCR details.
+                  Select a supplier name on the left and pick one of their certificates to verify or edit raw OCR details.
                 </p>
               </div>
             </section>

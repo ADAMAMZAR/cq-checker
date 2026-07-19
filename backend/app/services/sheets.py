@@ -106,6 +106,36 @@ def get_or_create_supplier(client: gspread.Client, supplier_name: str) -> int:
     logger.info(f"Assigned new Supplier ID {new_id} to '{supplier_name}'.")
     return new_id
 
+def parse_dynamic_log_fields(compiled_extracted_data: str, suggested_comment: str) -> tuple[str, str, str, str, str]:
+    """
+    Parses workspace_title, cert_type, complete_qa_data_dump, result, and expiration_date dynamically.
+    Returns: (workspace_title, cert_type, complete_qa_data_dump, result, expiration_date)
+    """
+    # 1. result
+    result = "Match"
+    if "Mismatch" in suggested_comment:
+        result = "Mismatch"
+
+    # 2. expiration_date and cert_type
+    expiration_date = "N/A"
+    cert_type = "Relational evidence"
+    try:
+        if compiled_extracted_data:
+            extracted_docs = json.loads(compiled_extracted_data)
+            if extracted_docs and isinstance(extracted_docs, list):
+                first_doc = extracted_docs[0]
+                extracted_data = first_doc.get("extracted_data", {})
+                expiration_date = extracted_data.get("expirationDate", "N/A")
+                cert_type = extracted_data.get("certificateType", "Relational evidence")
+    except Exception:
+        pass
+
+    workspace_title = "Ariba Workspace"
+    complete_qa_data_dump = "[]"
+
+    return workspace_title, cert_type, complete_qa_data_dump, result, expiration_date
+
+
 def get_next_audit_id(client: gspread.Client) -> str:
     """
     Looks up existing entries in both Audit_Results and Document_Evidence worksheets
@@ -113,9 +143,8 @@ def get_next_audit_id(client: gspread.Client) -> str:
     Example: AUDIT_0001, AUDIT_0002...
     """
     result_headers = [
-        "Audit ID", "Supplier ID", "Timestamp", "Supplier Name", "Workspace Title",
-        "Certificate Type", "Complete QA Data Dump", "Compiled Extracted Data",
-        "Audit Result Verdict", "Expiration Date", "Suggested Comments", "Screenshot URL",
+        "Audit ID", "Supplier ID", "Timestamp", "Supplier Name", "Compiled Extracted Data",
+        "Suggested Comments", "Screenshot URL", "Comparison Table JSON",
         "Comparison Input Tokens", "Comparison Output Tokens", "Comparison Cost USD", "Comparison Cost MYR",
         "Total Run Cost USD", "Total Run Cost MYR"
     ]
@@ -233,14 +262,10 @@ def log_audit_run(supplier_name: str, doc_evidences: List[DocumentEvidence], aud
                 "Supplier ID",
                 "Timestamp",
                 "Supplier Name",
-                "Workspace Title",
-                "Certificate Type",
-                "Complete QA Data Dump",
                 "Compiled Extracted Data",
-                "Audit Result Verdict",
-                "Expiration Date",
                 "Suggested Comments",
                 "Screenshot URL",
+                "Comparison Table JSON",
                 "Comparison Input Tokens",
                 "Comparison Output Tokens",
                 "Comparison Cost USD",
@@ -254,14 +279,10 @@ def log_audit_run(supplier_name: str, doc_evidences: List[DocumentEvidence], aud
                 audit_log.supplier_id,
                 audit_log.timestamp,
                 audit_log.supplier_name,
-                audit_log.workspace_title,
-                audit_log.cert_type,
-                audit_log.complete_qa_data_dump,
                 audit_log.compiled_extracted_data,
-                audit_log.result,
-                audit_log.expiration_date,
                 audit_log.suggested_comment,
                 audit_log.screenshot_url,
+                json.dumps(audit_log.comparison_table) if audit_log.comparison_table else None,
                 audit_log.comparison_input_tokens,
                 audit_log.comparison_output_tokens,
                 audit_log.comparison_cost_usd,
@@ -287,9 +308,8 @@ def get_audit_logs() -> List[AuditLogEntry]:
     try:
         client = get_sheets_client()
         result_headers = [
-            "Audit ID", "Supplier ID", "Timestamp", "Supplier Name", "Workspace Title",
-            "Certificate Type", "Complete QA Data Dump", "Compiled Extracted Data",
-            "Audit Result Verdict", "Expiration Date", "Suggested Comments", "Screenshot URL",
+            "Audit ID", "Supplier ID", "Timestamp", "Supplier Name", "Compiled Extracted Data",
+            "Suggested Comments", "Screenshot URL", "Comparison Table JSON",
             "Comparison Input Tokens", "Comparison Output Tokens", "Comparison Cost USD", "Comparison Cost MYR",
             "Total Run Cost USD", "Total Run Cost MYR"
         ]
@@ -302,25 +322,39 @@ def get_audit_logs() -> List[AuditLogEntry]:
         records = sheet.get_all_records()
         logs = []
         for r in records:
+            compiled_data = str(r.get("Compiled Extracted Data", ""))
+            comments = str(r.get("Suggested Comments", ""))
+            comp_table_str = str(r.get("Comparison Table JSON", ""))
+            comp_table_json = None
+            if comp_table_str:
+                try:
+                    comp_table_json = json.loads(comp_table_str)
+                except Exception:
+                    pass
+            
+            # Resolve removed columns dynamically
+            w_title, c_type, qa_dump, res, exp_date = parse_dynamic_log_fields(compiled_data, comments)
+            
             logs.append(AuditLogEntry(
                 audit_id=str(r.get("Audit ID", "")),
                 supplier_id=int(r.get("Supplier ID", 0)),
                 timestamp=str(r.get("Timestamp", "")),
                 supplier_name=str(r.get("Supplier Name", "")),
-                workspace_title=str(r.get("Workspace Title", "")),
-                cert_type=str(r.get("Certificate Type", "")),
-                complete_qa_data_dump=str(r.get("Complete QA Data Dump", "")),
-                compiled_extracted_data=str(r.get("Compiled Extracted Data", "")),
-                result=str(r.get("Audit Result Verdict", "")),
-                expiration_date=str(r.get("Expiration Date", "")),
-                suggested_comment=str(r.get("Suggested Comments", "")),
+                workspace_title=w_title,
+                cert_type=c_type,
+                complete_qa_data_dump=qa_dump,
+                compiled_extracted_data=compiled_data,
+                result=res,
+                expiration_date=exp_date,
+                suggested_comment=comments,
                 screenshot_url=str(r.get("Screenshot URL", "")) if r.get("Screenshot URL") else None,
                 comparison_input_tokens=int(r.get("Comparison Input Tokens", 0)) if r.get("Comparison Input Tokens") else 0,
                 comparison_output_tokens=int(r.get("Comparison Output Tokens", 0)) if r.get("Comparison Output Tokens") else 0,
                 comparison_cost_usd=float(r.get("Comparison Cost USD", 0.0)) if r.get("Comparison Cost USD") else 0.0,
                 comparison_cost_myr=float(r.get("Comparison Cost MYR", 0.0)) if r.get("Comparison Cost MYR") else 0.0,
                 total_run_cost_usd=float(r.get("Total Run Cost USD", 0.0)) if r.get("Total Run Cost USD") else 0.0,
-                total_run_cost_myr=float(r.get("Total Run Cost MYR", 0.0)) if r.get("Total Run Cost MYR") else 0.0
+                total_run_cost_myr=float(r.get("Total Run Cost MYR", 0.0)) if r.get("Total Run Cost MYR") else 0.0,
+                comparison_table=comp_table_json
             ))
         return logs
     except Exception as e:
@@ -636,14 +670,10 @@ def log_audit_run_via_supabase(supplier_name: str, doc_evidences: List[DocumentE
                 "supplier_id": audit_log.supplier_id,
                 "timestamp": audit_log.timestamp,
                 "supplier_name": audit_log.supplier_name,
-                "workspace_title": audit_log.workspace_title,
-                "cert_type": audit_log.cert_type,
-                "complete_qa_data_dump": audit_log.complete_qa_data_dump,
                 "compiled_extracted_data": audit_log.compiled_extracted_data,
-                "result": audit_log.result,
-                "expiration_date": audit_log.expiration_date,
                 "suggested_comments": audit_log.suggested_comment,
                 "screenshot_url": audit_log.screenshot_url,
+                "comparison_table": audit_log.comparison_table,
                 "comparison_input_tokens": audit_log.comparison_input_tokens,
                 "comparison_output_tokens": audit_log.comparison_output_tokens,
                 "comparison_cost_usd": audit_log.comparison_cost_usd,
@@ -652,7 +682,7 @@ def log_audit_run_via_supabase(supplier_name: str, doc_evidences: List[DocumentE
                 "total_run_cost_myr": audit_log.total_run_cost_myr
             }]
             call_supabase_insert("audit_results", results_row)
-            
+
         return audit_id
     except Exception as e:
         logger.error(f"Failed to log audit run via Supabase: {e}")
@@ -662,25 +692,38 @@ def get_audit_logs_via_supabase() -> List[AuditLogEntry]:
     records = call_supabase_select("audit_results")
     logs = []
     for r in records:
+        compiled_data = str(r.get("compiled_extracted_data", ""))
+        comments = str(r.get("suggested_comments", ""))
+        comp_table = r.get("comparison_table")
+        if isinstance(comp_table, str) and comp_table:
+            try:
+                comp_table = json.loads(comp_table)
+            except Exception:
+                comp_table = None
+
+        # Resolve removed columns dynamically
+        w_title, c_type, qa_dump, res, exp_date = parse_dynamic_log_fields(compiled_data, comments)
+
         logs.append(AuditLogEntry(
             audit_id=str(r.get("audit_id", "")),
             supplier_id=int(r.get("supplier_id", 0)),
             timestamp=str(r.get("timestamp", "")),
             supplier_name=str(r.get("supplier_name", "")),
-            workspace_title=str(r.get("workspace_title", "")),
-            cert_type=str(r.get("cert_type", "")),
-            complete_qa_data_dump=str(r.get("complete_qa_data_dump", "")),
-            compiled_extracted_data=str(r.get("compiled_extracted_data", "")),
-            result=str(r.get("result", "")),
-            expiration_date=str(r.get("expiration_date", "")),
-            suggested_comment=str(r.get("suggested_comments", "")),
+            workspace_title=w_title,
+            cert_type=c_type,
+            complete_qa_data_dump=qa_dump,
+            compiled_extracted_data=compiled_data,
+            result=res,
+            expiration_date=exp_date,
+            suggested_comment=comments,
             screenshot_url=str(r.get("screenshot_url", "")) if r.get("screenshot_url") else None,
             comparison_input_tokens=int(r.get("comparison_input_tokens", 0)) if r.get("comparison_input_tokens") else 0,
             comparison_output_tokens=int(r.get("comparison_output_tokens", 0)) if r.get("comparison_output_tokens") else 0,
             comparison_cost_usd=float(r.get("comparison_cost_usd", 0.0)) if r.get("comparison_cost_usd") else 0.0,
             comparison_cost_myr=float(r.get("comparison_cost_myr", 0.0)) if r.get("comparison_cost_myr") else 0.0,
             total_run_cost_usd=float(r.get("total_run_cost_usd", 0.0)) if r.get("total_run_cost_usd") else 0.0,
-            total_run_cost_myr=float(r.get("total_run_cost_myr", 0.0)) if r.get("total_run_cost_myr") else 0.0
+            total_run_cost_myr=float(r.get("total_run_cost_myr", 0.0)) if r.get("total_run_cost_myr") else 0.0,
+            comparison_table=comp_table
         ))
     return logs
 
@@ -909,9 +952,8 @@ def log_audit_run_via_apps_script(supplier_name: str, doc_evidences: List[Docume
         
         if audit_log:
             result_headers = [
-                "Audit ID", "Supplier ID", "Timestamp", "Supplier Name", "Workspace Title",
-                "Certificate Type", "Complete QA Data Dump", "Compiled Extracted Data",
-                "Audit Result Verdict", "Expiration Date", "Suggested Comments", "Screenshot URL",
+                "Audit ID", "Supplier ID", "Timestamp", "Supplier Name", "Compiled Extracted Data",
+                "Suggested Comments", "Screenshot URL", "Comparison Table JSON",
                 "Comparison Input Tokens", "Comparison Output Tokens", "Comparison Cost USD", "Comparison Cost MYR",
                 "Total Run Cost USD", "Total Run Cost MYR"
             ]
@@ -920,14 +962,10 @@ def log_audit_run_via_apps_script(supplier_name: str, doc_evidences: List[Docume
                 audit_log.supplier_id,
                 audit_log.timestamp,
                 audit_log.supplier_name,
-                audit_log.workspace_title,
-                audit_log.cert_type,
-                audit_log.complete_qa_data_dump,
                 audit_log.compiled_extracted_data,
-                audit_log.result,
-                audit_log.expiration_date,
                 audit_log.suggested_comment,
                 audit_log.screenshot_url,
+                json.dumps(audit_log.comparison_table) if audit_log.comparison_table else None,
                 audit_log.comparison_input_tokens,
                 audit_log.comparison_output_tokens,
                 audit_log.comparison_cost_usd,
@@ -950,25 +988,39 @@ def get_audit_logs_via_apps_script() -> List[AuditLogEntry]:
     records = call_apps_script_get("Audit_Results")
     logs = []
     for r in records:
+        compiled_data = str(r.get("Compiled Extracted Data", ""))
+        comments = str(r.get("Suggested Comments", ""))
+        comp_table_str = str(r.get("Comparison Table JSON", ""))
+        comp_table_json = None
+        if comp_table_str:
+            try:
+                comp_table_json = json.loads(comp_table_str)
+            except Exception:
+                pass
+
+        # Resolve removed columns dynamically
+        w_title, c_type, qa_dump, res, exp_date = parse_dynamic_log_fields(compiled_data, comments)
+
         logs.append(AuditLogEntry(
             audit_id=str(r.get("Audit ID", "")),
             supplier_id=int(r.get("Supplier ID", 0)),
             timestamp=str(r.get("Timestamp", "")),
             supplier_name=str(r.get("Supplier Name", "")),
-            workspace_title=str(r.get("Workspace Title", "")),
-            cert_type=str(r.get("Certificate Type", "")),
-            complete_qa_data_dump=str(r.get("Complete QA Data Dump", "")),
-            compiled_extracted_data=str(r.get("Compiled Extracted Data", "")),
-            result=str(r.get("Audit Result Verdict", "")),
-            expiration_date=str(r.get("Expiration Date", "")),
-            suggested_comment=str(r.get("Suggested Comments", "")),
+            workspace_title=w_title,
+            cert_type=c_type,
+            complete_qa_data_dump=qa_dump,
+            compiled_extracted_data=compiled_data,
+            result=res,
+            expiration_date=exp_date,
+            suggested_comment=comments,
             screenshot_url=str(r.get("Screenshot URL", "")) if r.get("Screenshot URL") else None,
             comparison_input_tokens=int(r.get("Comparison Input Tokens", 0)) if r.get("Comparison Input Tokens") else 0,
             comparison_output_tokens=int(r.get("Comparison Output Tokens", 0)) if r.get("Comparison Output Tokens") else 0,
             comparison_cost_usd=float(r.get("Comparison Cost USD", 0.0)) if r.get("Comparison Cost USD") else 0.0,
             comparison_cost_myr=float(r.get("Comparison Cost MYR", 0.0)) if r.get("Comparison Cost MYR") else 0.0,
             total_run_cost_usd=float(r.get("Total Run Cost USD", 0.0)) if r.get("Total Run Cost USD") else 0.0,
-            total_run_cost_myr=float(r.get("Total Run Cost MYR", 0.0)) if r.get("Total Run Cost MYR") else 0.0
+            total_run_cost_myr=float(r.get("Total Run Cost MYR", 0.0)) if r.get("Total Run Cost MYR") else 0.0,
+            comparison_table=comp_table_json
         ))
     return logs
 
@@ -1014,4 +1066,61 @@ def find_metadata_by_hash_via_apps_script(file_hash: str, ariba_question_label: 
                 "gemini_extracted_metadata": str(r.get("Gemini Extracted Metadata", ""))
             }
     return None
+
+
+def update_audit_result(audit_id: str, result: str, suggested_comment: str, comparison_table: Optional[dict] = None) -> bool:
+    """
+    Finds a record in Audit_Results sheet by Audit ID and updates its result verdict and suggested comments.
+    """
+    if settings.supabase_url and settings.supabase_key:
+        return update_audit_result_via_supabase(audit_id, result, suggested_comment, comparison_table)
+    if settings.google_apps_script_url:
+        return update_audit_result_via_apps_script(audit_id, result, suggested_comment, comparison_table)
+    try:
+        client = get_sheets_client()
+        result_headers = [
+            "Audit ID", "Supplier ID", "Timestamp", "Supplier Name", "Compiled Extracted Data",
+            "Suggested Comments", "Screenshot URL", "Comparison Table JSON",
+            "Comparison Input Tokens", "Comparison Output Tokens", "Comparison Cost USD", "Comparison Cost MYR",
+            "Total Run Cost USD", "Total Run Cost MYR"
+        ]
+        sheet = get_or_create_worksheet(client, "Audit_Results", result_headers)
+
+        records = sheet.get_all_records()
+        for idx, r in enumerate(records, start=2): # Row 1 is header, data starts at row 2
+            r_audit_id = str(r.get("Audit ID", "")).strip()
+            if r_audit_id == audit_id:
+                # Update Column 6 (Suggested Comments)
+                sheet.update_cell(idx, 6, suggested_comment)
+                if comparison_table is not None:
+                    sheet.update_cell(idx, 8, json.dumps(comparison_table))
+                return True
+        logger.warning(f"Could not find Audit Results record matching Audit ID '{audit_id}' to update.")
+        return False
+    except Exception as e:
+        logger.error(f"Failed to update audit result in Google Sheets: {e}")
+        return False
+
+
+def update_audit_result_via_supabase(audit_id: str, result: str, suggested_comment: str, comparison_table: Optional[dict] = None) -> bool:
+    filters = {"audit_id": f"eq.{audit_id}"}
+    updates = {
+        "suggested_comments": suggested_comment
+    }
+    if comparison_table is not None:
+        updates["comparison_table"] = comparison_table
+    return call_supabase_update("audit_results", filters, updates)
+
+
+def update_audit_result_via_apps_script(audit_id: str, result: str, suggested_comment: str, comparison_table: Optional[dict] = None) -> bool:
+    payload = {
+        "action": "update_audit_result",
+        "audit_id": audit_id,
+        "result": result,
+        "suggested_comment": suggested_comment
+    }
+    if comparison_table is not None:
+        payload["comparison_table"] = json.dumps(comparison_table)
+    return call_apps_script_post(payload)
+
 
