@@ -27,10 +27,12 @@ def test_get_logs(mock_get_logs):
     assert response.json() == []
     mock_get_logs.assert_called_once()
 
+@patch("app.services.sheets.find_metadata_by_hash")
 @patch("app.services.gemini.run_audit_comparison")
 @patch("app.services.gemini.extract_certificate_data")
 @patch("app.services.sheets.log_audit_run")
-def test_run_audit(mock_log_audit, mock_extract, mock_comparison):
+def test_run_audit(mock_log_audit, mock_extract, mock_comparison, mock_find_hash):
+    mock_find_hash.return_value = None
     mock_log_audit.return_value = "AUDIT_0001"
     mock_extract.return_value = ({
         "certificateOwnerName": "ACME Corp",
@@ -66,6 +68,41 @@ def test_run_audit(mock_log_audit, mock_extract, mock_comparison):
     mock_log_audit.assert_called_once()
     mock_extract.assert_called_once()
     mock_comparison.assert_not_called()
+
+@patch("app.services.sheets.find_metadata_by_hash")
+@patch("app.services.gemini.extract_certificate_data")
+@patch("app.services.sheets.log_audit_run")
+def test_run_audit_cache_hit(mock_log_audit, mock_extract, mock_find_hash):
+    mock_find_hash.return_value = {
+        "gemini_extracted_supplier_name": "ACME Cached Corp",
+        "gemini_extracted_metadata": '{"certificateOwnerName": "ACME Cached Corp", "expirationDate": "01/01/2030"}'
+    }
+    mock_log_audit.return_value = "AUDIT_0002"
+    
+    # Mock files and forms
+    files = [
+        ("files", ("test_cert.pdf", b"pdfcontent", "application/pdf"))
+    ]
+    data = {
+        "supplier_name": "ACME Corp",
+        "workspace_title": "Workspace 123",
+        "cert_type": "QSHE",
+        "qa_data": '{"question": "answer"}'
+    }
+    
+    response = client.post("/api/audit", data=data, files=files)
+    
+    assert response.status_code == 200
+    json_data = response.json()
+    assert json_data["audit_id"] == "AUDIT_0002"
+    assert json_data["supplier_name"] == "ACME Corp"
+    assert json_data["result"] == "Extracted"
+    assert json_data["expiration_date"] == "01/01/2030"
+    assert json_data["total_run_cost_usd"] == 0.0
+    
+    mock_log_audit.assert_called_once()
+    # extract_certificate_data should NOT be called due to cache hit
+    mock_extract.assert_not_called()
 
 @patch("app.services.gemini.extract_certificate_data")
 def test_extract_endpoint(mock_extract):

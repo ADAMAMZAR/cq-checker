@@ -113,12 +113,13 @@ def get_next_audit_id(client: gspread.Client) -> str:
         "Audit ID", "Supplier ID", "Timestamp", "Supplier Name", "Workspace Title",
         "Certificate Type", "Complete QA Data Dump", "Compiled Extracted Data",
         "Audit Result Verdict", "Expiration Date", "Suggested Comments", "Screenshot URL",
-        "Comparison Input Tokens", "Comparison Output Tokens", "Comparison Cost USD", "Total Run Cost USD"
+        "Comparison Input Tokens", "Comparison Output Tokens", "Comparison Cost USD", "Comparison Cost MYR",
+        "Total Run Cost USD", "Total Run Cost MYR"
     ]
     doc_headers = [
         "Audit ID", "Supplier ID", "Timestamp", "Supplier Name", "Filename",
         "Ariba Question Label", "Ariba QA Answers", "Gemini Extracted Supplier Name",
-        "Gemini Extracted Metadata", "File Content Type", "Input Tokens", "Output Tokens", "Cost USD"
+        "Gemini Extracted Metadata", "File Content Type", "Input Tokens", "Output Tokens", "Cost USD", "Cost MYR", "File Hash"
     ]
     
     highest_idx = 0
@@ -190,7 +191,9 @@ def log_audit_run(supplier_name: str, doc_evidences: List[DocumentEvidence], aud
             "File Content Type",
             "Input Tokens",
             "Output Tokens",
-            "Cost USD"
+            "Cost USD",
+            "Cost MYR",
+            "File Hash"
         ]
         doc_sheet = get_or_create_worksheet(client, "Document_Evidence", doc_headers)
         
@@ -209,7 +212,9 @@ def log_audit_run(supplier_name: str, doc_evidences: List[DocumentEvidence], aud
                 doc.file_content_type,
                 doc.input_tokens,
                 doc.output_tokens,
-                doc.cost_usd
+                doc.cost_usd,
+                doc.cost_myr,
+                doc.file_hash
             ])
         if doc_rows:
             doc_sheet.append_rows(doc_rows, table_range="A1")
@@ -232,7 +237,9 @@ def log_audit_run(supplier_name: str, doc_evidences: List[DocumentEvidence], aud
                 "Comparison Input Tokens",
                 "Comparison Output Tokens",
                 "Comparison Cost USD",
-                "Total Run Cost USD"
+                "Comparison Cost MYR",
+                "Total Run Cost USD",
+                "Total Run Cost MYR"
             ]
             results_sheet = get_or_create_worksheet(client, "Audit_Results", result_headers)
             results_row = [
@@ -251,7 +258,9 @@ def log_audit_run(supplier_name: str, doc_evidences: List[DocumentEvidence], aud
                 audit_log.comparison_input_tokens,
                 audit_log.comparison_output_tokens,
                 audit_log.comparison_cost_usd,
-                audit_log.total_run_cost_usd
+                audit_log.comparison_cost_myr,
+                audit_log.total_run_cost_usd,
+                audit_log.total_run_cost_myr
             ]
             results_sheet.append_row(results_row, table_range="A1")
         
@@ -270,7 +279,8 @@ def get_audit_logs() -> List[AuditLogEntry]:
             "Audit ID", "Supplier ID", "Timestamp", "Supplier Name", "Workspace Title",
             "Certificate Type", "Complete QA Data Dump", "Compiled Extracted Data",
             "Audit Result Verdict", "Expiration Date", "Suggested Comments", "Screenshot URL",
-            "Comparison Input Tokens", "Comparison Output Tokens", "Comparison Cost USD", "Total Run Cost USD"
+            "Comparison Input Tokens", "Comparison Output Tokens", "Comparison Cost USD", "Comparison Cost MYR",
+            "Total Run Cost USD", "Total Run Cost MYR"
         ]
         sheet = get_or_create_worksheet(client, "Audit_Results", result_headers)
         
@@ -297,7 +307,9 @@ def get_audit_logs() -> List[AuditLogEntry]:
                 comparison_input_tokens=int(r.get("Comparison Input Tokens", 0)) if r.get("Comparison Input Tokens") else 0,
                 comparison_output_tokens=int(r.get("Comparison Output Tokens", 0)) if r.get("Comparison Output Tokens") else 0,
                 comparison_cost_usd=float(r.get("Comparison Cost USD", 0.0)) if r.get("Comparison Cost USD") else 0.0,
-                total_run_cost_usd=float(r.get("Total Run Cost USD", 0.0)) if r.get("Total Run Cost USD") else 0.0
+                comparison_cost_myr=float(r.get("Comparison Cost MYR", 0.0)) if r.get("Comparison Cost MYR") else 0.0,
+                total_run_cost_usd=float(r.get("Total Run Cost USD", 0.0)) if r.get("Total Run Cost USD") else 0.0,
+                total_run_cost_myr=float(r.get("Total Run Cost MYR", 0.0)) if r.get("Total Run Cost MYR") else 0.0
             ))
         return logs
     except Exception as e:
@@ -313,7 +325,7 @@ def get_document_evidence_logs() -> List[DocumentEvidence]:
         doc_headers = [
             "Audit ID", "Supplier ID", "Timestamp", "Supplier Name", "Filename",
             "Ariba Question Label", "Ariba QA Answers", "Gemini Extracted Supplier Name",
-            "Gemini Extracted Metadata", "File Content Type", "Input Tokens", "Output Tokens", "Cost USD"
+            "Gemini Extracted Metadata", "File Content Type", "Input Tokens", "Output Tokens", "Cost USD", "Cost MYR", "File Hash"
         ]
         sheet = get_or_create_worksheet(client, "Document_Evidence", doc_headers)
         
@@ -337,7 +349,9 @@ def get_document_evidence_logs() -> List[DocumentEvidence]:
                 file_content_type=str(r.get("File Content Type", "")),
                 input_tokens=int(r.get("Input Tokens", 0)) if r.get("Input Tokens") else 0,
                 output_tokens=int(r.get("Output Tokens", 0)) if r.get("Output Tokens") else 0,
-                cost_usd=float(r.get("Cost USD", 0.0)) if r.get("Cost USD") else 0.0
+                cost_usd=float(r.get("Cost USD", 0.0)) if r.get("Cost USD") else 0.0,
+                cost_myr=float(r.get("Cost MYR", 0.0)) if r.get("Cost MYR") else 0.0,
+                file_hash=str(r.get("File Hash", "")) if r.get("File Hash") else None
             ))
         return logs
     except Exception as e:
@@ -354,7 +368,7 @@ def update_document_evidence(audit_id: str, filename: str, updated_metadata: Dic
         doc_headers = [
             "Audit ID", "Supplier ID", "Timestamp", "Supplier Name", "Filename",
             "Ariba Question Label", "Ariba QA Answers", "Gemini Extracted Supplier Name",
-            "Gemini Extracted Metadata", "File Content Type", "Input Tokens", "Output Tokens", "Cost USD"
+            "Gemini Extracted Metadata", "File Content Type", "Input Tokens", "Output Tokens", "Cost USD", "Cost MYR", "File Hash"
         ]
         sheet = get_or_create_worksheet(client, "Document_Evidence", doc_headers)
         
@@ -376,4 +390,32 @@ def update_document_evidence(audit_id: str, filename: str, updated_metadata: Dic
     except Exception as e:
         logger.error(f"Failed to update document evidence in Google Sheets: {e}")
         return False
+
+def find_metadata_by_hash(file_hash: str) -> Optional[Dict[str, Any]]:
+    """
+    Searches Document_Evidence sheet for a record with the given file hash.
+    Returns the most recent Gemini Extracted Supplier Name and Gemini Extracted Metadata if found.
+    """
+    try:
+        client = get_sheets_client()
+        doc_headers = [
+            "Audit ID", "Supplier ID", "Timestamp", "Supplier Name", "Filename",
+            "Ariba Question Label", "Ariba QA Answers", "Gemini Extracted Supplier Name",
+            "Gemini Extracted Metadata", "File Content Type", "Input Tokens", "Output Tokens", "Cost USD", "Cost MYR", "File Hash"
+        ]
+        sheet = get_or_create_worksheet(client, "Document_Evidence", doc_headers)
+        records = sheet.get_all_records()
+        
+        # Search backwards (latest first)
+        for r in reversed(records):
+            r_hash = str(r.get("File Hash", "")).strip()
+            if r_hash and r_hash == file_hash:
+                return {
+                    "gemini_extracted_supplier_name": str(r.get("Gemini Extracted Supplier Name", "")),
+                    "gemini_extracted_metadata": str(r.get("Gemini Extracted Metadata", ""))
+                }
+        return None
+    except Exception as e:
+        logger.error(f"Failed to find metadata by hash in Google Sheets: {e}")
+        return None
 

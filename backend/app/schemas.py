@@ -20,6 +20,8 @@ class DocumentEvidence(BaseModel):
     input_tokens: int = Field(default=0, description="Gemini prompt input tokens")
     output_tokens: int = Field(default=0, description="Gemini response output tokens")
     cost_usd: float = Field(default=0.0, description="Calculated USD cost of the extraction call")
+    cost_myr: float = Field(default=0.0, description="Calculated MYR cost of the extraction call")
+    file_hash: Optional[str] = Field(None, description="SHA-256 hash of the document bytes")
 
 class AuditLogEntry(BaseModel):
     audit_id: str = Field(..., description="Unique UUID for the audit run")
@@ -37,7 +39,9 @@ class AuditLogEntry(BaseModel):
     comparison_input_tokens: int = Field(default=0, description="Gemini prompt input tokens for comparison audit")
     comparison_output_tokens: int = Field(default=0, description="Gemini response output tokens for comparison audit")
     comparison_cost_usd: float = Field(default=0.0, description="Calculated USD cost of comparison audit call")
+    comparison_cost_myr: float = Field(default=0.0, description="Calculated MYR cost of comparison audit call")
     total_run_cost_usd: float = Field(default=0.0, description="Combined USD cost of all files + comparison run")
+    total_run_cost_myr: float = Field(default=0.0, description="Combined MYR cost of all files + comparison run")
 
 class AuditResultResponse(BaseModel):
     audit_id: str
@@ -53,7 +57,9 @@ class AuditResultResponse(BaseModel):
     comparison_input_tokens: int = 0
     comparison_output_tokens: int = 0
     comparison_cost_usd: float = 0.0
+    comparison_cost_myr: float = 0.0
     total_run_cost_usd: float = 0.0
+    total_run_cost_myr: float = 0.0
 
 class UpdateEvidenceRequest(BaseModel):
     audit_id: str = Field(..., description="Audit ID of the document to update")

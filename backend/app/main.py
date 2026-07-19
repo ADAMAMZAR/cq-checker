@@ -6,6 +6,7 @@ import os
 # Force pure Python implementation of Protobuf to bypass Python 3.14 C-extension incompatibilities
 os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 
+import hashlib
 import json
 import asyncio
 import shutil
@@ -175,19 +176,38 @@ async def run_audit(
         with open(file_path, "rb") as f:
             file_bytes = f.read()
 
+        file_hash = hashlib.sha256(file_bytes).hexdigest()
+
+        # Check if already processed (cache hit)
+        cached_record = sheets.find_metadata_by_hash(file_hash)
+        if cached_record:
+            # Reconstruct dummy/empty task for gather since we have a hit
+            try:
+                metadata_dict = json.loads(cached_record["gemini_extracted_metadata"])
+            except Exception:
+                metadata_dict = {}
+            task = asyncio.to_thread(lambda: (
+                metadata_dict,
+                0, # input tokens
+                0, # output tokens
+                0.0 # cost
+            ))
+        else:
+            # Schedule Gemini OCR extraction concurrently in thread
+            task = asyncio.to_thread(
+                gemini.extract_certificate_data,
+                file_bytes,
+                file.content_type or "application/pdf"
+            )
+
         file_contexts.append({
             "filename": file.filename,
             "content_type": file.content_type or "application/octet-stream",
             "ariba_question_label": ariba_question_label,
-            "ariba_qa_answers": ariba_qa_answers
+            "ariba_qa_answers": ariba_qa_answers,
+            "file_hash": file_hash
         })
         
-        # Schedule Gemini OCR extraction concurrently in thread
-        task = asyncio.to_thread(
-            gemini.extract_certificate_data,
-            file_bytes,
-            file.content_type or "application/pdf"
-        )
         file_tasks.append(task)
 
     # Await parallel execution of all file extractions
@@ -222,7 +242,9 @@ async def run_audit(
             file_content_type=ctx["content_type"],
             input_tokens=in_t,
             output_tokens=out_t,
-            cost_usd=cost
+            cost_usd=cost,
+            cost_myr=cost * 4.70,
+            file_hash=ctx["file_hash"]
         )
         doc_evidences.append(doc_evidence)
 
@@ -238,6 +260,7 @@ async def run_audit(
     comp_in_t = 0
     comp_out_t = 0
     comp_cost = 0.0
+    comp_cost_myr = 0.0
     audit_result = "Extracted"
     suggested_comment = "Document extraction completed successfully (Comparison skipped)."
     
@@ -247,6 +270,7 @@ async def run_audit(
         expiration_date = extracted_docs[0]["extracted_data"].get("expirationDate", "N/A")
 
     total_run_cost = total_extraction_cost + comp_cost
+    total_run_cost_myr = total_run_cost * 4.70
 
     # Save log records to Supplier_List and Document_Evidence only (Audit_Results skipped)
     resolved_audit_id = sheets.log_audit_run(supplier_name, doc_evidences, None)
@@ -270,7 +294,9 @@ async def run_audit(
         comparison_input_tokens=comp_in_t,
         comparison_output_tokens=comp_out_t,
         comparison_cost_usd=comp_cost,
-        total_run_cost_usd=total_run_cost
+        comparison_cost_myr=comp_cost_myr,
+        total_run_cost_usd=total_run_cost,
+        total_run_cost_myr=total_run_cost_myr
     )
 
 @app.get("/api/logs/{supplier_name}/assets")
