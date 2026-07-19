@@ -73,6 +73,7 @@ export default function Dashboard() {
     output_tokens: number;
     cost_usd: number;
     cost_myr: number;
+    file_url?: string;
   }
 
   const [activeMainTab, setActiveMainTab] = useState<"registry" | "editor" | "costs">("registry");
@@ -758,25 +759,28 @@ export default function Dashboard() {
                           <p className="text-sm text-gray-500 italic">No evidence validation screenshots found inside local storage path.</p>
                         ) : (
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {assets.screenshots.map((shot, idx) => (
-                              <div
-                                key={idx}
-                                onClick={() => setSelectedScreenshot(`http://127.0.0.1:8000${shot}`)}
-                                className="border border-white/5 rounded-xl bg-black/40 overflow-hidden relative aspect-video group cursor-zoom-in"
-                              >
-                                <img
-                                  src={`http://127.0.0.1:8000${shot}`}
-                                  alt="Audit verification capture"
-                                  className="w-full h-full object-cover group-hover:scale-102 transition-all duration-500"
-                                />
-                                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all duration-300">
-                                  <span className="text-xs font-semibold text-white tracking-wide flex items-center gap-1">
-                                    Expand Evidence Screenshot
-                                    <IconExternalLink className="h-3.5 w-3.5" />
-                                  </span>
+                            {assets.screenshots.map((shot, idx) => {
+                              const fullShotUrl = shot.startsWith("http") ? shot : `http://127.0.0.1:8000${shot}`;
+                              return (
+                                <div
+                                  key={idx}
+                                  onClick={() => setSelectedScreenshot(fullShotUrl)}
+                                  className="border border-white/5 rounded-xl bg-black/40 overflow-hidden relative aspect-video group cursor-zoom-in"
+                                >
+                                  <img
+                                    src={fullShotUrl}
+                                    alt="Audit verification capture"
+                                    className="w-full h-full object-cover group-hover:scale-102 transition-all duration-500"
+                                  />
+                                  <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all duration-300">
+                                    <span className="text-xs font-semibold text-white tracking-wide flex items-center gap-1">
+                                      Expand Evidence Screenshot
+                                      <IconExternalLink className="h-3.5 w-3.5" />
+                                    </span>
+                                  </div>
                                 </div>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         )}
                       </div>
@@ -871,72 +875,68 @@ export default function Dashboard() {
               {/* ── Left Panel: PDF / File Viewer ── */}
               <section className="lg:col-span-7 flex flex-col double-bezel">
                 <div className="double-bezel-inner flex-1 flex flex-col h-full" style={{ minHeight: '780px' }}>
-                  <div className="flex justify-between items-center mb-4 pb-3 border-b border-white/5 shrink-0">
-                    <h3 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Certificate Document</h3>
-                    <a
-                      href={`http://127.0.0.1:8000/static/${selectedEvidence.supplier_name.replace(/[^a-zA-Z0-9 _-]/g, '').trim()}/${selectedEvidence.filename}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 text-[10px] text-gray-400 hover:text-white hover:bg-white/10 transition-all duration-200 cursor-pointer active:scale-95"
-                    >
-                      <IconArrowUpRight className="h-3.5 w-3.5" />
-                      Open in Tab
-                    </a>
-                  </div>
-
-                  {/* Adaptive file renderer */}
                   {(() => {
                     const safeName = selectedEvidence.supplier_name.replace(/[^a-zA-Z0-9 _-]/g, '').trim();
-                    const fileUrl = `http://127.0.0.1:8000/static/${safeName}/${selectedEvidence.filename}`;
+                    const fileUrl = selectedEvidence.file_url || `http://127.0.0.1:8000/static/${safeName}/${selectedEvidence.filename}`;
                     const ct = (selectedEvidence.file_content_type || '').toLowerCase();
-
-                    if (ct.includes('pdf')) {
-                      return (
-                        <iframe
-                          src={fileUrl}
-                          title="Certificate PDF"
-                          className="flex-1 w-full rounded-xl border border-white/5 bg-black/30"
-                          style={{ minHeight: '700px' }}
-                        />
-                      );
-                    } else if (ct.startsWith('image/')) {
-                      return (
-                        <div
-                          className="flex-1 flex items-center justify-center rounded-xl border border-white/5 bg-black/30 overflow-hidden"
-                          style={{ minHeight: '700px' }}
-                        >
-                          <img
-                            src={fileUrl}
-                            alt="Certificate document"
-                            className="max-w-full max-h-full object-contain"
-                          />
-                        </div>
-                      );
-                    } else {
-                      return (
-                        <div
-                          className="flex-1 flex flex-col items-center justify-center rounded-xl border border-white/5 bg-black/30 gap-4"
-                          style={{ minHeight: '700px' }}
-                        >
-                          <div className="h-14 w-14 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-gray-500">
-                            <IconFiles className="h-7 w-7" />
-                          </div>
-                          <div className="text-center">
-                            <p className="text-sm text-gray-300 font-semibold">{selectedEvidence.filename}</p>
-                            <p className="text-xs text-gray-600 mt-1">{ct || 'Unknown file type'}</p>
-                          </div>
+                    return (
+                      <>
+                        <div className="flex justify-between items-center mb-4 pb-3 border-b border-white/5 shrink-0">
+                          <h3 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Certificate Document</h3>
                           <a
                             href={fileUrl}
                             target="_blank"
                             rel="noreferrer"
-                            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600/10 border border-emerald-500/20 text-xs text-emerald-400 hover:bg-emerald-600/20 transition-all duration-200 cursor-pointer active:scale-95"
+                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 text-[10px] text-gray-400 hover:text-white hover:bg-white/10 transition-all duration-200 cursor-pointer active:scale-95"
                           >
-                            <IconArrowUpRight className="h-4 w-4" />
-                            Open / Download File
+                            <IconArrowUpRight className="h-3.5 w-3.5" />
+                            Open in Tab
                           </a>
                         </div>
-                      );
-                    }
+
+                        {/* Adaptive file renderer */}
+                        {ct.includes('pdf') ? (
+                          <iframe
+                            src={`${fileUrl}#zoom=100&toolbar=0`}
+                            title="Certificate PDF"
+                            className="flex-1 w-full rounded-xl border border-white/5 bg-black/30"
+                            style={{ minHeight: '700px' }}
+                          />
+                        ) : ct.startsWith('image/') ? (
+                          <div
+                            className="flex-1 flex items-center justify-center rounded-xl border border-white/5 bg-black/30 overflow-hidden"
+                            style={{ minHeight: '700px' }}
+                          >
+                            <img
+                              src={fileUrl}
+                              alt="Certificate document"
+                              className="max-w-full max-h-full object-contain"
+                            />
+                          </div>
+                        ) : (
+                          <div
+                            className="flex-1 flex flex-col items-center justify-center rounded-xl border border-white/5 bg-black/30 gap-4"
+                            style={{ minHeight: '700px' }}
+                          >
+                            <div className="h-14 w-14 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-gray-500">
+                              <IconFiles className="h-7 w-7" />
+                            </div>
+                            <div className="text-center">
+                              <p className="text-sm font-semibold text-white">Preview unavailable for this format</p>
+                              <p className="text-xs text-gray-500 mt-1">Download file to view the content details.</p>
+                            </div>
+                            <a
+                              href={fileUrl}
+                              download
+                              className="flex items-center gap-1.5 px-4.5 py-2 rounded-xl bg-emerald-600 text-xs font-semibold text-white hover:bg-emerald-500 transition-all duration-300 cursor-pointer active:scale-95 glow-success mt-2"
+                            >
+                              <IconDownload className="h-4 w-4" />
+                              Open / Download File
+                            </a>
+                          </div>
+                        )}
+                      </>
+                    );
                   })()}
                 </div>
               </section>
@@ -1213,7 +1213,7 @@ export default function Dashboard() {
                       <th className="py-3 px-4 uppercase tracking-wider text-[10px]">Supplier Name</th>
                       <th className="py-3 px-4 text-center uppercase tracking-wider text-[10px]">Certificates Audited</th>
                       <th className="py-3 px-4 text-right uppercase tracking-wider text-[10px]">Accumulated Spend (MYR)</th>
-                      <th className="py-3 px-4 text-right w-56 uppercase tracking-wider text-[10px]">Visual Spend Proportion</th>
+                      {/* <th className="py-3 px-4 text-right w-56 uppercase tracking-wider text-[10px]">Visual Spend Proportion</th> */}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/5">
@@ -1239,7 +1239,7 @@ export default function Dashboard() {
                             <td className="py-3 px-4 font-semibold text-white">{sc.name}</td>
                             <td className="py-3 px-4 text-center text-gray-300 font-medium tabular-nums">{sc.count}</td>
                             <td className="py-3 px-4 text-right font-mono font-semibold text-white tabular-nums">RM{sc.cost.toFixed(4)} MYR</td>
-                            <td className="py-3 px-4 text-right">
+                            {/* <td className="py-3 px-4 text-right">
                               <div className="w-full flex items-center justify-end gap-2.5">
                                 <div className="w-32 bg-white/5 h-2 rounded-full overflow-hidden border border-white/5 relative">
                                   <div
@@ -1249,7 +1249,7 @@ export default function Dashboard() {
                                 </div>
                                 <span className="text-[10px] text-gray-500 font-mono w-8 text-left tabular-nums">{percentageOfHighest.toFixed(0)}%</span>
                               </div>
-                            </td>
+                            </td> */}
                           </tr>
                         );
                       })

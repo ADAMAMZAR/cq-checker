@@ -128,10 +128,18 @@ async def run_audit(
     if screenshot:
         screenshot_filename = f"screenshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
         screenshot_path = os.path.join(supplier_dir, screenshot_filename)
+        screenshot_bytes = screenshot.file.read()
+        screenshot.file.seek(0)
+        
         with open(screenshot_path, "wb") as buffer:
-            shutil.copyfileobj(screenshot.file, buffer)
-        # Construct access URL
-        screenshot_url = f"/static/{safe_supplier_name}/{screenshot_filename}"
+            buffer.write(screenshot_bytes)
+            
+        if settings.supabase_url and settings.supabase_key:
+            screenshot_url = sheets.upload_file_to_supabase_storage(
+                screenshot_bytes, safe_supplier_name, screenshot_filename, "image/png"
+            )
+        else:
+            screenshot_url = f"/static/{safe_supplier_name}/{screenshot_filename}"
 
     # Save QA data as a JSON file locally in the supplier folder
     qa_data_path = os.path.join(supplier_dir, "qa_data.json")
@@ -200,12 +208,20 @@ async def run_audit(
                 file.content_type or "application/pdf"
             )
 
+        # Upload file to Supabase Storage if enabled
+        file_url = None
+        if settings.supabase_url and settings.supabase_key:
+            file_url = sheets.upload_file_to_supabase_storage(
+                file_bytes, safe_supplier_name, file.filename, file.content_type or "application/pdf"
+            )
+
         file_contexts.append({
             "filename": file.filename,
             "content_type": file.content_type or "application/octet-stream",
             "ariba_question_label": ariba_question_label,
             "ariba_qa_answers": ariba_qa_answers,
-            "file_hash": file_hash
+            "file_hash": file_hash,
+            "file_url": file_url
         })
         
         file_tasks.append(task)
@@ -244,7 +260,8 @@ async def run_audit(
             output_tokens=out_t,
             cost_usd=cost,
             cost_myr=cost * 4.70,
-            file_hash=ctx["file_hash"]
+            file_hash=ctx["file_hash"],
+            file_url=ctx.get("file_url")
         )
         doc_evidences.append(doc_evidence)
 

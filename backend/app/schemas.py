@@ -22,6 +22,7 @@ class DocumentEvidence(BaseModel):
     cost_usd: float = Field(default=0.0, description="Calculated USD cost of the extraction call")
     cost_myr: float = Field(default=0.0, description="Calculated MYR cost of the extraction call")
     file_hash: Optional[str] = Field(None, description="SHA-256 hash of the document bytes")
+    file_url: Optional[str] = Field(None, description="Supabase storage public file URL")
 
 class AuditLogEntry(BaseModel):
     audit_id: str = Field(..., description="Unique UUID for the audit run")

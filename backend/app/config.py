@@ -11,6 +11,12 @@ class Settings(BaseSettings):
     google_creds_path: str = Field(default="credentials.json", env="GOOGLE_CREDS_PATH")
     # Optional raw JSON string for credentials (useful for CI/CD or cloud deployment env vars)
     google_creds_json: str = Field(default="", env="GOOGLE_CREDS_JSON")
+    # Google Apps Script Web App Configuration (optional alternative to service accounts)
+    google_apps_script_url: str = Field(default="", env="GOOGLE_APPS_SCRIPT_URL")
+
+    # Supabase Configuration
+    supabase_url: str = Field(default="", env="SUPABASE_URL")
+    supabase_key: str = Field(default="", env="SUPABASE_KEY")
 
     # Vertex AI Configuration
     vertex_project: str = Field(default="", env="VERTEX_PROJECT")

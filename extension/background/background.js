@@ -508,8 +508,9 @@ async function captureFullPageScreenshot(tabId) {
 
         try {
           chrome.debugger.sendCommand({ tabId: tabId }, 'Page.getLayoutMetrics', {}, (metrics) => {
-            const width = Math.ceil(metrics.cssContentSize.width);
-            const height = Math.ceil(metrics.cssContentSize.height);
+            // Cap dimensions to prevent GPU texture tiling limits from glitching/repeating the image
+            const width = Math.max(1280, Math.ceil(metrics.cssContentSize.width || 1280));
+            const height = Math.min(2500, Math.max(800, Math.ceil(metrics.cssContentSize.height || 1000)));
 
             chrome.debugger.sendCommand({ tabId: tabId }, 'Emulation.setDeviceMetricsOverride', {
               width: width,
