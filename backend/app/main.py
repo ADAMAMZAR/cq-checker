@@ -64,7 +64,7 @@ def get_evidence():
 def update_evidence(payload: UpdateEvidenceRequest):
     """
     Updates the extracted certificate details (JSON metadata) for a specific document evidence
-    record identified by its Audit ID and Filename.
+    record identified by its Audit ID and Filename, and re-runs the comparison table audit.
     """
     success = sheets.update_document_evidence(
         audit_id=payload.audit_id,
@@ -76,7 +76,59 @@ def update_evidence(payload: UpdateEvidenceRequest):
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Matching document evidence record not found or update failed."
         )
-    return {"status": "success", "message": "Document evidence updated successfully in Google Sheets."}
+
+    # Re-run comparison audit for all evidence attached to this audit_id
+    recalculated_result = None
+    recalculated_comment = None
+    recalculated_comp_table = None
+
+    try:
+        all_evidence = sheets.get_document_evidence_logs()
+        matching_docs = [doc for doc in all_evidence if str(doc.audit_id).strip() == str(payload.audit_id).strip()]
+
+        if matching_docs:
+            supplier_name = matching_docs[0].supplier_name
+            file_contexts = []
+            extracted_results = []
+
+            for doc in matching_docs:
+                file_contexts.append({
+                    "filename": doc.filename,
+                    "ariba_question_label": gemini.clean_question_label(doc.ariba_question_label),
+                    "ariba_qa_answers": doc.ariba_qa_answers
+                })
+                if doc.filename == payload.filename:
+                    extracted_results.append(payload.updated_metadata)
+                else:
+                    try:
+                        meta = json.loads(doc.gemini_extracted_metadata)
+                    except Exception:
+                        meta = {}
+                    extracted_results.append(meta)
+
+            recalculated_result, recalculated_comment, recalculated_comp_table = gemini.run_programmatic_audit(
+                supplier_name,
+                file_contexts,
+                extracted_results
+            )
+
+            # Update Audit_Results database log with recalculated comparison table & verdict
+            sheets.update_audit_result(
+                audit_id=payload.audit_id,
+                result=recalculated_result,
+                suggested_comment=recalculated_comment,
+                comparison_table=recalculated_comp_table
+            )
+    except Exception as e:
+        print(f"Warning: Failed to recalculate comparison table after evidence update: {e}")
+
+    return {
+        "status": "success",
+        "message": "Document evidence updated successfully.",
+        "audit_result": recalculated_result,
+        "suggested_comment": recalculated_comment,
+        "comparison_table": recalculated_comp_table
+    }
 
 @app.post("/api/test/extract")
 async def test_extract_file(file: UploadFile = File(...)):
@@ -181,7 +233,7 @@ async def run_audit(
     if qa_list:
         for block in qa_list:
             attached = block.get("attachedFile", "").strip()
-            q_label = block.get("questionLabel", "General Question")
+            q_label = gemini.clean_question_label(block.get("questionLabel", "General Question"))
             q_answers = json.dumps(block.get("answers", []))
             
             matching_file_tuple = None

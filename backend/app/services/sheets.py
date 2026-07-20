@@ -113,7 +113,7 @@ def parse_dynamic_log_fields(compiled_extracted_data: str, suggested_comment: st
     """
     # 1. result
     result = "Match"
-    if "Mismatch" in suggested_comment:
+    if "Mismatch" in suggested_comment or "revise" in suggested_comment.lower():
         result = "Mismatch"
 
     # 2. expiration_date and cert_type

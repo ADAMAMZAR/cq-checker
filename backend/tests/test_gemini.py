@@ -145,12 +145,44 @@ def test_run_programmatic_audit():
 
     # Now that year of publication falls back to 4-digit effectiveDate year ('2026'), it matches with QA '2026', making the overall verdict 'Match'
     assert verdict == "Match"
-    assert "Supplier: MUDA CONSULT SDN BHD" in comment
-    assert "1.3 Board of Engineers Malaysia (BEM)" in comment
+    assert comment == "All match."
     assert comp_table["supplier_name"] == supplier_name
     assert len(comp_table["tables"]) == 1
     assert comp_table["tables"][0]["question_label"] == "1.3 Board of Engineers Malaysia (BEM)"
     assert "attached_file" in comp_table["tables"][0]
-    assert "| Certificate Type | Board of Engineers Malaysia (BEM) | Board of Engineers Malaysia (BEM) | Match |" in comment
-    assert "| Year of Publication | 2026 | 2026 | Match |" in comment
+
+def test_run_programmatic_audit_mismatch():
+    supplier_name = "MUDA CONSULT SDN BHD"
+    file_contexts = [{
+        "ariba_question_label": "1.3 Board of Engineers Malaysia (BEM)",
+        "filename": "cert_bem.pdf",
+        "ariba_qa_answers": json.dumps([
+            {"label": "Certificate Type", "value": "Wrong Type"},
+            {"label": "Issuer", "value": "Lembaga Jurutera Malaysia"},
+            {"label": "Year of publication", "value": "2026"},
+            {"label": "Certificate Number", "value": "2611-BC-1195"},
+            {"label": "Certificate Location", "value": "Malaysia"},
+            {"label": "Effective Date", "value": "01/01/2026"},
+            {"label": "Expiration Date", "value": "31/12/2026"}
+        ])
+    }]
+    extraction_results = [{
+        "certificateType": "Board of Engineers Malaysia (BEM)",
+        "certificateOwnerName": "MUDA CONSULT SDN BHD",
+        "issuerName": "Lembaga Jurutera Malaysia",
+        "certificateNumber": "2611-BC-9999", # Mismatch!
+        "certificateLocation": "Selangor, Malaysia",
+        "effectiveDate": "01/01/2026",
+        "expirationDate": "31/12/2026"
+    }]
+
+    verdict, comment, comp_table = gemini.run_programmatic_audit(supplier_name, file_contexts, extraction_results)
+
+    assert verdict == "Mismatch"
+    assert "Dear Sir/Madam," in comment
+    assert "We seek for your resubmission for the following in Part 2: Modular Certificates Questionnaire:" in comment
+    assert "1.3 Board of Engineers Malaysia (BEM) (cert_bem.pdf)" in comment
+    assert '- Please revise the certificate type to "Board of Engineers Malaysia (BEM)"' in comment
+    assert '- Please revise the certificate number to "2611-BC-9999"' in comment
+    assert "Thank you." in comment
 

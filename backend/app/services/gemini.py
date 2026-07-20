@@ -87,13 +87,13 @@ EXTRACTION_SCHEMA = {
 # For comparison_table return: a markdown table with headers (Field Name | QA Value | Certificate Value | Status).
 # """
 
-def extract_certificate_data(file_bytes: bytes, mime_type: str, question_label: Optional[str] = None) -> tuple[Dict[str, Any], int, int, float]:
+def _run_extraction(file_bytes: bytes, mime_type: str, question_label: Optional[str] = None) -> tuple[Dict[str, Any], int, int, float]:
     """
-    Calls Gemini 2.5 Flash to perform OCR and extract certificate data as JSON.
+    Internal "Worker" function. Calls Gemini 1.5 Flash to perform OCR and extract certificate data as JSON.
     Returns: (extracted_data_dict, input_tokens, output_tokens, cost_usd)
     """
     if not settings.gemini_api_key:
-        logger.warning("Gemini API key is not configured. Returning empty structure.")
+        logger.warning("Gemini API key is not configured. Returning mock extraction data.")
         mock_data = {
             "certificateOwnerName": "MOCK SUPPLIER",
             "issuerName": "MOCK ISSUER",
@@ -107,7 +107,7 @@ def extract_certificate_data(file_bytes: bytes, mime_type: str, question_label: 
         return mock_data, 150, 45, calculate_cost(150, 45)
 
     try:
-        # Use gemini-2.5-flash-lite for cost-efficient OCR extraction
+        # Use gemini-1.5-flash for cost-efficient and capable OCR extraction
         model = genai.GenerativeModel("gemini-2.5-flash-lite")
         
         section_context = f" for the section '{question_label}'" if question_label else ""
@@ -159,7 +159,7 @@ def extract_certificate_data(file_bytes: bytes, mime_type: str, question_label: 
         
         return data, in_tokens, out_tokens, cost
     except Exception as e:
-        logger.error(f"Error during Gemini certificate extraction: {e}")
+        logger.error(f"Error during initial Gemini certificate extraction: {e}")
         fallback_data = {
             "certificateOwnerName": "Extraction Failed",
             "issuerName": "N/A",
@@ -172,68 +172,78 @@ def extract_certificate_data(file_bytes: bytes, mime_type: str, question_label: 
         }
         return fallback_data, 0, 0, 0.0
 
-# def run_audit_comparison(qa_text: str, compiled_json_text: str) -> tuple[Dict[str, Any], int, int, float]:
-#     """
-#     Calls Gemini 3.5 Flash to compare extracted certificate metadata with QA input fields, returning structured results.
-#     Returns: (comparison_dict, input_tokens, output_tokens, cost_usd)
-#     """
-#     if not settings.gemini_api_key:
-#         logger.warning("Gemini API key is not configured. Returning mock comparison report.")
-#         mock_data = {
-#             "result": "Match",
-#             "expiration_date": "2029-12-31",
-#             "suggested_comment": "Audit passed. Document matches questionnaire requirements (Mock API Mode).",
-#             "comparison_table": (
-#                 "| Field Name | QA Form Value | Certificate Value | Status |\n"
-#                 "|---|---|---|---|\n"
-#                 "| Supplier Name | Mock Supplier Ltd | Mock Supplier Ltd | Match |\n"
-#                 "| Certificate Type | QSHE | QSHE | Match |\n"
-#                 "| Expiration Date | 2029-12-31 | 2029-12-31 | Match |"
-#             )
-#         }
-#         return mock_data, 450, 120, calculate_cost(450, 120)
-# 
-#     try:
-#         # Using gemini-3.5-flash for the text auditing comparison
-#         model = genai.GenerativeModel(
-#             "gemini-3.5-flash",
-#             system_instruction=DEFAULT_SYSTEM_INSTRUCTION
-#         )
-#         
-#         prompt = (
-#             f"Please compare the following QA Data Form and Evidence Document JSON:\n\n"
-#             f"QA Data Form:\n{qa_text}\n\n"
-#             f"Evidence Document JSON:\n{compiled_json_text}"
-#         )
-#         
-#         response = model.generate_content(
-#             prompt,
-#             generation_config={
-#                 "temperature": 0.3,                      # slight flexibility for natural comment phrasing
-#                 "response_mime_type": "application/json",
-#                 "response_schema": COMPARISON_SCHEMA,    # enforce result enum + required keys
-#             }
-#         )
-#         
-#         data = json.loads(response.text.strip())
-#         
-#         # Extract usage metadata
-#         usage = response.usage_metadata
-#         in_tokens = usage.prompt_token_count if usage else 0
-#         out_tokens = usage.candidates_token_count if usage else 0
-#         cost = calculate_cost(in_tokens, out_tokens, COMPARISON_INPUT_RATE, COMPARISON_OUTPUT_RATE)
-#         
-#         return data, in_tokens, out_tokens, cost
-#     except Exception as e:
-#         logger.error(f"Error during Gemini audit comparison: {e}")
-#         fallback_data = {
-#             "result": "Mismatch",
-#             "expiration_date": "N/A",
-#             "suggested_comment": f"Audit comparison failed due to server error: {e}",
-#             "comparison_table": "| Status |\n|---|\n| Error running comparison |"
-#         }
-#         return fallback_data, 0, 0, 0.0
+def _run_verification(file_bytes: bytes, mime_type: str, initial_data: Dict[str, Any]) -> tuple[Dict[str, Any], int, int, float]:
+    """
+    Internal "Judge" function. Takes initial data and verifies it against the document, returning a corrected version.
+    Returns: (verified_data_dict, input_tokens, output_tokens, cost_usd)
+    """
+    if not settings.gemini_api_key:
+        logger.warning("Gemini API key not configured. Skipping verification.")
+        return initial_data, 0, 0, 0.0
 
+    try:
+        # Use gemini-1.5-flash as it's capable and cost-effective for this task.
+        # For higher stakes, you could swap this with "gemini-1.5-pro".
+        model = genai.GenerativeModel("gemini-2.5-flash-lite")
+
+        initial_json_str = json.dumps(initial_data, indent=2)
+
+        prompt = (
+            "You are a meticulous quality assurance auditor. Your task is to verify the accuracy of extracted data against the provided document. "
+            "Review the document and the `INITIAL_EXTRACTED_DATA` JSON object. "
+            "1. For each field, check if the value in the JSON is correct based on the document. "
+            "2. If you find any errors, inaccuracies, or missing information, correct them. "
+            "3. If all data is perfectly correct, return the original data. "
+            "4. Ensure dates are in DD/MM/YYYY format. "
+            "5. Your final output MUST be only the corrected and complete JSON object, adhering to the required schema."
+            f"\n\nINITIAL_EXTRACTED_DATA:\n```json\n{initial_json_str}\n```"
+        )
+
+        response = model.generate_content(
+            [
+                prompt,
+                {"mime_type": mime_type, "data": file_bytes}
+            ],
+            generation_config={
+                "temperature": 0,
+                "response_mime_type": "application/json",
+                "response_schema": EXTRACTION_SCHEMA
+            }
+        )
+
+        verified_data = json.loads(response.text.strip())
+
+        usage = response.usage_metadata
+        in_tokens = usage.prompt_token_count if usage else 0
+        out_tokens = usage.candidates_token_count if usage else 0
+        cost = calculate_cost(in_tokens, out_tokens, EXTRACTION_INPUT_RATE, EXTRACTION_OUTPUT_RATE)
+
+        return verified_data, in_tokens, out_tokens, cost
+
+    except Exception as e:
+        logger.error(f"Error during Gemini verification step: {e}. Falling back to initial data.")
+        # If the judge fails, we still have the worker's output.
+        return initial_data, 0, 0, 0.0
+
+def extract_certificate_data(file_bytes: bytes, mime_type: str, question_label: Optional[str] = None) -> tuple[Dict[str, Any], int, int, float]:
+    """
+    Orchestrator function. Performs a two-step "worker" and "judge" extraction to improve accuracy.
+    1. Runs an initial extraction.
+    2. Runs a second verification pass to correct any errors.
+    Returns the final, verified data and the combined token/cost usage.
+    """
+    # Step 1: Initial Extraction (Worker)
+    initial_data, in1, out1, cost1 = _run_extraction(file_bytes, mime_type, question_label)
+
+    # If the first step fails, don't proceed to verification.
+    if initial_data.get("certificateOwnerName") == "Extraction Failed":
+        return initial_data, in1, out1, cost1
+
+    # Step 2: Verification (Judge)
+    verified_data, in2, out2, cost2 = _run_verification(file_bytes, mime_type, initial_data)
+
+    # Return the verified data with combined usage stats
+    return verified_data, (in1 + in2), (out1 + out2), (cost1 + cost2)
 
 def check_keyword_match(val_evidence: str, val_qa: str) -> str:
     def clean(s: str) -> str:
@@ -282,6 +292,19 @@ def normalize_date(s: str) -> str:
             continue
     return s
 
+def clean_question_label(label: Optional[str]) -> str:
+    """
+    Cleans Ariba question labels by stripping noisy text after dashes (e.g. instructions).
+    Example: '2.6 Certificate of Currency for Workers\' Compensation (QLD) - Please select YES...'
+    Returns: '2.6 Certificate of Currency for Workers\' Compensation (QLD)'
+    """
+    if not label:
+        return "General Attachment"
+    label = label.strip()
+    parts = re.split(r'\s+[-–—]\s*|\s*[-–—]\s+', label, maxsplit=1)
+    cleaned = parts[0].strip() if parts else label
+    return cleaned or "General Attachment"
+
 
 def run_programmatic_audit(supplier_name: str, file_contexts: List[Dict[str, Any]], extraction_results: List[Dict[str, Any]]) -> tuple[str, str, dict]:
     """
@@ -289,7 +312,7 @@ def run_programmatic_audit(supplier_name: str, file_contexts: List[Dict[str, Any
     Returns: (overall_verdict, suggested_comment, comparison_table_dict)
     """
     overall_verdict = "Match"
-    comment_lines = [f"Supplier: {supplier_name}"]
+    mismatch_blocks = []
     
     comparison_table_dict = {
         "supplier_name": supplier_name,
@@ -299,7 +322,7 @@ def run_programmatic_audit(supplier_name: str, file_contexts: List[Dict[str, Any
     # Sort comparison pairs by question label number prefix (e.g. 1.1, 1.2, 1.3)
     pairs = list(zip(file_contexts, extraction_results))
     def get_sort_key(pair):
-        label = pair[0].get("ariba_question_label", "General Attachment").strip()
+        label = clean_question_label(pair[0].get("ariba_question_label", "General Attachment"))
         match = re.match(r'^(\d+(?:\.\d+)*)', label)
         if match:
             try:
@@ -309,8 +332,19 @@ def run_programmatic_audit(supplier_name: str, file_contexts: List[Dict[str, Any
         return [999]
     pairs.sort(key=get_sort_key)
 
+    field_display_names = {
+        "Certificate Type": "certificate type",
+        "Supplier Name": "supplier name",
+        "Issuer": "issuer",
+        "Year of Publication": "year of publication",
+        "Certificate Number": "certificate number",
+        "Certificate Location": "certificate location",
+        "Effective Date": "effective date",
+        "Expiration Date": "expiration date"
+    }
+
     for ctx, extracted_data in pairs:
-        question_label = ctx.get("ariba_question_label", "General Attachment")
+        question_label = clean_question_label(ctx.get("ariba_question_label", "General Attachment"))
         qa_answers_str = ctx.get("ariba_qa_answers", "[]")
 
         qa_answers_list = []
@@ -399,17 +433,6 @@ def run_programmatic_audit(supplier_name: str, file_contexts: List[Dict[str, Any
             overall_verdict = "Mismatch"
         table_rows.append(("Expiration Date", ev_val, qa_val, res))
 
-        # Build markdown table
-        table_lines = [
-            f"\n{question_label}",
-            "| Field | Value in Evidence | Value in QA Data | Result |",
-            "|---|---|---|---|"
-        ]
-        for field, ev, qa, r in table_rows:
-            table_lines.append(f"| {field} | {ev} | {qa} | {r} |")
-
-        comment_lines.append("\n".join(table_lines))
-
         # Build structured JSON dict for frontend
         table_dict = {
             "question_label": question_label,
@@ -425,7 +448,28 @@ def run_programmatic_audit(supplier_name: str, file_contexts: List[Dict[str, Any
             })
         comparison_table_dict["tables"].append(table_dict)
 
-    suggested_comment = "\n\n".join(comment_lines)
+        # Collect mismatches for this specific document/question label
+        mismatch_sentences = []
+        for field, ev, qa, r in table_rows:
+            if r == "Mismatch":
+                disp_name = field_display_names.get(field, field.lower())
+                mismatch_sentences.append(f"- Please revise the {disp_name} to \"{ev}\"")
+        
+        if mismatch_sentences:
+            filename = ctx.get("filename", "")
+            header = f"{question_label} ({filename})" if filename else question_label
+            block = f"{header}\n" + "\n".join(mismatch_sentences)
+            mismatch_blocks.append(block)
+
+    if overall_verdict == "Match":
+        suggested_comment = "All match."
+    else:
+        blocks_text = "\n\n".join(mismatch_blocks)
+        suggested_comment = (
+            "Dear Sir/Madam,\n\n"
+            "We seek for your resubmission for the following in Part 2: Modular Certificates Questionnaire:\n\n"
+            f"{blocks_text}\n\n"
+            "Thank you."
+        )
+
     return overall_verdict, suggested_comment, comparison_table_dict
-
-
