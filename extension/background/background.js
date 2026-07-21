@@ -76,31 +76,6 @@ function cleanName(n) {
     .trim();
 }
 
-function uint8ArrayToBase64(bytes) {
-  let binary = '';
-  const len = bytes.byteLength;
-  const chunk = 8192;
-  for (let i = 0; i < len; i += chunk) {
-    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
-  }
-  return btoa(binary);
-}
-
-async function blobToDataUrl(blob) {
-  const arrayBuffer = await blob.arrayBuffer();
-  const bytes = new Uint8Array(arrayBuffer);
-  const base64 = uint8ArrayToBase64(bytes);
-  return `data:${blob.type};base64,${base64}`;
-}
-
-// Disk save queue lock to protect memory usage during base64 conversions
-let _diskSaveLock = Promise.resolve();
-function withDiskSaveLock(fn) {
-  const run = _diskSaveLock.then(fn, fn);
-  _diskSaveLock = run.then(() => { }, () => { });
-  return run;
-}
-
 async function hashArrayBuffer(buffer) {
   const digest = await crypto.subtle.digest('SHA-256', buffer);
   return Array.from(new Uint8Array(digest))
@@ -162,12 +137,11 @@ async function handleAuditData(tabId, data) {
 
   try {
     // Step 1: Download attachments into RAM & Disk first
-    notifyPanel('Downloading attachments into RAM & Disk...');
-    notifyAribaTab(tabId, 'Downloading attachments into RAM & Disk...');
+    notifyPanel('Downloading attachments into RAM...');
+    notifyAribaTab(tabId, 'Downloading attachments into RAM...');
 
     const DOWNLOAD_CONCURRENCY = 4;
     const fileBlobs = [];
-    const diskDownloadIds = [];
     const usedFilenames = new Set();
     const seenHashes = new Map();
 
@@ -247,29 +221,6 @@ async function handleAuditData(tabId, data) {
 
         if (stopSignal.aborted) throw new Error('Stopped by user.');
 
-        // Save original file to disk inside withDiskSaveLock
-        try {
-          await withDiskSaveLock(async () => {
-            const rawDataUrl = await blobToDataUrl(blob);
-            await new Promise((resolve) => {
-              const destFilename = `${DOWNLOAD_ROOT}/${s}/${s} - ${cleanName(realFilename)}`;
-              chrome.downloads.download({ url: rawDataUrl, filename: destFilename, saveAs: false }, (downloadId) => {
-                if (chrome.runtime.lastError || downloadId === undefined) {
-                  const errMsg = chrome.runtime.lastError?.message || 'Unknown download error';
-                  console.error(`[Ariba SW] Disk save failed for ${realFilename}:`, errMsg);
-                  notifyPanel(`Disk save failed for "${realFilename}": ${errMsg}`, true);
-                } else {
-                  diskDownloadIds.push(downloadId);
-                }
-                resolve();
-              });
-            });
-          });
-        } catch (diskErr) {
-          console.error(`[Ariba SW] Disk save failed for ${realFilename}:`, diskErr);
-          notifyPanel(`Disk save exception for "${realFilename}": ${diskErr.message}`, true);
-        }
-
       } catch (err) {
         if (err.message === 'Stopped by user.') throw err;
         notifyPanel(`Failed to fetch file "${realFilename}": ${err.message}`, true);
@@ -323,72 +274,6 @@ async function handleAuditData(tabId, data) {
     chrome.tabs.sendMessage(tabId, { action: 'showOverlay' }).catch(() => {});
 
     if (stopSignal.aborted) throw new Error('Stopped by user.');
-
-    // Step 3: Save remaining logs and evidence to disk locally FIRST
-    notifyPanel('Consolidating files and audit reports to local disk...');
-
-    // Save QA data as raw JSON structured with metadata
-    if (extractedQAData.length > 0) {
-      const jsonDump = {
-        supplierName: s,
-        rawSupplierName: rawSupplierName,
-        workspaceTitle: workspaceTitle,
-        extractedQAData: extractedQAData
-      };
-      const jsonBlob = new Blob([JSON.stringify(jsonDump, null, 2)], { type: 'application/json' });
-      try {
-        await withDiskSaveLock(async () => {
-          const jsonDataUrl = await blobToDataUrl(jsonBlob);
-          const destJsonFilename = `${DOWNLOAD_ROOT}/${s}/qa_data.json`;
-          await new Promise((resolve) => {
-            chrome.downloads.download({ url: jsonDataUrl, filename: destJsonFilename, saveAs: false }, (downloadId) => {
-              if (chrome.runtime.lastError || downloadId === undefined) {
-                const errMsg = chrome.runtime.lastError?.message || 'Unknown download error';
-                console.error('[Ariba SW] QA JSON save failed:', errMsg);
-                notifyPanel(`QA JSON save failed: ${errMsg}`, true);
-              } else {
-                notifyPanel(`Saved Q&A JSON: qa_data.json`);
-                notifyAribaTab(tabId, `Saved Q&A JSON → ${destJsonFilename}`);
-              }
-              resolve();
-            });
-          });
-        });
-      } catch (err) {
-        console.error('[Ariba SW] QA JSON save failed:', err);
-        notifyPanel(`QA JSON save exception: ${err.message}`, true);
-      }
-    } else {
-      notifyPanel('Scraped Q&A form data is empty. Skipping Q&A files saving.', false);
-    }
-
-    // Save screenshot (JPEG)
-    if (screenshotBlob) {
-      try {
-        await withDiskSaveLock(async () => {
-          const screenshotDataUrl = await blobToDataUrl(screenshotBlob);
-          const destImgFilename = `${DOWNLOAD_ROOT}/${s}/${s} - Screenshot.jpeg`;
-          await new Promise((resolve) => {
-            chrome.downloads.download({ url: screenshotDataUrl, filename: destImgFilename, saveAs: false }, (downloadId) => {
-              if (chrome.runtime.lastError || downloadId === undefined) {
-                const errMsg = chrome.runtime.lastError?.message || 'Unknown download error';
-                console.error('[Ariba SW] Screenshot save failed:', errMsg);
-                notifyPanel(`Screenshot save failed: ${errMsg}`, true);
-              } else {
-                notifyPanel(`Saved Verification Screenshot: ${s} - Screenshot.jpeg`);
-                notifyAribaTab(tabId, `Saved Screenshot → ${destImgFilename}`);
-              }
-              resolve();
-            });
-          });
-        });
-      } catch (err) {
-        console.error('[Ariba SW] Screenshot save failed:', err);
-        notifyPanel(`Screenshot save exception: ${err.message}`, true);
-      }
-    } else {
-      notifyPanel('No screenshot captured. Skipping screenshot save.', true);
-    }
 
     if (stopSignal.aborted) throw new Error('Stopped by user.');
 

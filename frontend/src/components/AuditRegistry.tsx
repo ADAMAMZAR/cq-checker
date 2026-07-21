@@ -505,7 +505,7 @@ function JsonComparisonTables({
             t.attached_file.toLowerCase().includes(doc.name.toLowerCase()) ||
             doc.name.toLowerCase().includes(t.attached_file.toLowerCase())
           ) : null;
-        const pdfUrl = matchingDoc ? `http://127.0.0.1:8000${matchingDoc.url}` : null;
+        const pdfUrl = matchingDoc ? `http://127.0.0.1:8000/api/files/${btoa(matchingDoc.url).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_')}` : null;
 
         return (
           <div key={tIdx}
@@ -741,7 +741,9 @@ function EvidenceTab({ log, assets, assetsLoading, evidenceLogs, onScreenshotCli
     <div className="flex-1 flex flex-col gap-6 overflow-y-auto max-h-[620px] pr-2">
       <div className="space-y-6">
         {(() => {
-          const matchingEvidence = evidenceLogs.filter(e => e.audit_id === log.audit_id);
+          const matchingEvidence = evidenceLogs.filter(e =>
+            e.supplier_name.toLowerCase() === (log.supplier_name || log.comparison_table?.supplier_name || "").toLowerCase()
+          );
           const visibleDocs = assets.documents.filter(doc => doc.name.toLowerCase() !== "qa_data.json");
           const parsedQA = matchingEvidence.map(e => {
             let answers = [];

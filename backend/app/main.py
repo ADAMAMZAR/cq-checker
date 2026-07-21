@@ -9,12 +9,11 @@ os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 import hashlib
 import json
 import asyncio
-import shutil
+import requests
 from datetime import datetime
 from typing import List, Optional
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.schemas import AuditLogEntry, AuditResultResponse, DocumentEvidence, UpdateEvidenceRequest
@@ -37,8 +36,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Serve uploaded screenshots and documents as static files for dashboard preview
-app.mount("/static", StaticFiles(directory=settings.upload_dir), name="static")
+# Static file serving is no longer needed — Supabase Storage serves files via public URLs
 
 @app.get("/")
 def read_root():
@@ -173,8 +171,6 @@ async def extract_documents(
                      (falls back to alphanumeric-only sanitization if not provided).
     """
     safe_supplier_name = supplier_folder or "".join(c for c in supplier_name if c.isalnum() or c in (" ", "_", "-")).strip()
-    supplier_dir = os.path.join(settings.upload_dir, safe_supplier_name)
-    os.makedirs(supplier_dir, exist_ok=True)
 
     saved_filenames = []
     file_bytes_map = {}
@@ -183,9 +179,6 @@ async def extract_documents(
     for file in files:
         file_bytes = await file.read()
         await file.seek(0)
-        file_path = os.path.join(supplier_dir, file.filename)
-        with open(file_path, "wb") as buffer:
-            buffer.write(file_bytes)
         saved_filenames.append(file.filename)
         file_bytes_map[file.filename.lower()] = file_bytes
         file_content_type_map[file.filename.lower()] = file.content_type or "application/pdf"
@@ -193,21 +186,12 @@ async def extract_documents(
     screenshot_url = None
     if screenshot:
         screenshot_filename = f"screenshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-        screenshot_path = os.path.join(supplier_dir, screenshot_filename)
         screenshot_bytes = screenshot.file.read()
         screenshot.file.seek(0)
-        with open(screenshot_path, "wb") as buffer:
-            buffer.write(screenshot_bytes)
         if settings.supabase_url and settings.supabase_key:
             screenshot_url = sheets.upload_file_to_supabase_storage(
                 screenshot_bytes, safe_supplier_name, screenshot_filename, "image/png"
             )
-        else:
-            screenshot_url = f"/static/{safe_supplier_name}/{screenshot_filename}"
-
-    qa_data_path = os.path.join(supplier_dir, "qa_data.json")
-    with open(qa_data_path, "w", encoding="utf-8") as f:
-        f.write(qa_data)
 
     temp_audit_id = f"TEMP_{uuid.uuid4()}"
     timestamp = datetime.now().strftime("%d/%m/%Y, %H:%M:%S")
@@ -469,25 +453,16 @@ async def run_audit(
                      (falls back to alphanumeric-only sanitization if not provided).
     """
     safe_supplier_name = supplier_folder or "".join(c for c in supplier_name if c.isalnum() or c in (" ", "_", "-")).strip()
-    supplier_dir = os.path.join(settings.upload_dir, safe_supplier_name)
-    os.makedirs(supplier_dir, exist_ok=True)
     
-    # Save the files and keep their bytes in memory
+    # Keep file bytes in memory for processing
     saved_filenames = []
     file_bytes_map = {}  # filename_lower -> bytes
     file_content_type_map = {}
     
     for file in files:
-        # Read the file bytes asynchronously
         file_bytes = await file.read()
         await file.seek(0)
-        
-        file_path = os.path.join(supplier_dir, file.filename)
-        with open(file_path, "wb") as buffer:
-            buffer.write(file_bytes)
         saved_filenames.append(file.filename)
-        
-        # Store in map (lowercased key for matching)
         file_bytes_map[file.filename.lower()] = file_bytes
         file_content_type_map[file.filename.lower()] = file.content_type or "application/pdf"
         
@@ -495,24 +470,12 @@ async def run_audit(
     screenshot_url = None
     if screenshot:
         screenshot_filename = f"screenshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-        screenshot_path = os.path.join(supplier_dir, screenshot_filename)
         screenshot_bytes = screenshot.file.read()
         screenshot.file.seek(0)
-        
-        with open(screenshot_path, "wb") as buffer:
-            buffer.write(screenshot_bytes)
-            
         if settings.supabase_url and settings.supabase_key:
             screenshot_url = sheets.upload_file_to_supabase_storage(
                 screenshot_bytes, safe_supplier_name, screenshot_filename, "image/png"
             )
-        else:
-            screenshot_url = f"/static/{safe_supplier_name}/{screenshot_filename}"
-
-    # Save QA data as a JSON file locally in the supplier folder
-    qa_data_path = os.path.join(supplier_dir, "qa_data.json")
-    with open(qa_data_path, "w", encoding="utf-8") as f:
-        f.write(qa_data)
 
     # Relational Database Auditing Setup (Initial temp ID)
     temp_audit_id = f"TEMP_{uuid.uuid4()}"
@@ -759,29 +722,43 @@ async def run_audit(
 @app.get("/api/logs/{supplier_name}/assets")
 def get_supplier_assets(supplier_name: str):
     """
-    Scans the local storage uploads directory for files and screenshots
-    belonging to a specific supplier name.
+    Returns documents and screenshots for a supplier from Supabase Storage via file_urls in the DB.
     """
-    safe_supplier_name = "".join(c for c in supplier_name if c.isalnum() or c in (" ", "_", "-")).strip()
-    supplier_dir = os.path.join(settings.upload_dir, safe_supplier_name)
-    
-    if not os.path.exists(supplier_dir):
-        return {"screenshots": [], "documents": []}
-        
-    files = os.listdir(supplier_dir)
-    screenshots = []
-    documents = []
-    
-    for f in files:
-        file_path = f"/static/{safe_supplier_name}/{f}"
-        if f.startswith("screenshot_") and f.endswith(".png"):
-            screenshots.append(file_path)
-        elif not f.startswith(".") and f != "dummy_cert.pdf":
-            documents.append({
-                "name": f,
-                "url": file_path
-            })
-            
+    screenshots = sheets.get_screenshot_urls_by_supplier(supplier_name)
+    documents = sheets.get_evidence_urls_by_supplier(supplier_name)
     return {"screenshots": screenshots, "documents": documents}
+
+
+@app.get("/api/files/{encoded_url:path}")
+def proxy_supabase_file(encoded_url: str):
+    """
+    Proxies a file from Supabase Storage through the backend.
+    The frontend passes the Supabase Storage URL base64-encoded (url-safe, no padding).
+    """
+    try:
+        import base64
+        # Add padding back if needed
+        padded = encoded_url + "=" * ((4 - len(encoded_url) % 4) % 4)
+        url = base64.urlsafe_b64decode(padded).decode("utf-8")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid URL encoding: {e}")
+
+    try:
+        resp = requests.get(url, timeout=30, headers={"User-Agent": "GPO-Auditor/1.0"})
+        resp.raise_for_status()
+        filename = url.split("/")[-1].split("?")[0]
+        from urllib.parse import unquote
+        filename = unquote(filename)
+        content_type = resp.headers.get("content-type", "application/octet-stream")
+        from fastapi.responses import Response
+        return Response(content=resp.content, media_type=content_type,
+                        headers={
+                            "Content-Disposition": f'inline; filename="{filename}"',
+                            "Access-Control-Allow-Origin": "*",
+                        })
+    except requests.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"Storage fetch failed: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch file: {e}")
 
 

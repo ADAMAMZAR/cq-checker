@@ -34,13 +34,7 @@ from app.services import sheets, auditor
 def get_db_backend() -> str:
     if settings.supabase_url and settings.supabase_key:
         return "supabase"
-    if settings.google_apps_script_url:
-        return "apps_script"
-    try:
-        sheets.get_sheets_client()
-        return "google_sheets"
-    except Exception:
-        return "unknown"
+    return "unknown"
 
 
 def build_audit_context(doc: DocumentEvidence) -> tuple:
@@ -67,50 +61,16 @@ def detect_qa_title_from_docs(docs: List[DocumentEvidence]) -> str:
     return " ".join(titles)
 
 
-def read_local_qa_json(supplier_name: str) -> str:
-    """Try to read workspaceTitle from the local qa_data.json file."""
-    from pathlib import Path
-    safe = "".join(c for c in supplier_name if c.isalnum() or c in (" ", "_", "-")).strip()
-    qa_path = Path("uploads") / safe / "qa_data.json"
-    if qa_path.exists():
-        try:
-            with open(str(qa_path), encoding="utf-8") as f:
-                data = json.load(f)
-            if isinstance(data, dict):
-                return data.get("workspaceTitle", "") or ""
-        except Exception:
-            pass
-    return ""
-
-
 def build_workspace_map(audit_logs, all_evidence) -> dict:
     """Build a mapping of audit_id -> workspace_title.
-    Tries (1) complete_qa_data_dump JSON, (2) local qa_data.json files, (3) workspace_title field.
+    Reads workspace_title directly from audit log entries (now stored in DB).
     """
     wm = {}
     for log in audit_logs:
         aid = str(getattr(log, "audit_id", "")).strip()
         if not aid:
             continue
-
-        wt = ""
-
-        dump = getattr(log, "complete_qa_data_dump", None) or ""
-        if dump and len(dump) > 4:
-            try:
-                parsed = json.loads(dump)
-                if isinstance(parsed, dict):
-                    wt = parsed.get("workspaceTitle", "") or ""
-            except Exception:
-                pass
-
-        if not wt:
-            sup = getattr(log, "supplier_name", "") or ""
-            wt = read_local_qa_json(sup)
-
-        if not wt:
-            wt = getattr(log, "workspace_title", None) or ""
-
+        wt = getattr(log, "workspace_title", None) or ""
         wm[aid] = wt
     return wm
 
@@ -160,9 +120,17 @@ def reaudit_run(supplier_name: str, docs: List[DocumentEvidence],
     if dry_run:
         return result
 
-    # Write back to database — update each audit_id found
-    audit_ids = set(d.audit_id for d in docs)
-    for aid in audit_ids:
+    # Find the correct audit_results audit_id(s) for this supplier
+    # (may differ from document_evidence audit_ids due to Phase1/Phase2 split)
+    all_logs = sheets.get_audit_logs()
+    supplier_logs = [log for log in all_logs if log.supplier_name.strip().lower() == supplier_name.strip().lower()]
+    audit_ids_to_update = set(log.audit_id for log in supplier_logs)
+
+    # Fall back to document audit_ids if no audit_results found
+    if not audit_ids_to_update:
+        audit_ids_to_update = set(d.audit_id for d in docs)
+
+    for aid in audit_ids_to_update:
         success = sheets.update_audit_result(
             audit_id=aid,
             result=verdict,

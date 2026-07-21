@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+from collections import defaultdict
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
@@ -568,6 +569,16 @@ def build_comparison_rows(
             qa_map.get("certificate location", "N/A"),
         ))
 
+    # Add Public Liability Amount row for PL-classified documents
+    if category == DocCategory.PUBLIC_LIABILITY:
+        pl_ev = extracted_data.get("publicLiabilityAmount", "N/A")
+        pl_qa = "N/A"
+        for m in mismatches:
+            if m["field"] == "Public Liability Amount":
+                pl_qa = m["qa"]
+                break
+        field_values.append(("Public Liability Amount", pl_ev, pl_qa))
+
     rows = []
     for fn, ev, qa in field_values:
         rows.append({
@@ -777,6 +788,7 @@ def run_full_audit(
     pairs.sort(key=_sort_key)
 
     all_comment_parts = []
+    intercept_groups = defaultdict(list)
 
     for ctx, extracted_data in pairs:
         question_label = clean_question_label(ctx.get("ariba_question_label", "General Attachment"))
@@ -932,8 +944,32 @@ def run_full_audit(
             )
 
         if entry_lines:
-            label = f"{question_label} ({filename})" if filename else question_label
-            block = f"{label}:\n" + "\n".join(f"- {line}" for line in entry_lines)
+            if has_intercept:
+                # Groupable intercept — collect for potential merging
+                group_key = (intercept.value,) + tuple(sorted(
+                    (k, str(v)) for k, v in intercept_params.items()
+                ))
+                intercept_groups[group_key].append({
+                    "label": question_label,
+                    "filename": filename,
+                    "lines": entry_lines,
+                })
+            else:
+                # Non-intercept entries (field-level, PL_INSUFFICIENT) — keep individual
+                label = f"{question_label} ({filename})" if filename else question_label
+                block = f"{label}:\n" + "\n".join(f"- {line}" for line in entry_lines)
+                all_comment_parts.append(block)
+
+    # Merge groups with the same intercept reason
+    for entries in intercept_groups.values():
+        if len(entries) >= 2:
+            labels = [e["label"] for e in entries]
+            message = entries[0]["lines"][0]
+            all_comment_parts.append(f"{', '.join(labels)} - {message}")
+        else:
+            entry = entries[0]
+            label = f"{entry['label']} ({entry['filename']})" if entry["filename"] else entry["label"]
+            block = f"{label}:\n" + "\n".join(f"- {line}" for line in entry["lines"])
             all_comment_parts.append(block)
 
     if not all_comment_parts:

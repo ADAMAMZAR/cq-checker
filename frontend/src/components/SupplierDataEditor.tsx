@@ -274,15 +274,23 @@ function SupplierFileList({ supplierName, files, selectedEvidence, onSelectFile,
 }
 
 function CertificateViewer({ evidence }: { evidence: DocumentEvidence }) {
-  const safeName = evidence.supplier_name.replace(/[^a-zA-Z0-9 _-]/g, '').trim();
-  const fileUrl = evidence.file_url || `http://127.0.0.1:8000/static/${safeName}/${evidence.filename}`;
+  const fileUrl = evidence.file_url;
+  const proxyUrl = fileUrl ? `http://127.0.0.1:8000/api/files/${btoa(fileUrl).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_')}` : null;
   const ct = (evidence.file_content_type || '').toLowerCase();
+
+  if (!fileUrl) {
+    return (
+      <div className="flex items-center justify-center h-full text-[10px] text-[var(--text-tertiary)]">
+        File not available (no Supabase Storage URL)
+      </div>
+    );
+  }
 
   return (
     <>
       <div className="flex justify-between items-center mb-4 pb-3 border-b border-[var(--border-subtle)] shrink-0">
         <h3 className="text-[10px] font-bold text-[var(--text-tertiary)] uppercase tracking-wider">Certificate Document</h3>
-        <a href={fileUrl} target="_blank" rel="noreferrer"
+        <a href={proxyUrl} target="_blank" rel="noreferrer"
           className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-visible)] text-[10px] text-[var(--text-secondary)] hover:text-[var(--heading-color)] hover:bg-[var(--bg-surface-hover)] transition-all duration-200 cursor-pointer active:scale-95"
         >
           <IconArrowUpRight className="h-3.5 w-3.5" />
@@ -291,12 +299,12 @@ function CertificateViewer({ evidence }: { evidence: DocumentEvidence }) {
       </div>
 
       {ct.includes('pdf') ? (
-        <iframe src={`${fileUrl}#zoom=100&toolbar=0`} title="Certificate PDF"
+        <iframe src={`${proxyUrl}#toolbar=0`} title="Certificate PDF"
           className="flex-1 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-input)]" style={{ minHeight: '700px' }}
         />
       ) : ct.startsWith('image/') ? (
         <div className="flex-1 flex items-center justify-center rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-input)] overflow-hidden" style={{ minHeight: '700px' }}>
-          <img src={fileUrl} alt="Certificate document" className="max-w-full max-h-full object-contain" />
+          <img src={`${fileUrl}#toolbar=0`} alt="Certificate document" className="max-w-full max-h-full object-contain" />
         </div>
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-input)] gap-4" style={{ minHeight: '700px' }}>
@@ -307,7 +315,7 @@ function CertificateViewer({ evidence }: { evidence: DocumentEvidence }) {
             <p className="text-sm font-semibold text-[var(--heading-color)]">Preview unavailable for this format</p>
             <p className="text-xs text-[var(--text-tertiary)] mt-1">Download file to view the content details.</p>
           </div>
-          <a href={fileUrl} download
+          <a href={proxyUrl} download
             className="flex items-center gap-1.5 px-4.5 py-2 rounded-xl bg-emerald-600 text-xs font-semibold text-[var(--heading-color)] hover:bg-emerald-500 transition-all duration-300 cursor-pointer active:scale-95 glow-success mt-2"
           >
             <IconDownload className="h-4 w-4" />

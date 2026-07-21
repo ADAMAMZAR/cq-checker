@@ -4,9 +4,6 @@
 
 var BACKEND_URL = "http://127.0.0.1:8000";
 
-// Root folder used for all downloads
-var DOWNLOAD_ROOT = 'GPO - Automatic Certificate Checker';
-
 // Extension panel window dimensions (pixels)
 var POPUP_WIDTH = 400;
 var POPUP_HEIGHT = 520;
