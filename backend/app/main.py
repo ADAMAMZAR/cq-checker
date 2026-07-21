@@ -153,9 +153,307 @@ async def test_extract_file(file: UploadFile = File(...)):
         }
     }
 
+@app.post("/api/extract")
+async def extract_documents(
+    supplier_name: str = Form(...),
+    supplier_folder: Optional[str] = Form(None),
+    workspace_title: str = Form(...),
+    cert_type: str = Form(...),
+    qa_data: str = Form(...),
+    files: List[UploadFile] = File(...),
+    screenshot: Optional[UploadFile] = File(None)
+):
+    """
+    Phase 1 endpoint called by the Chrome Extension.
+    Saves attachments locally, runs Gemini Worker + LLM Judge extraction,
+    saves DocumentEvidence to database, and returns audit_id for the comparison phase.
+
+    supplier_name: real/unedited supplier name (goes into DB).
+    supplier_folder: folder-safe short name for local file paths
+                     (falls back to alphanumeric-only sanitization if not provided).
+    """
+    safe_supplier_name = supplier_folder or "".join(c for c in supplier_name if c.isalnum() or c in (" ", "_", "-")).strip()
+    supplier_dir = os.path.join(settings.upload_dir, safe_supplier_name)
+    os.makedirs(supplier_dir, exist_ok=True)
+
+    saved_filenames = []
+    file_bytes_map = {}
+    file_content_type_map = {}
+
+    for file in files:
+        file_bytes = await file.read()
+        await file.seek(0)
+        file_path = os.path.join(supplier_dir, file.filename)
+        with open(file_path, "wb") as buffer:
+            buffer.write(file_bytes)
+        saved_filenames.append(file.filename)
+        file_bytes_map[file.filename.lower()] = file_bytes
+        file_content_type_map[file.filename.lower()] = file.content_type or "application/pdf"
+
+    screenshot_url = None
+    if screenshot:
+        screenshot_filename = f"screenshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        screenshot_path = os.path.join(supplier_dir, screenshot_filename)
+        screenshot_bytes = screenshot.file.read()
+        screenshot.file.seek(0)
+        with open(screenshot_path, "wb") as buffer:
+            buffer.write(screenshot_bytes)
+        if settings.supabase_url and settings.supabase_key:
+            screenshot_url = sheets.upload_file_to_supabase_storage(
+                screenshot_bytes, safe_supplier_name, screenshot_filename, "image/png"
+            )
+        else:
+            screenshot_url = f"/static/{safe_supplier_name}/{screenshot_filename}"
+
+    qa_data_path = os.path.join(supplier_dir, "qa_data.json")
+    with open(qa_data_path, "w", encoding="utf-8") as f:
+        f.write(qa_data)
+
+    temp_audit_id = f"TEMP_{uuid.uuid4()}"
+    timestamp = datetime.now().strftime("%d/%m/%Y, %H:%M:%S")
+
+    try:
+        qa_list = json.loads(qa_data)
+        if isinstance(qa_list, dict):
+            qa_list = [qa_list]
+        elif not isinstance(qa_list, list):
+            qa_list = []
+    except Exception:
+        qa_list = []
+
+    file_contexts = []
+    file_tasks = []
+    matched_file_keys = set()
+    items_to_process = []
+
+    if qa_list:
+        for block in qa_list:
+            attached = block.get("attachedFile", "").strip()
+            q_label = gemini.clean_question_label(block.get("questionLabel", "General Question"))
+            q_answers = json.dumps(block.get("answers", []))
+            matching_file_tuple = None
+            if attached:
+                for fname_lower, fbytes in file_bytes_map.items():
+                    if attached.lower() in fname_lower or fname_lower in attached.lower():
+                        matching_file_tuple = (fname_lower, fbytes, file_content_type_map[fname_lower])
+                        matched_file_keys.add(fname_lower)
+                        break
+            if matching_file_tuple:
+                fname_lower, fbytes, ctype = matching_file_tuple
+                orig_fname = next((n for n in saved_filenames if n.lower() == fname_lower), attached)
+                items_to_process.append({
+                    "question_label": q_label, "qa_answers": q_answers,
+                    "filename": orig_fname, "file_bytes": fbytes, "content_type": ctype
+                })
+
+    for fname_lower, fbytes in file_bytes_map.items():
+        if fname_lower not in matched_file_keys:
+            orig_fname = next((n for n in saved_filenames if n.lower() == fname_lower), fname_lower)
+            items_to_process.append({
+                "question_label": "General Attachment", "qa_answers": "[]",
+                "filename": orig_fname, "file_bytes": fbytes, "content_type": file_content_type_map[fname_lower]
+            })
+
+    if not items_to_process:
+        for fname_lower, fbytes in file_bytes_map.items():
+            orig_fname = next((n for n in saved_filenames if n.lower() == fname_lower), fname_lower)
+            items_to_process.append({
+                "question_label": "General Attachment", "qa_answers": "[]",
+                "filename": orig_fname, "file_bytes": fbytes, "content_type": file_content_type_map[fname_lower]
+            })
+
+    for item in items_to_process:
+        ariba_question_label = item["question_label"]
+        ariba_qa_answers = item["qa_answers"]
+        file_bytes = item["file_bytes"]
+        filename = item["filename"]
+        content_type = item["content_type"]
+        file_hash = hashlib.sha256(file_bytes).hexdigest()
+
+        cached_record = sheets.find_metadata_by_hash(file_hash, ariba_question_label)
+        if cached_record:
+            try:
+                metadata_dict = json.loads(cached_record["gemini_extracted_metadata"])
+            except Exception:
+                metadata_dict = {}
+            task = asyncio.to_thread(lambda md=metadata_dict: (
+                md, 0, 0, 0.0
+            ))
+        else:
+            task = asyncio.to_thread(
+                gemini.extract_certificate_data,
+                file_bytes, content_type, ariba_question_label
+            )
+
+        file_url = None
+        if settings.supabase_url and settings.supabase_key:
+            file_url = sheets.upload_file_to_supabase_storage(
+                file_bytes, safe_supplier_name, filename, content_type
+            )
+
+        file_contexts.append({
+            "filename": filename, "content_type": content_type,
+            "ariba_question_label": ariba_question_label,
+            "ariba_qa_answers": ariba_qa_answers,
+            "file_hash": file_hash, "file_url": file_url
+        })
+        file_tasks.append(task)
+
+    extraction_results = await asyncio.gather(*file_tasks)
+
+    doc_evidences = []
+    extracted_docs = []
+    total_extraction_cost = 0.0
+
+    for ctx, (extracted_data, in_t, out_t, cost) in zip(file_contexts, extraction_results):
+        extracted_docs.append({
+            "filename": ctx["filename"],
+            "extracted_data": extracted_data,
+            "input_tokens": in_t, "output_tokens": out_t, "cost_usd": cost
+        })
+        gemini_supp_name = extracted_data.get("certificateOwnerName", supplier_name)
+        total_extraction_cost += cost
+
+        doc_evidences.append(DocumentEvidence(
+            audit_id=temp_audit_id, supplier_id=0, timestamp=timestamp,
+            supplier_name=supplier_name, filename=ctx["filename"],
+            ariba_question_label=ctx["ariba_question_label"],
+            ariba_qa_answers=ctx["ariba_qa_answers"],
+            gemini_extracted_supplier_name=gemini_supp_name,
+            gemini_extracted_metadata=json.dumps(extracted_data),
+            file_content_type=ctx["content_type"],
+            input_tokens=in_t, output_tokens=out_t,
+            cost_usd=cost, cost_myr=cost * 4.70,
+            file_hash=ctx["file_hash"], file_url=ctx.get("file_url")
+        ))
+
+    # Save DocumentEvidence to DB (no audit_log yet — that happens in comparison phase)
+    resolved_audit_id = sheets.log_audit_run(supplier_name, doc_evidences, None)
+    if not resolved_audit_id:
+        resolved_audit_id = temp_audit_id
+
+    return {
+        "audit_id": resolved_audit_id,
+        "supplier_name": supplier_name,
+        "workspace_title": workspace_title,
+        "cert_type": cert_type,
+        "qa_data": qa_data,
+        "screenshot_url": screenshot_url,
+        "timestamp": timestamp,
+        "file_count": len(doc_evidences),
+        "total_extraction_cost_usd": total_extraction_cost,
+        "total_extraction_cost_myr": total_extraction_cost * 4.70
+    }
+
+
+@app.post("/api/audit/comparison", response_model=AuditResultResponse)
+async def run_audit_comparison(
+    audit_id: str = Form(...),
+    supplier_name: str = Form(...),
+    workspace_title: str = Form(...),
+    cert_type: str = Form(...),
+    qa_data: str = Form(...),
+    screenshot_url: Optional[str] = Form(None),
+    timestamp: str = Form(...)
+):
+    """
+    Phase 2 endpoint called by the Chrome Extension after extraction.
+    Loads document evidence from DB by audit_id, runs the code-based auditor comparison,
+    saves the full audit log including results, and returns the verdict.
+    """
+    # Load existing DocumentEvidence records from DB
+    all_evidence = sheets.get_document_evidence_logs()
+    matching_docs = [doc for doc in all_evidence if str(doc.audit_id).strip() == str(audit_id).strip()]
+
+    file_contexts = []
+    extracted_results = []
+
+    for doc in matching_docs:
+        file_contexts.append({
+            "filename": doc.filename,
+            "ariba_question_label": gemini.clean_question_label(doc.ariba_question_label),
+            "ariba_qa_answers": doc.ariba_qa_answers
+        })
+        try:
+            meta = json.loads(doc.gemini_extracted_metadata)
+        except Exception:
+            meta = {}
+        extracted_results.append(meta)
+
+    # Run code-based auditor comparison
+    expiration_date = "N/A"
+    if extracted_results:
+        expiration_date = extracted_results[0].get("expirationDate", "N/A")
+
+    qa_data_title = f"{workspace_title} {cert_type}"
+    audit_result, suggested_comment, comparison_table_dict = auditor.run_full_audit(
+        supplier_name,
+        file_contexts,
+        extracted_results,
+        qa_data_title=qa_data_title,
+    )
+
+    # Build the full AuditLogEntry and save to DB
+    total_run_cost = sum(
+        doc.input_tokens * 0.10 / 1_000_000 + doc.output_tokens * 0.40 / 1_000_000
+        for doc in matching_docs
+    )
+    compiled_data = json.dumps([
+        {"filename": fc["filename"], "extracted_data": er}
+        for fc, er in zip(file_contexts, extracted_results)
+    ])
+
+    audit_log = AuditLogEntry(
+        audit_id=audit_id,
+        supplier_id=0,
+        timestamp=timestamp,
+        supplier_name=supplier_name,
+        workspace_title=workspace_title,
+        cert_type=cert_type,
+        complete_qa_data_dump=qa_data,
+        compiled_extracted_data=compiled_data,
+        result=audit_result,
+        expiration_date=expiration_date,
+        suggested_comment=suggested_comment,
+        screenshot_url=screenshot_url or None,
+        comparison_input_tokens=0,
+        comparison_output_tokens=0,
+        comparison_cost_usd=0.0,
+        comparison_cost_myr=0.0,
+        total_run_cost_usd=total_run_cost,
+        total_run_cost_myr=total_run_cost * 4.70,
+        comparison_table=comparison_table_dict
+    )
+
+    resolved_audit_id = sheets.log_audit_run(supplier_name, [], audit_log)
+    if not resolved_audit_id:
+        resolved_audit_id = audit_id
+
+    return AuditResultResponse(
+        audit_id=resolved_audit_id,
+        supplier_id=0,
+        supplier_name=supplier_name,
+        workspace_title=workspace_title,
+        cert_type=cert_type,
+        filename=", ".join(doc.filename for doc in matching_docs),
+        result=audit_result,
+        expiration_date=expiration_date,
+        suggested_comment=suggested_comment,
+        screenshot_url=screenshot_url or None,
+        comparison_input_tokens=0,
+        comparison_output_tokens=0,
+        comparison_cost_usd=0.0,
+        comparison_cost_myr=0.0,
+        total_run_cost_usd=total_run_cost,
+        total_run_cost_myr=total_run_cost * 4.70,
+        comparison_table=comparison_table_dict
+    )
+
+
 @app.post("/api/audit", response_model=AuditResultResponse)
 async def run_audit(
     supplier_name: str = Form(...),
+    supplier_folder: Optional[str] = Form(None),
     workspace_title: str = Form(...),
     cert_type: str = Form(...),
     qa_data: str = Form(...),  # Scraped QA questions & answers
@@ -166,9 +464,11 @@ async def run_audit(
     Main endpoint called by the Chrome Extension.
     Saves attachments locally, triggers the audit,
     and records results in Google Sheets.
+
+    supplier_folder: folder-safe short name for file paths
+                     (falls back to alphanumeric-only sanitization if not provided).
     """
-    # Create supplier-specific subdirectories for evidence
-    safe_supplier_name = "".join(c for c in supplier_name if c.isalnum() or c in (" ", "_", "-")).strip()
+    safe_supplier_name = supplier_folder or "".join(c for c in supplier_name if c.isalnum() or c in (" ", "_", "-")).strip()
     supplier_dir = os.path.join(settings.upload_dir, safe_supplier_name)
     os.makedirs(supplier_dir, exist_ok=True)
     

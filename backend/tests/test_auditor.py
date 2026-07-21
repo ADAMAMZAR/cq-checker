@@ -416,7 +416,7 @@ def test_comparison_table_structure():
     row = t["comparison_rows"][0]
     assert "field_name" in row
     assert "value_evidence" in row
-    assert "value_qa" in row
+    assert "value_in_ariba" in row
     assert "result" in row
     assert "matching_mode" in row
 

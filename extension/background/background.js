@@ -392,12 +392,15 @@ async function handleAuditData(tabId, data) {
 
     if (stopSignal.aborted) throw new Error('Stopped by user.');
 
-    // Step 4: Fast API audit upload
-    notifyPanel('Uploading attachments and Q&A to audit backend...');
-    notifyAribaTab(tabId, 'Running Gemini compliance checks...');
+    // Step 4a: Phase 1 — Upload files & run Gemini extraction (Worker + LLM Judge)
+    notifyPanel('Phase 1/2: Extracting certificate data with Gemini (Worker + LLM Judge)...');
+    notifyAribaTab(tabId, 'Running Gemini extraction & LLM Judge verification...');
 
     const formData = new FormData();
-    formData.append('supplier_name', supplierName);
+    // Use the original (uncleaned) name for the database and all API responses
+    formData.append('supplier_name', rawSupplierName);
+    // Pass the folder-safe name separately so the backend uses it only for file paths
+    formData.append('supplier_folder', s);
     formData.append('workspace_title', workspaceTitle);
 
     let certType = 'QSHE';
@@ -409,7 +412,6 @@ async function handleAuditData(tabId, data) {
     formData.append('cert_type', certType);
     formData.append('qa_data', JSON.stringify(extractedQAData));
 
-    // Append original files to backend
     fileBlobs.forEach(fb => {
       formData.append('files', fb.blob, fb.filename);
     });
@@ -418,17 +420,42 @@ async function handleAuditData(tabId, data) {
       formData.append('screenshot', screenshotBlob, 'verification_screenshot.jpg');
     }
 
-    const backendUrl = `${BACKEND_URL}/api/audit`;
-    const response = await fetch(backendUrl, {
+    const extractUrl = `${BACKEND_URL}/api/extract`;
+    const extractResponse = await fetch(extractUrl, {
       method: 'POST',
       body: formData
     });
 
-    if (!response.ok) {
-      throw new Error(`FastAPI audit endpoint returned HTTP ${response.status}`);
+    if (!extractResponse.ok) {
+      throw new Error(`Extraction endpoint returned HTTP ${extractResponse.status}`);
     }
 
-    const auditResult = await response.json();
+    const extractResult = await extractResponse.json();
+    notifyPanel(`Phase 1 complete — ${extractResult.file_count} file(s) extracted and verified by LLM Judge.`);
+    notifyPanel('Phase 2/2: Running code-based comparison audit...');
+    notifyAribaTab(tabId, 'Extraction done. Running comparison audit...');
+
+    // Step 4b: Phase 2 — Run code-based comparison
+    const compareForm = new FormData();
+    compareForm.append('audit_id', extractResult.audit_id);
+    compareForm.append('supplier_name', extractResult.supplier_name);
+    compareForm.append('workspace_title', extractResult.workspace_title);
+    compareForm.append('cert_type', extractResult.cert_type);
+    compareForm.append('qa_data', extractResult.qa_data);
+    compareForm.append('screenshot_url', extractResult.screenshot_url || '');
+    compareForm.append('timestamp', extractResult.timestamp);
+
+    const compareUrl = `${BACKEND_URL}/api/audit/comparison`;
+    const compareResponse = await fetch(compareUrl, {
+      method: 'POST',
+      body: compareForm
+    });
+
+    if (!compareResponse.ok) {
+      throw new Error(`Comparison audit endpoint returned HTTP ${compareResponse.status}`);
+    }
+
+    const auditResult = await compareResponse.json();
 
     // Complete audit state
     chrome.tabs.sendMessage(tabId, { action: 'hideOverlay' }).catch(() => {});

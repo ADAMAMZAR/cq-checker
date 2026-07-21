@@ -82,18 +82,97 @@ def _today() -> datetime:
 
 
 # ---------------------------------------------------------------------------
-# Strict matching (Certificate Numbers) — char-by-char, no normalization
+# Strict matching (Certificate Numbers) — char-by-char, case-insensitive
 # ---------------------------------------------------------------------------
 
 def match_strict(evidence: str, qa: str) -> bool:
     if not evidence or not qa:
         return False
-    return evidence.strip() == qa.strip()
+    return evidence.strip().lower() == qa.strip().lower()
+
+
+# ---------------------------------------------------------------------------
+# Supplier name matching — QA (Ariba) is source of truth
+# ---------------------------------------------------------------------------
+
+def match_supplier(evidence: str, qa: str) -> bool:
+    """Supplier name matching where QA (Ariba data) is the source of truth.
+    Bidirectional — extra tokens on either side are allowed as long as
+    all meaningful (>1 char) tokens from the shorter value appear in the longer one.
+    """
+    def _cln(s: str) -> str:
+        if not s:
+            return ""
+        s = str(s).strip().lower()
+        if s in ("n/a", "na", "-", "missing", "none", "null", ""):
+            return ""
+        return s
+
+    ev = _cln(evidence)
+    qa = _cln(qa)
+
+    if not ev and not qa:
+        return True
+    if not ev:
+        return True
+    if not qa:
+        return False
+
+    if ev == qa:
+        return True
+    if qa in ev or ev in qa:
+        return True
+
+    ev_suff = _normalize_suffixes(ev)
+    qa_suff = _normalize_suffixes(qa)
+    if ev_suff == qa_suff:
+        return True
+    if qa_suff in ev_suff or ev_suff in qa_suff:
+        return True
+
+    ev_tokens = set(w for w in re.sub(r'[^\w\s]', '', ev_suff).split() if len(w) > 1)
+    qa_tokens = set(w for w in re.sub(r'[^\w\s]', '', qa_suff).split() if len(w) > 1)
+
+    if ev_tokens and qa_tokens:
+        if ev_tokens.issubset(qa_tokens) or qa_tokens.issubset(ev_tokens):
+            return True
+
+    return False
 
 
 # ---------------------------------------------------------------------------
 # Flexible matching (Names, Addresses, Issuers)
 # ---------------------------------------------------------------------------
+
+SUFFIX_MAP = {
+    "pty ltd": "private limited",
+    "ptyltd": "private limited",
+    "sdn bhd": "sendirian berhad",
+    "sdnbhd": "sendirian berhad",
+    "limited": "ltd",
+    "incorporated": "inc",
+}
+
+
+def _normalize_suffixes(s: str) -> str:
+    words = s.split()
+    result = []
+    i = 0
+    while i < len(words):
+        bigram = (words[i] + " " + words[i + 1]) if i + 1 < len(words) else None
+        trigram = (words[i] + " " + words[i + 1] + " " + words[i + 2]) if i + 2 < len(words) else None
+        matched = False
+        for variant, canonical in SUFFIX_MAP.items():
+            if bigram == variant or trigram == variant:
+                result.append(canonical)
+                i += len(variant.split())
+                matched = True
+                break
+        if not matched:
+            result.append(words[i])
+            i += 1
+    return " ".join(result)
+
 
 def match_flexible(evidence: str, qa: str) -> bool:
     def _cln(s: str) -> str:
@@ -109,25 +188,31 @@ def match_flexible(evidence: str, qa: str) -> bool:
 
     if not ev and not qa:
         return True
-    if not ev or not qa:
+    if not ev:
+        return True
+    if not qa:
         return False
 
-    suffixes = {"pty ltd", "sdn bhd", "limited", "ltd", "bhd", "inc", "llc", "gmbh"}
-    ev_words = ev.split()
-    qa_words = qa.split()
-    ev_clean = " ".join(w for w in ev_words if w not in suffixes)
-    qa_clean = " ".join(w for w in qa_words if w not in suffixes)
-
-    if ev_clean == qa_clean:
-        return True
-    if ev_clean in qa_clean or qa_clean in ev_clean:
+    # Exact match after normalization
+    if ev == qa:
         return True
 
-    ev_tokens = set(w for w in re.sub(r'[^\w\s]', '', ev).split() if len(w) > 1)
-    qa_tokens = set(w for w in re.sub(r'[^\w\s]', '', qa).split() if len(w) > 1)
-
-    if ev_tokens and ev_tokens.issubset(qa_tokens):
+    # Substring — QA must be contained within evidence (not the reverse)
+    if qa in ev:
         return True
+
+    # Normalize suffix variations and retry
+    ev_suff = _normalize_suffixes(ev)
+    qa_suff = _normalize_suffixes(qa)
+    if ev_suff == qa_suff:
+        return True
+    if qa_suff in ev_suff:
+        return True
+
+    # Token subset — evidence is source of truth: QA must be within evidence
+    ev_tokens = set(w for w in re.sub(r'[^\w\s]', '', ev_suff).split() if len(w) > 1)
+    qa_tokens = set(w for w in re.sub(r'[^\w\s]', '', qa_suff).split() if len(w) > 1)
+
     if qa_tokens and qa_tokens.issubset(ev_tokens):
         return True
 
@@ -208,6 +293,10 @@ def classify_document(
 # Expiry Calculation
 # ---------------------------------------------------------------------------
 
+def _is_na(s: str) -> bool:
+    return not s or s.strip().lower() in ("n/a", "na", "-", "missing", "none", "null", "not listed", "")
+
+
 def check_expiry(
     extracted_data: dict,
     region_config: RegionConfig,
@@ -220,22 +309,26 @@ def check_expiry(
 
     eff_date = _parse_date(eff_raw)
     issue_date = _parse_date(iss_raw)
-
     effective = eff_date or issue_date
-
     expiry_date = _parse_date(exp_raw)
+    expiry_na = _is_na(exp_raw)
 
-    if is_permanent:
+    # Treat as permanent if: isPermanent flag is set, OR expiry date is N/A
+    treat_as_permanent = is_permanent or expiry_na
+
+    if treat_as_permanent:
+        if not effective:
+            return ExpiryStatus.NOT_LISTED
+        capped = _add_years(effective, region_config.validity_cap_years)
         qa_exp_date = _parse_date(qa_expiry) if qa_expiry else None
-        if qa_exp_date and qa_exp_date >= _today():
+        if qa_exp_date and qa_exp_date >= _today() and qa_exp_date <= capped:
             return ExpiryStatus.PERMANENT_MATCH
         if qa_exp_date:
             return ExpiryStatus.PERMANENT_NEEDS_REVISION
         return ExpiryStatus.PERMANENT_MATCH
 
     if not effective:
-        exp_raw_lower = exp_raw.strip().lower()
-        if not exp_raw_lower or exp_raw_lower in ("n/a", "na", "-", "missing", "none", "null", "not listed"):
+        if expiry_na:
             return ExpiryStatus.NOT_LISTED
         if expiry_date:
             if expiry_date <= _today():
@@ -335,12 +428,12 @@ def match_fields(
             "mode": "flexible",
         })
 
-    # 2. Supplier Name
+    # 2. Supplier Name (QA/Ariba is source of truth)
     ev_sn = extracted_data.get("certificateOwnerName", "N/A")
     if category == DocCategory.PERSONAL_CERTIFICATE or category == DocCategory.OTHER_RECOGNITION:
         pass
     else:
-        if not match_flexible(ev_sn, supplier_name):
+        if not match_supplier(ev_sn, supplier_name):
             mismatches.append({
                 "field": "Supplier Name",
                 "evidence": ev_sn,
@@ -361,18 +454,19 @@ def match_fields(
 
     # 4. Year of Publication
     ev_yop = extracted_data.get("yearOfPublication", "N/A")
-    if not ev_yop or ev_yop == "N/A":
+    if not ev_yop or _is_na(ev_yop):
         eff_date = extracted_data.get("effectiveDate", "")
-        if eff_date and eff_date != "N/A":
+        if eff_date and not _is_na(eff_date):
             match = re.search(r'\b(20\d\d|19\d\d)\b', eff_date)
             if match:
                 ev_yop = match.group(1)
     qa_yop = qa_map.get("year of publication", "N/A")
     ev_yop_stripped = ev_yop.strip() if ev_yop else ""
     qa_yop_stripped = qa_yop.strip() if qa_yop else ""
-    if not ev_yop_stripped or ev_yop_stripped.lower() in ("n/a", "na", "-", "missing", "none", "null", "not listed", ""):
+    # If evidence is N/A (couldn't determine year), accept whatever QA entered
+    if _is_na(ev_yop_stripped):
         pass
-    elif not qa_yop_stripped or qa_yop_stripped.lower() in ("n/a", "na", "-", "missing", "none", "null", "not listed", ""):
+    elif _is_na(qa_yop_stripped):
         pass
     elif ev_yop_stripped != qa_yop_stripped:
         mismatches.append({
@@ -479,7 +573,7 @@ def build_comparison_rows(
         rows.append({
             "field_name": fn,
             "value_evidence": ev,
-            "value_qa": qa,
+            "value_in_ariba": qa,
             "result": _res(fn),
             "matching_mode": "strict" if fn == "Certificate Number" else "flexible",
         })
@@ -488,9 +582,9 @@ def build_comparison_rows(
 
 def _extract_year(extracted_data: dict) -> str:
     ev = extracted_data.get("yearOfPublication", "N/A")
-    if not ev or ev == "N/A":
+    if not ev or _is_na(ev):
         eff = extracted_data.get("effectiveDate", "")
-        if eff and eff != "N/A":
+        if eff and not _is_na(eff):
             m = re.search(r'\b(20\d\d|19\d\d)\b', eff)
             if m:
                 return m.group(1)
@@ -612,7 +706,12 @@ def build_comment_lines(
     for m in mismatches:
         disp = m["field"]
         ev = m["evidence"]
-        parts.append(f"Please revise the {disp} to \"{ev}\"")
+        # For Supplier Name, QA (Ariba) is the source of truth
+        if disp == "Supplier Name":
+            qa_val = m["qa"]
+            parts.append(f"Please revise the {disp} to \"{qa_val}\"")
+        else:
+            parts.append(f"Please revise the {disp} to \"{ev}\"")
 
     for m in special_mismatches:
         if m["field"] == "Public Liability Amount":
@@ -749,7 +848,7 @@ def run_full_audit(
             # Check Supplier Name Mismatch (for corporate certs)
             if category not in (DocCategory.PERSONAL_CERTIFICATE, DocCategory.OTHER_RECOGNITION):
                 ev_supplier = extracted_data.get("certificateOwnerName", "")
-                if not match_flexible(ev_supplier, supplier_name):
+                if not match_supplier(ev_supplier, supplier_name):
                     intercept = InterceptType.SUPPLIER_MISMATCH
                     intercept_params = {
                         "cert_supplier": ev_supplier,
@@ -819,11 +918,11 @@ def run_full_audit(
             InterceptType.NONE, InterceptType.PL_INSUFFICIENT, InterceptType.FIELD_MISMATCH,
         )
 
-        # When an intercept already handles the cert type, remove it from field mismatches
-        # to avoid duplicating "Please revise the Certificate Type" (NEVER allowed per rules)
+        # When an intercept fires, suppress ALL field-level revision messages
+        # (comparison table still shows the full picture)
         comment_mismatches = local_mismatches[:]
         if intercept:
-            comment_mismatches = [m for m in comment_mismatches if m["field"] != "Certificate Type"]
+            comment_mismatches = []
 
         entry_lines = None
         if has_intercept or comment_mismatches or local_special_mismatches:

@@ -455,7 +455,7 @@ def run_programmatic_audit(supplier_name: str, file_contexts: List[Dict[str, Any
             table_dict["comparison_rows"].append({
                 "field_name": field,
                 "value_evidence": ev,
-                "value_qa": qa,
+                "value_in_ariba": qa,
                 "result": r
             })
         comparison_table_dict["tables"].append(table_dict)

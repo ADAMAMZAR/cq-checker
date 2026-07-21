@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Audit Rules Review</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f5f5;
+      color: #222;
+      padding: 20px;
+    }
+
+    h1 {
+      font-size: 22px;
+      margin-bottom: 4px;
+    }
+
+    .sub {
+      color: #666;
+      font-size: 13px;
+      margin-bottom: 24px;
+    }
+
+    .section {
+      background: #fff;
+      border-radius: 8px;
+      margin-bottom: 16px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      overflow: hidden;
+    }
+
+    .section-title {
+      font-size: 15px;
+      font-weight: 600;
+      padding: 12px 16px;
+      background: #eef;
+      border-bottom: 1px solid #ddd;
+    }
+
+    .rule {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 10px 16px;
+      border-bottom: 1px solid #eee;
+    }
+
+    .rule:last-child {
+      border-bottom: none;
+    }
+
+    .rule-text {
+      flex: 1;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .rule-text code {
+      background: #f0f0f0;
+      padding: 1px 4px;
+      border-radius: 3px;
+      font-size: 12px;
+    }
+
+    .rule-text strong {
+      color: #333;
+    }
+    .rule-text .example {
+      margin-top: 4px;
+      padding: 4px 8px;
+      background: #f8f9fa;
+      border-left: 3px solid #0066cc;
+      border-radius: 3px;
+      font-size: 12px;
+      font-family: 'SFMono-Regular', Consolas, monospace;
+    }
+
+    .verdict {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      min-width: 100px;
+    }
+
+    .verdict select {
+      padding: 4px 8px;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .verdict select.correct {
+      background: #d4edda;
+      border-color: #28a745;
+    }
+
+    .verdict select.incorrect {
+      background: #f8d7da;
+      border-color: #dc3545;
+    }
+
+    .correction-fields {
+      display: none;
+      flex-direction: column;
+      gap: 6px;
+      padding: 8px 16px 12px;
+      background: #fff8f0;
+      border-bottom: 1px solid #eee;
+    }
+
+    .correction-fields.open {
+      display: flex;
+    }
+
+    .correction-fields textarea {
+      width: 100%;
+      padding: 6px 8px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 12px;
+      font-family: inherit;
+      resize: vertical;
+    }
+
+    .correction-fields textarea:focus {
+      outline: none;
+      border-color: #e67e22;
+    }
+
+    .correction-fields label {
+      font-size: 11px;
+      font-weight: 600;
+      color: #555;
+    }
+
+    .actions {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+
+    .actions button,
+    .actions a {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-block;
+    }
+
+    .btn-copy {
+      background: #0066cc;
+      color: #fff;
+    }
+
+    .btn-copy:hover {
+      background: #0052a3;
+    }
+
+    .btn-reset {
+      background: #e0e0e0;
+      color: #333;
+    }
+
+    .btn-reset:hover {
+      background: #ccc;
+    }
+
+    .btn-download {
+      background: #28a745;
+      color: #fff;
+    }
+
+    .btn-download:hover {
+      background: #218838;
+    }
+
+    #output {
+      display: none;
+      background: #fff;
+      border-radius: 8px;
+      padding: 16px;
+      margin-top: 16px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+
+    #output h3 {
+      font-size: 14px;
+      margin-bottom: 8px;
+    }
+
+    #output pre {
+      background: #f8f9fa;
+      padding: 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .summary-bar {
+      font-size: 12px;
+      color: #666;
+      margin-bottom: 12px;
+      padding: 8px 0;
+    }
+  </style>
+</head>
+
+<body>
+
+  <h1>Audit Comparison Rules — Review</h1>
+  <p class="sub">For each rule below: select <strong>✓ Correct</strong> or <strong>✗ Incorrect</strong>. If incorrect,
+    fill in the reason and correct answer.</p>
+
+  <div class="actions">
+    <button class="btn-copy" onclick="copyOutput()">📋 Copy Corrections</button>
+    <button class="btn-download" onclick="downloadOutput()">⬇ Download as Markdown</button>
+    <button class="btn-reset" onclick="resetAll()">Reset All</button>
+  </div>
+
+  <div class="summary-bar" id="summary">Reviewed: 0 / 0 &nbsp;|&nbsp; Correct: 0 &nbsp;|&nbsp; Incorrect: 0</div>
+
+  <div id="rules-container"></div>
+
+  <div id="output">
+    <h3>📋 Corrections Report</h3>
+    <pre id="output-text"></pre>
+  </div>
+
+  <script>
+const RULES = [
+  { section: "1. Strict Match — Certificate Number", label: "Char-by-char exact; case-sensitive", ex: "CERT-12345 vs cert-12345 → <b>Mismatch</b>" },
+  { section: "2. Flexible — Both Empty", label: "Both values are N/A or empty → <b>Match</b>", ex: "N/A vs N/A → <b>Match</b>" },
+  { section: "3. Flexible — One Empty", label: "Only one value is N/A or empty → <b>Mismatch</b>", ex: "Safety Training vs N/A → <b>Mismatch</b>" },
+  { section: "4. Flexible — Exact", label: "Exact match after strip + lowercase → <b>Match</b>", ex: "ABC Pty Ltd vs abc pty ltd → <b>Match</b>" },
+  { section: "5. Flexible — Substring", label: "One value contains the other (either direction) → <b>Match</b>", ex: "Kuala Lumpur vs Kuala Lumpur, Malaysia → <b>Match</b>" },
+  { section: "6. Flexible — Suffix Stripping", label: "Strip company suffixes (pty ltd, sdn bhd, ltd, bhd, inc, llc, gmbh) and retry", ex: "ABC Pty Ltd vs ABC → <b>Match</b> (suffix stripped)" },
+  { section: "7. Flexible — Token Subset", label: "All &gt;1-char words from one appear in the other → <b>Match</b>", ex: "John Smith vs John → <b>Match</b> (token subset)" },
+  { section: "8. Flexible — No Token Overlap", label: "No shared &gt;1-char words → <b>Mismatch</b>", ex: "John Smith vs Jane Doe → <b>Mismatch</b>" },
+  { section: "9. Location — State-level", label: "MY state-level address satisfies country-level → <b>Match</b>", ex: "Selangor, Malaysia vs Malaysia → <b>Match</b>" },
+  { section: "10. Certificate Type — Standard Equivalence", label: "MS 1722 ↔ ISO 45001 (bidirectional, MY only)", ex: "MS 1722 vs ISO 45001 → <b>Match</b>" },
+  { section: "11. Certificate Type — No Equivalence", label: "No standard mapping → <b>Mismatch</b>", ex: "First Aid vs ISO 14001 → <b>Mismatch</b>" },
+  { section: "12. Supplier Name — Skip Categories", label: "Skipped for PERSONAL_CERTIFICATE / OTHER_RECOGNITION", ex: "Any value → <b>Skipped</b>" },
+  { section: "13. Supplier Name — Suffix Match", label: "Suffix stripped, then matched", ex: "ABC Construction Pty Ltd vs ABC Construction → <b>Match</b>" },
+  { section: "14. Supplier Name — Different Companies", label: "No overlap after processing → <b>Mismatch</b>", ex: "XYZ Corp vs ABC Corp → <b>Mismatch</b>" },
+  { section: "15. Issuer — Token Subset", label: "One issuer name contains all tokens of the other", ex: "SGS United Kingdom Ltd vs SGS → <b>Match</b>" },
+  { section: "16. Issuer — No Match", label: "No token overlap → <b>Mismatch</b>", ex: "Bureau Veritas vs DNV → <b>Mismatch</b>" },
+  { section: "17. Year — Strict + Fallback", label: "Strict match; if N/A, pulls year from effectiveDate", ex: "N/A (effDate=01/01/2024) vs 2024 → <b>Match</b> (fallback)" },
+  { section: "18. Year — Both N/A", label: "Both N/A → <b>Match</b> (no revision)", ex: "N/A vs N/A → <b>Match</b>" },
+  { section: "19. Certificate Number — Strict", label: "Char-by-char exact, case-sensitive", ex: "CERT-001234 vs cert-001234 → <b>Mismatch</b>" },
+  { section: "20. Certificate Location — Skipped (AU)", label: "Always Match for Australia region", ex: "Melbourne, Australia vs — → <b>Skipped</b>" },
+  { section: "21. Certificate Location — Substring", label: "Location match via substring", ex: "Kuala Lumpur vs Malaysia → <b>Match</b> (substring)" },
+  { section: "22. Effective Date — Normalized", label: "Dates normalized to DD/MM/YYYY before matching", ex: "2024-01-01 vs 01/01/2024 → <b>Match</b>" },
+  { section: "23. Effective Date — Mismatch", label: "Different dates → <b>Mismatch</b>", ex: "01/01/2024 vs 01/02/2024 → <b>Mismatch</b>" },
+  { section: "24. Expiration Date — Match", label: "Same date after normalization → <b>Match</b>", ex: "31/12/2025 vs 31/12/2025 → <b>Match</b>" },
+  { section: "25. Expiration Date — Mismatch", label: "Different dates → <b>Mismatch</b>", ex: "31/12/2025 vs 31/12/2024 → <b>Mismatch</b>" },
+  { section: "26. Intercept — Recertification Letter (P1)", label: "recertificationLetter=true → short-circuits all checks", ex: "Any values → <b>Intercepted</b> (P1)" },
+  { section: "27. Intercept — SSM Upload (P2)", label: "Issuer contains SSM keywords → short-circuits (MY)", ex: "ssm corporate profile → <b>Intercepted</b> (P2)" },
+  { section: "28. Intercept — Multiple Certs (P3)", label: "hasMultipleCertificates=true + OTHER_RECOGNITION → short-circuits", ex: "Two certs in one upload → <b>Intercepted</b> (P3)" },
+  { section: "29. Intercept — Wrong Standard (P4)", label: "Cert type mismatch + no standard equivalence → short-circuits", ex: "ISO 9001 vs ISO 14001 → <b>Intercepted</b> (P4)" },
+  { section: "30. Intercept — Supplier Mismatch (P5)", label: "Certificate owner ≠ supplier_name → short-circuits", ex: "Owner: XYZ vs Supplier: ABC → <b>Intercepted</b> (P5)" },
+  { section: "31. Intercept — Expired (P6)", label: "Expiry ≤ today or > cap → short-circuits", ex: "Expired 2023 → <b>Intercepted</b> (P6)" },
+  { section: "32. Intercept — Permanent Date Revision (P7)", label: "Permanent cert + QA date mismatch → short-circuits", ex: "KEKAL SAH vs 31/12/2023 → <b>Intercepted</b> (P7)" },
+  { section: "33. Intercept — PL Insufficient (P8)", label: "Public Liability below AUD 20M → short-circuits", ex: "$5,000,000 vs AUD 20M → <b>Intercepted</b> (P8)" },
+  { section: "34. Intercept — Field Mismatch (P9)", label: "Falls through from above intercepts → field-level revisions", ex: "8 fields, some mismatch → <b>Field revisions</b>" },
+  { section: "35. PL Amount — Format Parsing", label: "Supports $20,000,000, 20M, 20,000,000, $20M", ex: "20M → parsed as 20,000,000" },
+  { section: "36. PL Amount — Below Minimum", label: "Below AUD 20M → PL_INSUFFICIENT intercept", ex: "$5M → <b>Insufficient</b>" },
+  { section: "37. CIDB Check (MY)", label: "MY + Contractors: CIDB required; missing → special mismatch", ex: "No CIDB in upload → <b>Special mismatch</b>" },
+  { section: "38. Expiry — Australia Cap", label: "Max 3 years from effective/issue date", ex: "Issue 01/01/2024 → cap 01/01/2027" },
+  { section: "39. Expiry — Malaysia Cap", label: "Max 10 years from effective/issue date", ex: "Issue 01/01/2024 → cap 01/01/2034" },
+  { section: "40. Expiry — Unknown Region Cap", label: "99 years (effectively no cap)", ex: "Issue 01/01/2024 → cap 01/01/2123" },
+  { section: "41. Permanent Cert — QA Date Valid", label: "isPermanent=true + QA expiry still valid → no revision", ex: "KEKAL SAH vs 31/12/2030 → <b>Pass</b>" },
+  { section: "42. Permanent Cert — QA Date Invalid", label: "isPermanent=true + QA expiry past → revision to capped date", ex: "KEKAL SAH vs 31/12/2020 → <b>Revision needed</b>" },
+  { section: "43. Standard Equivalence — MS 1722 Only", label: "Only MS 1722 ↔ ISO 45001 mapping exists", ex: "MS 1722 vs ISO 45001 → <b>Match</b>" },
+  { section: "44. Region Detection — Australia", label: "Title contains (Australia), (NSW), state names → AU", ex: "Cert (Australia) → Region: <b>Australia</b>" },
+  { section: "45. Region Detection — Default", label: "Everything else → Malaysia", ex: "Cert (Global) → Region: <b>Malaysia</b>" },
+  { section: "46. Comparison Table — 8 Fields", label: "8 rows; Location omitted for AU", ex: "MY: 8 rows, AU: 7 rows" },
+  { section: "47. Revision Msg — Mismatch Template", label: "Uses Dear Sir/Madam… resubmission template", ex: "Multiline with field breakdown" },
+  { section: "48. Revision Msg — All Match", label: "Outputs \"All match.\"", ex: "All match." },
+  { section: "49. Doc Class — Recertification Letter", label: "recertificationLetter=true → RECERTIFICATION_LETTER", ex: "Letter detected → classification" },
+  { section: "50. Doc Class — SSM Profile", label: "SSM keywords → SSM_PROFILE (MY only)", ex: "SSM e-info → SSM_PROFILE" },
+  { section: "51. Doc Class — Name-exempt Issuers", label: "bem, acem, bqsm → PERSONAL_CERTIFICATE", ex: "BEM issuer → PERSONAL_CERTIFICATE" },
+  { section: "52. Doc Class — Other Recognition", label: "QA type = other recognition → OTHER_RECOGNITION", ex: "Other Recognition → classification" },
+  { section: "53. Doc Class — Public Liability", label: "PL keywords in type/label → PUBLIC_LIABILITY", ex: "Public Liability → classification" },
+  { section: "54. Doc Class — Default", label: "Default → TECHNICAL_CERTIFICATE", ex: "No match → TECHNICAL_CERTIFICATE" },
+];
+
+    function render() {
+      const container = document.getElementById('rules-container');
+      let currentSection = '';
+      let html = '';
+      RULES.forEach((rule, i) => {
+        html += `
+      <div class="rule" id="rule-${i}">
+          <div class="rule-text">
+            <strong>${rule.section}</strong><br>
+            ${rule.label}
+            ${rule.ex ? `<div class="example">${rule.ex}</div>` : ''}
+          </div>
+        <div class="verdict">
+          <select id="select-${i}" onchange="onChange(${i})">
+            <option value="">—</option>
+            <option value="correct">✓ Correct</option>
+            <option value="incorrect">✗ Incorrect</option>
+          </select>
+        </div>
+      </div>
+      <div class="correction-fields" id="correction-${i}">
+        <div>
+          <label for="reason-${i}">Why is it incorrect?</label>
+          <textarea id="reason-${i}" rows="2" placeholder="Explain why this rule is wrong…"></textarea>
+        </div>
+        <div>
+          <label for="answer-${i}">What is the correct rule?</label>
+          <textarea id="answer-${i}" rows="2" placeholder="Describe what the correct behavior should be…"></textarea>
+        </div>
+      </div>
+    `;
+      });
+      container.innerHTML = html;
+      updateSummary();
+    }
+
+    function onChange(i) {
+      const sel = document.getElementById(`select-${i}`);
+      const corr = document.getElementById(`correction-${i}`);
+      if (sel.value === 'incorrect') {
+        corr.classList.add('open');
+      } else {
+        corr.classList.remove('open');
+      }
+      updateSummary();
+    }
+
+    function updateSummary() {
+      let total = RULES.length;
+      let answered = 0;
+      let correct = 0;
+      let incorrect = 0;
+      RULES.forEach((_, i) => {
+        const sel = document.getElementById(`select-${i}`);
+        if (sel && sel.value) {
+          answered++;
+          if (sel.value === 'correct') correct++;
+          else incorrect++;
+        }
+      });
+      document.getElementById('summary').textContent =
+        `Reviewed: ${answered} / ${total}  |  Correct: ${correct}  |  Incorrect: ${incorrect}`;
+    }
+
+    function buildOutput() {
+      const lines = [];
+      lines.push('# Audit Rules Corrections Report');
+      lines.push('');
+      lines.push(`Generated: ${new Date().toISOString().split('T')[0]}`);
+      lines.push('');
+      let hasCorrections = false;
+      RULES.forEach((rule, i) => {
+        const sel = document.getElementById(`select-${i}`);
+        if (!sel || !sel.value) return;
+        const verdict = sel.value;
+        lines.push(`## ${rule.section}`);
+        lines.push(`- **Verdict**: ${verdict === 'correct' ? '✓ Correct' : '✗ Incorrect'}`);
+        if (verdict === 'incorrect') {
+          hasCorrections = true;
+          const reason = document.getElementById(`reason-${i}`).value.trim();
+          const answer = document.getElementById(`answer-${i}`).value.trim();
+          if (reason) lines.push(`- **Reason**: ${reason}`);
+          if (answer) lines.push(`- **Correct Answer**: ${answer}`);
+        }
+        lines.push('');
+      });
+      if (!hasCorrections) {
+        lines.push('No corrections — all rules verified as correct.');
+        lines.push('');
+      }
+  // Copy-friendly summary
+  lines.push('---');
+  lines.push('');
+  lines.push('## Summary Table');
+  lines.push('');
+  lines.push('| # | Rule | Example | Verdict | Reason | Correct Answer |');
+  lines.push('|---|---|---|---|---|---|');
+  RULES.forEach((rule, i) => {
+    const sel = document.getElementById(`select-${i}`);
+    if (!sel || !sel.value) return;
+    const verdict = sel.value === 'correct' ? '✓ Correct' : '✗ Incorrect';
+    const reason = document.getElementById(`reason-${i}`).value.trim();
+    const answer = document.getElementById(`answer-${i}`).value.trim();
+    const ex = rule.ex ? rule.ex.replace(/<[^>]*>/g, '') : '—';
+    lines.push(`| ${i+1} | ${rule.section} | ${ex} | ${verdict} | ${reason || '—'} | ${answer || '—'} |`);
+  });
+      return lines.join('\n');
+    }
+
+    function copyOutput() {
+      const text = buildOutput();
+      document.getElementById('output-text').textContent = text;
+      document.getElementById('output').style.display = 'block';
+      navigator.clipboard.writeText(text).then(() => {
+        const btn = document.querySelector('.btn-copy');
+        btn.textContent = '✓ Copied!';
+        setTimeout(() => { btn.textContent = '📋 Copy Corrections'; }, 2000);
+      });
+    }
+
+    function downloadOutput() {
+      const text = buildOutput();
+      const blob = new Blob([text], { type: 'text/markdown' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'audit-rules-corrections.md';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function resetAll() {
+      if (!confirm('Reset all selections and corrections?')) return;
+      RULES.forEach((_, i) => {
+        document.getElementById(`select-${i}`).value = '';
+        document.getElementById(`correction-${i}`).classList.remove('open');
+        document.getElementById(`reason-${i}`).value = '';
+        document.getElementById(`answer-${i}`).value = '';
+      });
+      document.getElementById('output').style.display = 'none';
+      updateSummary();
+    }
+
+    render();
+  </script>
+</body>
+
+</html>

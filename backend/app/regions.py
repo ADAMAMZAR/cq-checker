@@ -39,7 +39,7 @@ REGION_CONFIGS = {
         ],
     ),
     Region.UNKNOWN: RegionConfig(
-        validity_cap_years=99,
+        validity_cap_years=10,
         pl_min_aud=20_000_000.0,
     ),
 }
