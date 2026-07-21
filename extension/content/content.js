@@ -398,7 +398,11 @@
       }
 
       const labelSpan = mainContainer.querySelector('.label-span');
-      if (labelSpan) qaBlock.questionLabel = labelSpan.textContent.replace(/\s+/g, ' ').trim();
+      if (labelSpan) {
+        let rawLabel = labelSpan.textContent.replace(/\s+/g, ' ').trim();
+        const parts = rawLabel.split(/\s+[-–—]\s*|\s*[-–—]\s+/);
+        qaBlock.questionLabel = parts[0] ? parts[0].trim() : rawLabel;
+      }
 
       let contentBlock = mainContainer.querySelector('.content-2, [content2]') || mainContainer.querySelector('.content-1, [content1]') || mainContainer;
       

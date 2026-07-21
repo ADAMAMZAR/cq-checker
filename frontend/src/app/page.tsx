@@ -17,7 +17,9 @@ import {
   IconCoin,
   IconChevronDown,
   IconChevronLeft,
-  IconList
+  IconList,
+  IconX,
+  IconDownload
 } from "@tabler/icons-react";
 
 interface AuditLog {
@@ -96,6 +98,7 @@ export default function Dashboard() {
     issuerName: "",
     certificateType: "",
     certificateNumber: "",
+    yearOfPublication: "",
     expirationDate: "",
     effectiveDate: "",
     certificateLocation: ""
@@ -106,6 +109,7 @@ export default function Dashboard() {
     issuerName: "",
     certificateType: "",
     certificateNumber: "",
+    yearOfPublication: "",
     expirationDate: "",
     effectiveDate: "",
     certificateLocation: ""
@@ -114,6 +118,23 @@ export default function Dashboard() {
   const [isSavingForm, setIsSavingForm] = useState(false);
   const [formSuccessMessage, setFormSuccessMessage] = useState<string | null>(null);
   const [formErrorMessage, setFormErrorMessage] = useState<string | null>(null);
+
+  // Per-table edit state for comparison table "Value in Evidence" cells
+  const [editingTableIdx, setEditingTableIdx] = useState<number | null>(null);
+  const [tableEditValues, setTableEditValues] = useState<Record<number, Record<number, string>>>({});
+  const [isSavingTableEdits, setIsSavingTableEdits] = useState(false);
+  const [tableEditMsg, setTableEditMsg] = useState<string | null>(null);
+
+  const fieldNameToMetaKey: Record<string, string> = {
+    "Certificate Type": "certificateType",
+    "Supplier Name": "certificateOwnerName",
+    "Issuer": "issuerName",
+    "Year of Publication": "yearOfPublication",
+    "Certificate Number": "certificateNumber",
+    "Certificate Location": "certificateLocation",
+    "Effective Date": "effectiveDate",
+    "Expiration Date": "expirationDate"
+  };
 
   // Fetch all DocumentEvidence logs
   const fetchEvidence = async () => {
@@ -145,6 +166,7 @@ export default function Dashboard() {
       issuerName: "",
       certificateType: "",
       certificateNumber: "",
+      yearOfPublication: "",
       expirationDate: "",
       effectiveDate: "",
       certificateLocation: ""
@@ -156,6 +178,7 @@ export default function Dashboard() {
         issuerName: parsed.issuerName || "",
         certificateType: parsed.certificateType || "",
         certificateNumber: parsed.certificateNumber || "",
+        yearOfPublication: parsed.yearOfPublication || "",
         expirationDate: parsed.expirationDate || "",
         effectiveDate: parsed.effectiveDate || "",
         certificateLocation: parsed.certificateLocation || ""
@@ -167,6 +190,7 @@ export default function Dashboard() {
         issuerName: "",
         certificateType: "",
         certificateNumber: "",
+        yearOfPublication: "",
         expirationDate: "",
         effectiveDate: "",
         certificateLocation: ""
@@ -175,6 +199,111 @@ export default function Dashboard() {
     setFormFields(targetFields);
     setInitialFields(targetFields);
   };
+
+  // Start editing a table — snapshot current evidence values into edit state
+  const startTableEdit = (tIdx: number) => {
+    const table = selectedLog?.comparison_table?.tables?.[tIdx];
+    if (!table) return;
+    const values: Record<number, string> = {};
+    table.comparison_rows.forEach((row: any, rIdx: number) => {
+      values[rIdx] = row.value_evidence;
+    });
+    setTableEditValues(prev => ({ ...prev, [tIdx]: values }));
+    setEditingTableIdx(tIdx);
+    setTableEditMsg(null);
+  };
+
+  const updateTableEditValue = (tIdx: number, rIdx: number, value: string) => {
+    setTableEditValues(prev => ({
+      ...prev,
+      [tIdx]: { ...prev[tIdx], [rIdx]: value }
+    }));
+  };
+
+  // Save all edits for a table at once
+  const handleSaveTableEdits = async (tIdx: number) => {
+    if (!selectedLog) return;
+    const table = selectedLog.comparison_table?.tables?.[tIdx];
+    if (!table) return;
+
+    const filename = table.attached_file;
+    if (!filename) {
+      setTableEditMsg("Cannot determine which file this field belongs to.");
+      setTimeout(() => setTableEditMsg(null), 3000);
+      return;
+    }
+
+    setIsSavingTableEdits(true);
+    setTableEditMsg(null);
+
+    try {
+      const evRecord = evidenceLogs.find(e =>
+        e.audit_id === selectedLog.audit_id &&
+        e.filename.toLowerCase() === filename.toLowerCase()
+      );
+      if (!evRecord) {
+        throw new Error("No matching evidence record found for this file.");
+      }
+
+      let metadata: Record<string, string> = {};
+      try {
+        metadata = JSON.parse(evRecord.gemini_extracted_metadata);
+      } catch { metadata = {}; }
+
+      const edits = tableEditValues[tIdx] || {};
+      table.comparison_rows.forEach((row: any, rIdx: number) => {
+        if (edits[rIdx] !== undefined && edits[rIdx] !== row.value_evidence) {
+          const metaKey = fieldNameToMetaKey[row.field_name] || row.field_name;
+          metadata[metaKey] = edits[rIdx];
+        }
+      });
+
+      const res = await fetch("http://127.0.0.1:8000/api/evidence", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          audit_id: selectedLog.audit_id,
+          filename,
+          updated_metadata: metadata
+        })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.detail || "Failed to save.");
+      }
+
+      const responseData = await res.json();
+
+      await fetchEvidence();
+      await fetchLogs();
+
+      if (responseData.comparison_table) {
+        setSelectedLog(prev => prev ? ({
+          ...prev,
+          result: responseData.audit_result || prev.result,
+          suggested_comment: responseData.suggested_comment || prev.suggested_comment,
+          comparison_table: responseData.comparison_table
+        }) : null);
+      }
+
+      setEditingTableIdx(null);
+      setTableEditMsg("Table values updated and comparison recalculated.");
+      setTimeout(() => setTableEditMsg(null), 3000);
+    } catch (err: any) {
+      console.error(err);
+      setTableEditMsg(err.message || "Save failed.");
+      setTimeout(() => setTableEditMsg(null), 4000);
+    } finally {
+      setIsSavingTableEdits(false);
+    }
+  };
+
+  function cleanQuestionLabel(label?: string): string {
+    if (!label) return '';
+    const parts = label.split(/\s+[-–—]\s*|\s*[-–—]\s+/);
+    return parts[0] ? parts[0].trim() : label.trim();
+  }
 
   // Handle saving the edited form fields
   const handleSaveForm = async (e: React.FormEvent) => {
@@ -203,11 +332,14 @@ export default function Dashboard() {
         throw new Error(errData.detail || "Failed to save updates to Google Sheets.");
       }
 
-      setFormSuccessMessage("Successfully saved changes!");
+      const responseData = await res.json();
+
+      setFormSuccessMessage("Successfully saved changes! Comparison table recalculated.");
       setInitialFields(formFields);
 
-      // Refresh local logs
+      // Refresh local logs & evidence
       await fetchEvidence();
+      await fetchLogs();
 
       // Update selected evidence in UI state
       const updatedEvidence = {
@@ -216,6 +348,18 @@ export default function Dashboard() {
         gemini_extracted_metadata: JSON.stringify(formFields)
       };
       setSelectedEvidence(updatedEvidence);
+
+      // If currently selected log matches this audit_id, update selectedLog with recalculated comparison table & verdict
+      if (selectedLog && selectedLog.audit_id === selectedEvidence.audit_id) {
+        if (responseData.audit_result && responseData.comparison_table) {
+          setSelectedLog(prev => prev ? ({
+            ...prev,
+            result: responseData.audit_result,
+            suggested_comment: responseData.suggested_comment || prev.suggested_comment,
+            comparison_table: responseData.comparison_table
+          }) : null);
+        }
+      }
     } catch (err: any) {
       console.error(err);
       setFormErrorMessage(err.message || "An unexpected error occurred while saving.");
@@ -286,6 +430,10 @@ export default function Dashboard() {
 
   const getCommentAndTable = (fullComment: string) => {
     if (!fullComment) return { comment: "", table: null, tables: [] as ComparisonTable[] };
+
+    if (fullComment.startsWith("Dear Sir/Madam") || fullComment === "All match." || !fullComment.includes("|")) {
+      return { comment: fullComment, table: null, tables: [] as ComparisonTable[] };
+    }
 
     // Check if it's the old format
     if (fullComment.includes(" | Comparison: ")) {
@@ -376,14 +524,17 @@ export default function Dashboard() {
     (key) => formFields[key] !== initialFields[key]
   );
 
-  const filteredLogs = logs.filter(log => {
-    const matchesSearch = log.supplier_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      log.cert_type.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = statusFilter === "ALL" ||
-      (statusFilter === "MATCH" && log.result.toLowerCase() === "match") ||
-      (statusFilter === "MISMATCH" && log.result.toLowerCase() === "mismatch");
-    return matchesSearch && matchesStatus;
-  });
+  function getFilteredLogs(): AuditLog[] {
+    return logs.filter(log => {
+      const matchesSearch = log.supplier_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        log.cert_type.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesStatus = statusFilter === "ALL" ||
+        (statusFilter === "MATCH" && log.result.toLowerCase() === "match") ||
+        (statusFilter === "MISMATCH" && log.result.toLowerCase() === "mismatch");
+      return matchesSearch && matchesStatus;
+    });
+  }
+  const filteredLogs = getFilteredLogs();
 
   // Filter supplier list in editor tab
   const uniqueSuppliers = Array.from(new Set(evidenceLogs.map(e => e.supplier_name)));
@@ -391,7 +542,7 @@ export default function Dashboard() {
     name.toLowerCase().includes(supplierSearchQuery.toLowerCase())
   );
 
-  const supplierFiles = selectedSupplierName
+  const supplierFiles: DocumentEvidence[] = selectedSupplierName
     ? evidenceLogs.filter(e => e.supplier_name === selectedSupplierName)
     : [];
 
@@ -527,7 +678,7 @@ export default function Dashboard() {
                       <p className="text-sm">No audit logs match current filters.</p>
                     </div>
                   ) : (
-                    filteredLogs.map((log) => {
+                    (filteredLogs as any[]).map((log) => {
                       const isSelected = selectedLog?.timestamp === log.timestamp && selectedLog?.supplier_name === log.supplier_name;
                       const isMatch = log.result.toLowerCase() === "match";
                       return (
@@ -589,7 +740,7 @@ export default function Dashboard() {
                         : "border-transparent text-gray-500 hover:text-gray-400"
                         }`}
                     >
-                      Comparison Results
+                      Audit Results
                     </button>
                     <button
                       onClick={() => setActiveTab("assets")}
@@ -598,7 +749,7 @@ export default function Dashboard() {
                         : "border-transparent text-gray-500 hover:text-gray-400"
                         }`}
                     >
-                      Evidence & Q&A
+                      Evidence
                     </button>
                   </div>
 
@@ -644,6 +795,15 @@ export default function Dashboard() {
 
                             {hasJsonTable ? (
                               <div className="p-5 rounded-xl border border-white/5 bg-black/40 space-y-6">
+                                {tableEditMsg && (
+                                  <div className={`p-3 rounded-xl text-xs flex items-center gap-2 ${tableEditMsg.includes("recalculated")
+                                    ? "bg-emerald-500/10 border border-emerald-500/20 text-emerald-400"
+                                    : "bg-rose-500/10 border border-rose-500/20 text-rose-400"
+                                    }`}>
+                                    {tableEditMsg.includes("recalculated") ? <IconCircleCheck className="h-4 w-4 shrink-0" /> : <IconAlertTriangle className="h-4 w-4 shrink-0" />}
+                                    <span>{tableEditMsg}</span>
+                                  </div>
+                                )}
                                 <div className="border-b border-white/5 pb-3">
 
                                   <h4 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2">Comparison Tables</h4>
@@ -699,32 +859,78 @@ export default function Dashboard() {
 
                                         <div className={isActive && pdfUrl ? "xl:col-span-7 space-y-3" : "space-y-3"}>
                                           {t.question_label && (
-                                            <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-2 mt-1">
+                                            <div className="flex flex-row justify-between items-start gap-2 mt-1">
                                               <h4 className="text-xs font-bold text-gray-200 tracking-wide">
                                                 {t.question_label}
                                               </h4>
+                                              <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+                                                {editingTableIdx === tIdx ? (
+                                                  <>
+                                                    <button
+                                                      onClick={() => handleSaveTableEdits(tIdx)}
+                                                      disabled={isSavingTableEdits}
+                                                      className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-semibold tracking-wide transition-all cursor-pointer active:scale-95 flex items-center gap-1 disabled:opacity-50"
+                                                    >
+                                                      {isSavingTableEdits ? <IconLoader2 className="h-3 w-3 animate-spin" /> : <IconCheck className="h-3.5 w-3.5" />}
+                                                      Save
+                                                    </button>
+                                                    <button
+                                                      onClick={() => setEditingTableIdx(null)}
+                                                      className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-gray-400 hover:text-white text-[10px] font-semibold tracking-wide transition-all cursor-pointer active:scale-95 flex items-center gap-1"
+                                                    >
+                                                      <IconX className="h-3.5 w-3.5" />
+                                                      Cancel
+                                                    </button>
+                                                  </>
+                                                ) : (
+                                                  <button
+                                                    onClick={() => startTableEdit(tIdx)}
+                                                    className="p-1 rounded-lg bg-white/5 border border-white/10 hover:bg-white/15 text-gray-500 hover:text-emerald-400 transition-all cursor-pointer active:scale-90"
+                                                    title="Edit all values in evidence"
+                                                  >
+                                                    <IconEdit className="h-3.5 w-3.5" />
+                                                  </button>
+                                                )}
+                                              </div>
                                             </div>
                                           )}
                                           <div className="overflow-x-auto rounded-lg border border-white/5 bg-black/20">
-                                            <table className="min-w-full text-left text-xs font-sans text-gray-300">
+                                            <table className="min-w-full text-left text-xs font-sans text-gray-300" style={{ tableLayout: 'fixed' }}>
+                                              <colgroup>
+                                                <col style={{ width: '15%' }} />
+                                                <col style={{ width: '35%' }} />
+                                                <col style={{ width: '35%' }} />
+                                                <col style={{ width: '15%' }} />
+                                              </colgroup>
                                               <thead>
                                                 <tr className="border-b border-emerald-500/20 font-bold text-emerald-400 bg-emerald-950/35 backdrop-blur-sm">
-                                                  <th className="py-2.5 px-3 uppercase tracking-wider text-[10px]">Field</th>
-                                                  <th className="py-2.5 px-3 uppercase tracking-wider text-[10px]">Value in Evidence</th>
-                                                  <th className="py-2.5 px-3 uppercase tracking-wider text-[10px]">Value in QA Data</th>
+                                                  <th className="py-2.5 px-3 uppercase tracking-wider text-[10px] border-r border-white/10">Field</th>
+                                                  <th className="py-2.5 px-3 uppercase tracking-wider text-[10px] border-r border-white/10">Value in Evidence</th>
+                                                  <th className="py-2.5 px-3 uppercase tracking-wider text-[10px] border-r border-white/10">Value in QA Data</th>
                                                   <th className="py-2.5 px-3 uppercase tracking-wider text-[10px]">Result</th>
                                                 </tr>
                                               </thead>
-                                              <tbody className="divide-y divide-white/5">
+                                              <tbody>
                                                 {t.comparison_rows.map((row: any, rIdx: number) => {
                                                   const isMatch = row.result.toLowerCase() === "match";
                                                   const isMismatch = row.result.toLowerCase() === "mismatch";
                                                   return (
-                                                    <tr key={rIdx} className="hover:bg-white/[0.01]">
-                                                      <td className="py-2.5 px-3 text-gray-300 font-medium">{row.field_name}</td>
-                                                      <td className="py-2.5 px-3 text-gray-300 font-medium">{row.value_evidence}</td>
-                                                      <td className="py-2.5 px-3 text-gray-300 font-medium">{row.value_qa}</td>
-                                                      <td className="py-2.5 px-3 text-gray-300 font-medium">
+                                                    <tr key={rIdx} className="hover:bg-white/[0.01] border-b border-white/5">
+                                                      <td className="py-2.5 px-3 text-gray-300 font-medium border-r border-white/5 whitespace-normal break-words align-top">{row.field_name}</td>
+                                                      <td className="py-2.5 px-3 text-gray-300 font-medium border-r border-white/5 whitespace-normal break-words align-top">
+                                                        {editingTableIdx === tIdx ? (
+                                                          <textarea
+                                                            value={tableEditValues[tIdx]?.[rIdx] ?? row.value_evidence}
+                                                            onChange={(e) => updateTableEditValue(tIdx, rIdx, e.target.value)}
+                                                            className="w-full bg-transparent border border-emerald-500/30 rounded px-1.5 py-1 text-xs font-sans text-gray-200 resize-none focus:outline-none focus:border-emerald-500/60 transition-colors"
+                                                            rows={2}
+                                                          />
+                                                        ) : (
+                                                          <div className="whitespace-normal break-words">{row.value_evidence}</div>
+                                                        )}
+                                                      </td>
+                                                      <td className="py-2.5 px-3 text-gray-300 font-medium border-r border-white/5 whitespace-normal break-words align-top">{row.value_qa}</td>
+                                                      <td className="py-2.5 px-3 text-gray-300 font-medium whitespace-normal break-words align-top">
                                                         <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${isMatch
                                                           ? "bg-emerald-500/10 text-emerald-400"
                                                           : isMismatch
@@ -756,24 +962,30 @@ export default function Dashboard() {
                                 {table && (
                                   <div className="p-4 rounded-xl border border-white/5 bg-white/[0.01] hover:bg-white/[0.02] hover:border-emerald-500/15 transition-all duration-300 space-y-3 cursor-pointer">
                                     <div className="overflow-x-auto rounded-lg border border-white/5 bg-black/20">
-                                      <table className="min-w-full text-left text-xs font-sans text-gray-300">
+                                      <table className="min-w-full text-left text-xs font-sans text-gray-300" style={{ tableLayout: 'fixed' }}>
+                                        <colgroup>
+                                          <col style={{ width: '15%' }} />
+                                          <col style={{ width: '35%' }} />
+                                          <col style={{ width: '35%' }} />
+                                          <col style={{ width: '15%' }} />
+                                        </colgroup>
                                         <thead>
                                           <tr className="border-b border-emerald-500/20 font-bold text-emerald-400 bg-emerald-950/35 backdrop-blur-sm">
                                             {table.headers.map((h, i) => (
-                                              <th key={i} className="py-2.5 px-3 uppercase tracking-wider text-[10px]">{h}</th>
+                                              <th key={i} className={`py-2.5 px-3 uppercase tracking-wider text-[10px] ${i < table.headers.length - 1 ? 'border-r border-white/10' : ''}`}>{h}</th>
                                             ))}
                                           </tr>
                                         </thead>
-                                        <tbody className="divide-y divide-white/5">
+                                        <tbody>
                                           {table.rows.map((row, rIdx) => (
-                                            <tr key={rIdx} className="hover:bg-white/[0.01]">
+                                            <tr key={rIdx} className="hover:bg-white/[0.01] border-b border-white/5">
                                               {row.map((cell, cIdx) => {
                                                 const isStatusCell = cIdx === row.length - 1;
                                                 const cleanCell = cell.trim();
                                                 const isMatch = cleanCell.toLowerCase() === "match";
                                                 const isMismatch = cleanCell.toLowerCase() === "mismatch";
                                                 return (
-                                                  <td key={cIdx} className="py-2.5 px-3 text-gray-300 font-medium">
+                                                  <td key={cIdx} className={`py-2.5 px-3 text-gray-300 font-medium whitespace-normal break-words align-top ${cIdx < row.length - 1 ? 'border-r border-white/5' : ''}`}>
                                                     {isStatusCell ? (
                                                       <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${isMatch
                                                         ? "bg-emerald-500/10 text-emerald-400"
@@ -805,24 +1017,30 @@ export default function Dashboard() {
                                       </h4>
                                     )}
                                     <div className="overflow-x-auto rounded-lg border border-white/5 bg-black/20">
-                                      <table className="min-w-full text-left text-xs font-sans text-gray-300">
+                                      <table className="min-w-full text-left text-xs font-sans text-gray-300" style={{ tableLayout: 'fixed' }}>
+                                        <colgroup>
+                                          <col style={{ width: '15%' }} />
+                                          <col style={{ width: '35%' }} />
+                                          <col style={{ width: '35%' }} />
+                                          <col style={{ width: '15%' }} />
+                                        </colgroup>
                                         <thead>
                                           <tr className="border-b border-emerald-500/20 font-bold text-emerald-400 bg-emerald-950/35 backdrop-blur-sm">
                                             {t.headers.map((h, i) => (
-                                              <th key={i} className="py-2.5 px-3 uppercase tracking-wider text-[10px]">{h}</th>
+                                              <th key={i} className={`py-2.5 px-3 uppercase tracking-wider text-[10px] ${i < t.headers.length - 1 ? 'border-r border-white/10' : ''}`}>{h}</th>
                                             ))}
                                           </tr>
                                         </thead>
-                                        <tbody className="divide-y divide-white/5">
+                                        <tbody>
                                           {t.rows.map((row, rIdx) => (
-                                            <tr key={rIdx} className="hover:bg-white/[0.01]">
+                                            <tr key={rIdx} className="hover:bg-white/[0.01] border-b border-white/5">
                                               {row.map((cell, cIdx) => {
                                                 const isStatusCell = cIdx === row.length - 1;
                                                 const cleanCell = cell.trim();
                                                 const isMatch = cleanCell.toLowerCase() === "match";
                                                 const isMismatch = cleanCell.toLowerCase() === "mismatch";
                                                 return (
-                                                  <td key={cIdx} className="py-2.5 px-3 text-gray-300 font-medium">
+                                                  <td key={cIdx} className={`py-2.5 px-3 text-gray-300 font-medium whitespace-normal break-words align-top ${cIdx < row.length - 1 ? 'border-r border-white/5' : ''}`}>
                                                     {isStatusCell ? (
                                                       <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${isMatch
                                                         ? "bg-emerald-500/10 text-emerald-400"
@@ -861,7 +1079,7 @@ export default function Dashboard() {
                           try {
                             const matchingEvidence = evidenceLogs.filter(e => e.audit_id === selectedLog.audit_id);
                             const visibleDocs = assets.documents.filter(doc => doc.name.toLowerCase() !== "qa_data.json");
-                            
+
                             // Reconstruct the Q&A blocks from the evidence logs matching this audit_id
                             const parsedQA = matchingEvidence.map(e => {
                               let answers = [];
@@ -904,7 +1122,7 @@ export default function Dashboard() {
 
                             return parsedQA.map((item: any, idx: number) => {
                               const ev = item.original_evidence;
-                              const matchingDoc = visibleDocs.find(d => 
+                              const matchingDoc = visibleDocs.find(d =>
                                 d.name.toLowerCase() === ev.filename.toLowerCase() ||
                                 ev.filename.toLowerCase().includes(d.name.toLowerCase()) ||
                                 d.name.toLowerCase().includes(ev.filename.toLowerCase())
@@ -922,11 +1140,11 @@ export default function Dashboard() {
                                   {/* Title section: Filename and Question Label */}
                                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-white/5 pb-2.5">
                                     <h4 className="text-xs font-bold text-white truncate max-w-full sm:max-w-[450px]">
-                                      {ev.filename}
+                                      {cleanQuestionLabel(ev.ariba_question_label)}
                                     </h4>
                                     {ev.ariba_question_label && (
                                       <span className="text-[9px] uppercase font-bold text-emerald-400 tracking-wider px-2 py-0.5 rounded bg-emerald-500/[0.04] border border-emerald-500/10 shrink-0">
-                                        {ev.ariba_question_label}
+                                        {ev.filename}
                                       </span>
                                     )}
                                   </div>
@@ -1237,6 +1455,16 @@ export default function Dashboard() {
                             required
                           />
                         </div>
+                        <div>
+                          <label className="text-[10px] font-semibold text-gray-400 block mb-1">Year of publication</label>
+                          <input
+                            type="text"
+                            value={formFields.yearOfPublication || ""}
+                            onChange={(e) => setFormFields({ ...formFields, yearOfPublication: e.target.value })}
+                            placeholder="YYYY"
+                            className="w-full px-4.5 py-2.5 rounded-xl bg-black/40 border border-white/5 text-sm text-gray-200 focus:outline-none focus:border-emerald-500/30 transition-all duration-300 font-sans"
+                          />
+                        </div>
                         <div className="md:col-span-2">
                           <label className="text-[10px] font-semibold text-gray-400 block mb-1">Certificate location</label>
                           <input
@@ -1372,7 +1600,7 @@ export default function Dashboard() {
                         {supplierFiles.length === 0 ? (
                           <p className="text-xs text-gray-500 italic">No certificates recorded for this supplier.</p>
                         ) : (
-                          supplierFiles.map((ev) => {
+                          (supplierFiles as any[]).map((ev) => {
                             const isSelected = selectedEvidence?.audit_id === ev.audit_id && selectedEvidence?.filename === ev.filename;
                             return (
                               <div
@@ -1388,7 +1616,7 @@ export default function Dashboard() {
                                   <p className="text-xs font-semibold text-white truncate pr-2">{ev.filename}</p>
                                 </div>
                                 <div className="text-[10px] text-gray-500 font-medium truncate">
-                                  {ev.ariba_question_label}
+                                  {cleanQuestionLabel(ev.ariba_question_label)}
                                 </div>
                               </div>
                             );

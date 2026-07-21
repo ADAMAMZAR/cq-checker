@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <title>GPO - Automatic Certificate Auditor</title>
@@ -8,25 +9,27 @@
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
 </head>
+
 <body>
   <div class="container">
     <div class="panel-header">
       <h2>GPO Certificate Auditor</h2>
       <span id="ext-version" class="version-badge"></span>
     </div>
-    <p class="description">Navigate to the SAP Ariba supplier questionnaire page, then click the button below to download documents and execute the compliance audit.</p>
+    <p class="description">Navigate to the SAP Ariba supplier questionnaire page, then click the button below to
+      download documents and execute the compliance audit.</p>
 
     <button id="download-btn">Run Automatic Audit</button>
     <button id="stop-btn" class="btn-danger" style="display:none;">⏹ Stop Audit</button>
-    <button id="clear-cache-btn" class="btn-secondary" style="margin-top: 5px; margin-bottom: 5px; width: 100%;">Clear Extension Cache</button>
 
     <div class="log-box" id="log-box">
       <div class="log-title">Audit Activity Log</div>
       <div id="log-entries"></div>
     </div>
   </div>
-  
+
   <script src="../shared/constants.js"></script>
   <script src="panel.js"></script>
 </body>
+
 </html>

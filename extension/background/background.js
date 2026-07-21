@@ -327,55 +327,8 @@ async function handleAuditData(tabId, data) {
     // Step 3: Save remaining logs and evidence to disk locally FIRST
     notifyPanel('Consolidating files and audit reports to local disk...');
 
-    // Save formatted QA markdown file
+    // Save QA data as raw JSON structured with metadata
     if (extractedQAData.length > 0) {
-      let qaText = `# ${workspaceTitle}\n\n## Supplier: ${rawSupplierName}\n\n`;
-      let currentSection = '';
-      extractedQAData.forEach((qaBlock) => {
-        if (qaBlock.sectionLabel && qaBlock.sectionLabel !== currentSection) {
-          currentSection = qaBlock.sectionLabel;
-          qaText += `## ${currentSection}\n\n`;
-        }
-        if (qaBlock.questionLabel) {
-          qaText += `### ${qaBlock.questionLabel}\n\n`;
-        }
-        if (qaBlock.attachedFile) {
-          qaText += `**Attached File:** \`${s} - ${qaBlock.attachedFile}\`\n\n`;
-        }
-        qaBlock.answers.forEach(ans => {
-          qaText += `- **${ans.label}:** ${ans.value}\n`;
-        });
-        qaText += `\n---\n\n`;
-      });
-
-      const qaFilename = `${s} - QA_Data.md`;
-      const utf8Bytes = new TextEncoder().encode(qaText);
-      const base64Text = uint8ArrayToBase64(utf8Bytes);
-      const qaDataUrl = `data:text/markdown;base64,${base64Text}`;
-      const destQaFilename = `${DOWNLOAD_ROOT}/${s}/${qaFilename}`;
-
-      try {
-        await withDiskSaveLock(async () => {
-          await new Promise((resolve) => {
-            chrome.downloads.download({ url: qaDataUrl, filename: destQaFilename, saveAs: false }, (downloadId) => {
-              if (chrome.runtime.lastError || downloadId === undefined) {
-                const errMsg = chrome.runtime.lastError?.message || 'Unknown download error';
-                console.error('[Ariba SW] QA markdown save failed:', errMsg);
-                notifyPanel(`QA markdown save failed: ${errMsg}`, true);
-              } else {
-                notifyPanel(`Saved Q&A Markdown: ${qaFilename}`);
-                notifyAribaTab(tabId, `Saved Q&A data → ${destQaFilename}`);
-              }
-              resolve();
-            });
-          });
-        });
-      } catch (err) {
-        console.error('[Ariba SW] QA MD save failed:', err);
-        notifyPanel(`QA MD save exception: ${err.message}`, true);
-      }
-
-      // Also dump raw JSON structured with metadata
       const jsonDump = {
         supplierName: s,
         rawSupplierName: rawSupplierName,

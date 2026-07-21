@@ -76,20 +76,31 @@ document.addEventListener('DOMContentLoaded', () => {
       });
       addLog('Toast stylesheet injected.', 'info');
 
-      // Pre-injection state reset
-      addLog('Resetting page automation state...', 'info');
+      // Check for already-running automation before resetting
+      addLog('Checking page automation state...', 'info');
+      const stateResult = await chrome.scripting.executeScript({
+        target: { tabId: aribaTab.id, allFrames: true },
+        func: () => window.__aribaAutomationRunning === true
+      });
+      const alreadyRunning = stateResult?.some(r => r.result === true);
+      if (alreadyRunning) {
+        addLog('Automation is already running on this page. Please wait or click Stop first.', 'error');
+        setRunning(false);
+        return;
+      }
+
+      // Reset stop flag only — do NOT clear __aribaAutomationRunning (prevents duplicate injection)
+      addLog('Resetting page stop state...', 'info');
       const currentVersion = chrome.runtime.getManifest().version;
       await chrome.scripting.executeScript({
         target: { tabId: aribaTab.id, allFrames: true },
         func: (version) => {
-          // Always clear state so every button click starts fresh
-          window.__aribaAutomationRunning = false;
           window.__aribaStop = false;
           window.__aribaContentVersion = version;
         },
         args: [currentVersion]
       });
-      addLog('Page automation state reset completed.', 'info');
+      addLog('Page state ready.', 'info');
 
       // shared/constants.js must be injected first so sanitiseSupplierName()
       // in content.js has access to SUPPLIER_CLEAN_RULES at runtime.
