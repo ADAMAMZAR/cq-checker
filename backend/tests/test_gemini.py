@@ -33,13 +33,15 @@ def test_extract_certificate_data_success(mock_gemini_model):
     with patch("app.services.gemini.settings") as mock_settings:
         mock_settings.gemini_api_key = "fake_key"
         
-        # Mock successful Gemini JSON response
-        mock_response = MagicMock()
-        mock_response.text = '{"certificateOwnerName": "Target Supplier Inc", "expirationDate": "30/06/2028"}'
-        mock_gemini_model.generate_content.return_value = mock_response
-        
+        base_response = '{"certificateOwnerName": "Target Supplier Inc", "expirationDate": "30/06/2028", "issuerName": "N/A", "certificateType": "N/A", "certificateNumber": "N/A", "effectiveDate": "N/A", "certificateLocation": "N/A", "yearOfPublication": "N/A", "publicLiabilityAmount": "N/A", "currency": "N/A", "isPermanent": false, "recertificationLetter": false, "hasMultipleCertificates": false}'
+        mock_worker = MagicMock()
+        mock_worker.text = base_response
+        mock_judge = MagicMock()
+        mock_judge.text = base_response
+        mock_gemini_model.generate_content.side_effect = [mock_worker, mock_judge]
+
         result, in_t, out_t, cost = gemini.extract_certificate_data(b"pdfbytes", "application/pdf")
-        
+
         assert result["certificateOwnerName"] == "Target Supplier Inc"
         assert result["expirationDate"] == "30/06/2028"
 
@@ -47,13 +49,15 @@ def test_year_of_publication_effective_date_fallback(mock_gemini_model):
     with patch("app.services.gemini.settings") as mock_settings:
         mock_settings.gemini_api_key = "fake_key"
         
-        # Mock Gemini returning N/A for yearOfPublication, but valid effectiveDate
-        mock_response = MagicMock()
-        mock_response.text = '{"certificateOwnerName": "Target Supplier Inc", "effectiveDate": "15/08/2024", "yearOfPublication": "N/A"}'
-        mock_gemini_model.generate_content.return_value = mock_response
-        
+        # Worker returns N/A for year; Judge returns the corrected value (2024 from effectiveDate fallback)
+        mock_worker = MagicMock()
+        mock_worker.text = '{"certificateOwnerName": "Target Supplier Inc", "effectiveDate": "15/08/2024", "yearOfPublication": "N/A"}'
+        mock_judge = MagicMock()
+        mock_judge.text = '{"certificateOwnerName": "Target Supplier Inc", "effectiveDate": "15/08/2024", "yearOfPublication": "2024"}'
+        mock_gemini_model.generate_content.side_effect = [mock_worker, mock_judge]
+
         result, in_t, out_t, cost = gemini.extract_certificate_data(b"pdfbytes", "application/pdf")
-        
+
         # Should extract the 4-digit year '2024' from effectiveDate as fallback
         assert result["yearOfPublication"] == "2024"
 

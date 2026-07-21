@@ -551,12 +551,8 @@ export default function Dashboard() {
       {/* ── Header / Top Navigation ── */}
       <header className="flex justify-between items-center mb-6 pb-6 border-b border-white/5">
         <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-xl bg-white/[0.02] border border-white/10 flex items-center justify-center">
-            <IconDatabase className="text-emerald-400 h-5 w-5" />
-          </div>
           <div>
             <h1 className="text-lg font-bold tracking-tight text-white">GPO Automatic Certificate Auditor</h1>
-            <p className="text-xs text-gray-500">Compliance Verification Logs & AI-Auditor Hub</p>
           </div>
         </div>
 
@@ -1651,7 +1647,7 @@ export default function Dashboard() {
             <div className="double-bezel">
               <div className="double-bezel-inner text-center py-6">
                 <span className="text-[10px] uppercase font-bold text-gray-500 tracking-wider block mb-1">Total API Spending</span>
-                <h3 className="text-2xl font-black text-white tracking-tight tabular-nums">RM{totalCost.toFixed(4)} MYR</h3>
+                <h3 className="text-2xl font-black text-white tracking-tight tabular-nums">RM{totalCost.toFixed(4)}</h3>
                 <span className="text-[10px] text-gray-500 mt-1 block font-medium">Accumulated sum of all runs</span>
               </div>
             </div>
@@ -1667,8 +1663,8 @@ export default function Dashboard() {
             <div className="double-bezel">
               <div className="double-bezel-inner text-center py-6">
                 <span className="text-[10px] uppercase font-bold text-gray-500 tracking-wider block mb-1">Average Cost per Document</span>
-                <h3 className="text-2xl font-black text-white tracking-tight tabular-nums">RM{avgCost.toFixed(4)} MYR</h3>
-                <span className="text-[10px] text-gray-500 mt-1 block font-medium">Based on gemini-2.5-flash-lite pricing</span>
+                <h3 className="text-2xl font-black text-white tracking-tight tabular-nums">RM{avgCost.toFixed(4)}</h3>
+                {/* <span className="text-[10px] text-gray-500 mt-1 block font-medium">Based on gemini-2.5-flash-lite pricing</span> */}
               </div>
             </div>
           </div>
@@ -1684,7 +1680,7 @@ export default function Dashboard() {
                     <tr className="border-b border-white/5 font-bold text-gray-500">
                       <th className="py-3 px-4 uppercase tracking-wider text-[10px]">Supplier Name</th>
                       <th className="py-3 px-4 text-center uppercase tracking-wider text-[10px]">Certificates Audited</th>
-                      <th className="py-3 px-4 text-right uppercase tracking-wider text-[10px]">Accumulated Spend (MYR)</th>
+                      <th className="py-3 px-4 text-right uppercase tracking-wider text-[10px]">Accumulated Spend (RM)</th>
                       {/* <th className="py-3 px-4 text-right w-56 uppercase tracking-wider text-[10px]">Visual Spend Proportion</th> */}
                     </tr>
                   </thead>
@@ -1710,7 +1706,7 @@ export default function Dashboard() {
                           <tr key={sc.name} className="hover:bg-white/[0.01] transition-colors duration-300">
                             <td className="py-3 px-4 font-semibold text-white">{sc.name}</td>
                             <td className="py-3 px-4 text-center text-gray-300 font-medium tabular-nums">{sc.count}</td>
-                            <td className="py-3 px-4 text-right font-mono font-semibold text-white tabular-nums">RM{sc.cost.toFixed(4)} MYR</td>
+                            <td className="py-3 px-4 text-right font-mono font-semibold text-white tabular-nums">RM{sc.cost.toFixed(4)}</td>
                             {/* <td className="py-3 px-4 text-right">
                               <div className="w-full flex items-center justify-end gap-2.5">
                                 <div className="w-32 bg-white/5 h-2 rounded-full overflow-hidden border border-white/5 relative">

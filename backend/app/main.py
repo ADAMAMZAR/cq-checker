@@ -20,6 +20,7 @@ from app.config import settings
 from app.schemas import AuditLogEntry, AuditResultResponse, DocumentEvidence, UpdateEvidenceRequest
 import uuid
 from app.services import sheets, gemini
+from app.services import auditor
 
 app = FastAPI(
     title="GPO Automatic Certificate Auditor API",
@@ -106,10 +107,14 @@ def update_evidence(payload: UpdateEvidenceRequest):
                         meta = {}
                     extracted_results.append(meta)
 
-            recalculated_result, recalculated_comment, recalculated_comp_table = gemini.run_programmatic_audit(
+            combined_title = " ".join(
+                doc.ariba_question_label for doc in matching_docs
+            ) if matching_docs else ""
+            recalculated_result, recalculated_comment, recalculated_comp_table = auditor.run_full_audit(
                 supplier_name,
                 file_contexts,
-                extracted_results
+                extracted_results,
+                qa_data_title=combined_title,
             )
 
             # Update Audit_Results database log with recalculated comparison table & verdict
@@ -383,11 +388,13 @@ async def run_audit(
     if extracted_docs:
         expiration_date = extracted_docs[0]["extracted_data"].get("expirationDate", "N/A")
 
-    # Run programmatic comparison locally
-    audit_result, suggested_comment, comparison_table_dict = gemini.run_programmatic_audit(
+    # Run programmatic comparison locally (code-based, no AI)
+    qa_data_title = f"{workspace_title} {cert_type}"
+    audit_result, suggested_comment, comparison_table_dict = auditor.run_full_audit(
         supplier_name,
         file_contexts,
-        [d["extracted_data"] for d in extracted_docs]
+        [d["extracted_data"] for d in extracted_docs],
+        qa_data_title=qa_data_title,
     )
 
     comp_in_t = 0

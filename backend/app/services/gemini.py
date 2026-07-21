@@ -51,6 +51,12 @@ EXTRACTION_SCHEMA = {
         "effectiveDate":        {"type": "string"},
         "certificateLocation":  {"type": "string"},
         "yearOfPublication":    {"type": "string"},
+        "publicLiabilityAmount":  {"type": "string"},
+        "currency":               {"type": "string"},
+        "hasMultipleCertificates": {"type": "boolean"},
+        "additionalCertificateType": {"type": "string"},
+        "isPermanent":             {"type": "boolean"},
+        "recertificationLetter":   {"type": "boolean"},
     }
 }
 
@@ -121,7 +127,13 @@ def _run_extraction(file_bytes: bytes, mime_type: str, question_label: Optional[
             "Use 'N/A' for any field not found. "
             "Dates must be formatted as DD/MM/YYYY. "
             "yearOfPublication must be the 4-digit year (e.g. 2024). If no year of publication is found on the document, use the 4-digit year from effectiveDate. "
-            f"certificateLocation must be 'State, Country' (e.g. Selangor, Malaysia).{merged_instruction}"
+            f"certificateLocation must be 'State, Country' (e.g. Selangor, Malaysia).{merged_instruction} "
+            "If the document mentions a public liability or insurance coverage amount, extract it under publicLiabilityAmount "
+            "(e.g. '20,000,000', '20M', '$20M'). Extract the currency under currency. If only '$' is present without a currency code, set currency to 'AUD'. "
+            "If the document contains TWO OR MORE distinct certificates, set hasMultipleCertificates to true and describe the additional "
+            "type under additionalCertificateType. "
+            "If the document is a permanent/non-expiring certificate (e.g. 'KEKAL SAH', 'NO EXPIRY'), set isPermanent to true. "
+            "If the document is a recertification letter, renewal confirmation, or similar renewal notice (not a full certificate), set recertificationLetter to true."
         )
         
         response = model.generate_content(
