@@ -1,17 +1,24 @@
-import type { AuditLog, DocumentEvidence, SupplierAssets, FormFields } from "@/types";
+import type { AuditLog, DocumentEvidence, SupplierAssets, CostAnalyticsData } from "@/types";
 
 const BASE = "http://127.0.0.1:8000/api";
 
 export async function fetchAuditLogs(): Promise<AuditLog[]> {
   const res = await fetch(`${BASE}/logs`);
   if (!res.ok) throw new Error(`Failed to load logs: HTTP ${res.status}`);
-  return res.json();
+  const data: AuditLog[] = await res.json();
+  return data;
 }
 
-export async function fetchSupplierAssets(supplierName: string): Promise<SupplierAssets> {
-  const res = await fetch(`${BASE}/logs/${encodeURIComponent(supplierName)}/assets`);
+export async function fetchSupplierAssets(supplierId: number): Promise<SupplierAssets> {
+  const res = await fetch(`${BASE}/logs/${supplierId}/assets`);
   if (res.ok) return res.json();
   return { screenshots: [], documents: [] };
+}
+
+export async function fetchCostAnalytics(): Promise<CostAnalyticsData> {
+  const res = await fetch(`${BASE}/costs`);
+  if (!res.ok) throw new Error(`Failed to load cost analytics: HTTP ${res.status}`);
+  return res.json();
 }
 
 export async function fetchEvidenceLogs(): Promise<DocumentEvidence[]> {

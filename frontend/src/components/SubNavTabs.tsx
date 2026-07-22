@@ -1,8 +1,8 @@
 "use client";
 
-import { IconFiles, IconEdit, IconCoin, IconPlaylist } from "@tabler/icons-react";
+import { IconFiles, IconEdit, IconCoin, IconPlaylist, IconSearch } from "@tabler/icons-react";
 
-export type MainTab = "registry" | "editor" | "costs" | "playground";
+export type MainTab = "registry" | "editor" | "costs" | "playground" | "audit";
 
 interface SubNavTabsProps {
   active: MainTab;
@@ -14,6 +14,7 @@ const tabs: { key: MainTab; label: string; icon: typeof IconFiles }[] = [
   { key: "editor", label: "Supplier Data Editor", icon: IconEdit },
   { key: "costs", label: "Cost Analytics", icon: IconCoin },
   { key: "playground", label: "Playground", icon: IconPlaylist },
+  { key: "audit", label: "Audit", icon: IconSearch },
 ];
 
 export default function SubNavTabs({ active, onChange }: SubNavTabsProps) {

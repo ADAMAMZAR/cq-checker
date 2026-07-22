@@ -1,4 +1,4 @@
-import type { ComparisonTable, DocumentEvidence, SupplierCost } from "@/types";
+import type { ComparisonTable, DocumentEvidence } from "@/types";
 
 export function cleanQuestionLabel(label?: string): string {
   if (!label) return '';
@@ -72,20 +72,6 @@ export function getCommentAndTable(fullComment: string): {
   }
 
   return { comment: commentLines.join("\n"), table: null, tables };
-}
-
-export function getSupplierCosts(evidenceLogs: DocumentEvidence[]): SupplierCost[] {
-  const map: Record<string, { name: string; count: number; cost: number }> = {};
-  evidenceLogs.forEach(ev => {
-    const name = ev.supplier_name || "Unknown Supplier";
-    if (!map[name]) {
-      map[name] = { name, count: 0, cost: 0.0 };
-    }
-    const costMyr = ev.cost_myr || (ev.cost_usd ? ev.cost_usd * 4.70 : 0.0);
-    map[name].count += 1;
-    map[name].cost += costMyr;
-  });
-  return Object.values(map).sort((a, b) => b.cost - a.cost);
 }
 
 export function getLabelSortKey(label: string): number[] {

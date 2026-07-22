@@ -59,10 +59,17 @@ export interface FormFields {
   certificateLocation: string;
 }
 
-export interface SupplierCost {
-  name: string;
-  count: number;
-  cost: number;
+export interface CostBreakdownItem {
+  supplier_name: string;
+  document_count: number;
+  cost_myr: number;
+}
+
+export interface CostAnalyticsData {
+  total_cost_myr: number;
+  total_documents: number;
+  average_cost_myr: number;
+  breakdown: CostBreakdownItem[];
 }
 
 export const FIELD_NAME_TO_META_KEY: Record<string, string> = {

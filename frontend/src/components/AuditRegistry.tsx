@@ -19,6 +19,8 @@ interface AuditRegistryProps {
   onRefreshLogs: () => void;
 }
 
+let auditLogsFetched = false;
+
 export default function AuditRegistry({ evidenceLogs, isEvidenceLoading, onRefreshEvidence, onRefreshLogs }: AuditRegistryProps) {
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
@@ -51,7 +53,12 @@ export default function AuditRegistry({ evidenceLogs, isEvidenceLoading, onRefre
     }
   }, []);
 
-  useEffect(() => { loadLogs() }, [loadLogs]);
+  useEffect(() => {
+    if (!auditLogsFetched) {
+      auditLogsFetched = true;
+      loadLogs();
+    }
+  }, [loadLogs]);
 
   const handleSelectLog = async (log: AuditLog) => {
     setSelectedLog(log);
@@ -60,7 +67,7 @@ export default function AuditRegistry({ evidenceLogs, isEvidenceLoading, onRefre
     setAssets({ screenshots: [], documents: [] });
     setAssetsLoading(true);
     setActiveTab("comparison");
-    const data = await fetchSupplierAssets(log.supplier_name);
+    const data = await fetchSupplierAssets(log.supplier_id);
     setAssets(data);
     setAssetsLoading(false);
   };
@@ -139,7 +146,6 @@ export default function AuditRegistry({ evidenceLogs, isEvidenceLoading, onRefre
   };
 
   const refreshAll = async () => {
-    await onRefreshLogs();
     await onRefreshEvidence();
     await loadLogs();
   };
@@ -196,6 +202,7 @@ export default function AuditRegistry({ evidenceLogs, isEvidenceLoading, onRefre
                   log={selectedLog}
                   assets={assets}
                   assetsLoading={assetsLoading}
+                  isEvidenceLoading={isEvidenceLoading}
                   evidenceLogs={evidenceLogs}
                   activeTab={activeTab}
                   onTabChange={setActiveTab}
@@ -292,12 +299,11 @@ function LogListPanel({
               return (
                 <div key={`${log.timestamp}-${log.supplier_name}`}
                   onClick={() => onSelectLog(log)}
-                  className={`p-4 rounded-xl border transition-all duration-300 cursor-pointer relative group overflow-hidden ${isSelected
+                  className={`p-4 rounded-xl border transition-all duration-300 cursor-pointer ${isSelected
                     ? "bg-[var(--bg-surface-hover)] border-[var(--match-border)] glow-success"
-                    : "bg-[var(--bg-surface)] border-[var(--border-subtle)] hover:border-[var(--border-visible)] hover:bg-[var(--bg-surface-hover)]"
+                    : "bg-[var(--bg-surface)] border-[var(--border-subtle)] hover:border-emerald-500 hover:bg-emerald-900/10"
                     }`}
                 >
-                  <div className="absolute left-0 top-0 bottom-0 w-[3px] bg-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity"></div>
                   <div className="flex justify-between items-start mb-2">
                     <h4 className="font-semibold text-sm text-[var(--heading-color)] group-hover:text-[var(--match-text)] transition-colors">{log.supplier_name}</h4>
                     <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wider uppercase shrink-0 ${isMatch
@@ -318,7 +324,7 @@ function LogListPanel({
 }
 
 function DetailPane({
-  log, assets, assetsLoading, evidenceLogs, activeTab, onTabChange, onBack,
+  log, assets, assetsLoading, isEvidenceLoading, evidenceLogs, activeTab, onTabChange, onBack,
   copied, onCopyComment,
   activeTableIdx, onTableToggle,
   editingTableIdx, tableEditValues, onStartTableEdit, onUpdateTableEditValue,
@@ -328,6 +334,7 @@ function DetailPane({
   log: AuditLog;
   assets: SupplierAssets;
   assetsLoading: boolean;
+  isEvidenceLoading: boolean;
   evidenceLogs: DocumentEvidence[];
   activeTab: "comparison" | "assets";
   onTabChange: (t: "comparison" | "assets") => void;
@@ -389,6 +396,7 @@ function DetailPane({
       ) : (
         <EvidenceTab
           log={log} assets={assets} assetsLoading={assetsLoading}
+          isEvidenceLoading={isEvidenceLoading}
           evidenceLogs={evidenceLogs}
           onScreenshotClick={onScreenshotClick}
         />
@@ -730,13 +738,51 @@ function LegacyComparisonTables({ log, table, tables }: {
   );
 }
 
-function EvidenceTab({ log, assets, assetsLoading, evidenceLogs, onScreenshotClick }: {
+function EvidenceTab({ log, assets, assetsLoading, isEvidenceLoading, evidenceLogs, onScreenshotClick }: {
   log: AuditLog;
   assets: SupplierAssets;
   assetsLoading: boolean;
+  isEvidenceLoading: boolean;
   evidenceLogs: DocumentEvidence[];
   onScreenshotClick: (url: string) => void;
 }) {
+  if (isEvidenceLoading) {
+    return (
+      <div className="flex-1 flex flex-col gap-6 overflow-y-auto max-h-[620px] pr-2">
+        <div className="space-y-6 animate-pulse">
+          {Array.from({ length: 2 }).map((_, idx) => (
+            <div key={idx} className="p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-input)] space-y-4">
+              <div className="flex justify-between items-center border-b border-[var(--border-subtle)] pb-2.5">
+                <div className="h-3 w-48 bg-[var(--bg-surface-hover)] rounded" />
+                <div className="h-3 w-16 bg-[var(--bg-surface-hover)] rounded" />
+              </div>
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                <div className="lg:col-span-6 space-y-2.5">
+                  <div className="h-3 w-28 bg-[var(--bg-surface-hover)] rounded" />
+                  <div className="p-3 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-subtle)] space-y-2">
+                    <div className="h-3 w-full bg-[var(--bg-surface-hover)] rounded" />
+                    <div className="h-3 w-3/4 bg-[var(--bg-surface-hover)] rounded" />
+                  </div>
+                </div>
+                <div className="lg:col-span-6 space-y-2.5">
+                  <div className="h-3 w-28 bg-[var(--bg-surface-hover)] rounded" />
+                  <div className="p-2.5 rounded-lg bg-[var(--bg-surface-hover)] border border-[var(--border-subtle)] space-y-1.5">
+                    {Array.from({ length: 4 }).map((_, i) => (
+                      <div key={i} className="flex justify-between gap-2">
+                        <div className="h-3 w-24 bg-[var(--bg-surface-hover)] rounded" />
+                        <div className="h-3 w-20 bg-[var(--bg-surface-hover)] rounded" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex-1 flex flex-col gap-6 overflow-y-auto max-h-[620px] pr-2">
       <div className="space-y-6">

@@ -719,13 +719,17 @@ async def run_audit(
         comparison_table=comparison_table_dict
     )
 
-@app.get("/api/logs/{supplier_name}/assets")
-def get_supplier_assets(supplier_name: str):
+@app.get("/api/costs")
+def get_cost_analytics():
+    return sheets.get_cost_analytics()
+
+@app.get("/api/logs/{supplier_id}/assets")
+def get_supplier_assets(supplier_id: int):
     """
     Returns documents and screenshots for a supplier from Supabase Storage via file_urls in the DB.
     """
-    screenshots = sheets.get_screenshot_urls_by_supplier(supplier_name)
-    documents = sheets.get_evidence_urls_by_supplier(supplier_name)
+    screenshots = sheets.get_screenshot_urls_by_supplier_id(supplier_id)
+    documents = sheets.get_evidence_urls_by_supplier_id(supplier_id)
     return {"screenshots": screenshots, "documents": documents}
 
 

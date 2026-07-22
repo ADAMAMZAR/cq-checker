@@ -166,13 +166,23 @@ export default function SupplierDataEditor({ evidenceLogs, isEvidenceLoading, on
 
       <section className="lg:col-span-8 flex flex-col double-bezel">
         <div className="double-bezel-inner flex-1 flex flex-col h-full items-center justify-center text-center p-8">
-          <div className="h-14 w-14 rounded-full bg-[var(--bg-surface)] border border-[var(--border-visible)] flex items-center justify-center text-[var(--text-tertiary)] mb-4 animate-pulse">
-            <IconEdit className="h-6 w-6" />
-          </div>
-          <h3 className="text-md font-semibold text-[var(--heading-color)]">Select a certificate</h3>
-          <p className="text-sm text-[var(--text-tertiary)] max-w-xs mt-1">
-            Select a supplier name on the left and pick one of their certificates to verify or edit raw OCR details.
-          </p>
+          {isEvidenceLoading ? (
+            <div className="w-full space-y-4 animate-pulse">
+              <div className="h-14 w-14 rounded-full bg-[var(--bg-surface-hover)] mx-auto" />
+              <div className="h-4 w-36 bg-[var(--bg-surface-hover)] rounded mx-auto" />
+              <div className="h-3 w-56 bg-[var(--bg-surface-hover)] rounded mx-auto" />
+            </div>
+          ) : (
+            <>
+              <div className="h-14 w-14 rounded-full bg-[var(--bg-surface)] border border-[var(--border-visible)] flex items-center justify-center text-[var(--text-tertiary)] mb-4">
+                <IconEdit className="h-6 w-6" />
+              </div>
+              <h3 className="text-md font-semibold text-[var(--heading-color)]">Select a certificate</h3>
+              <p className="text-sm text-[var(--text-tertiary)] max-w-xs mt-1">
+                Select a supplier name on the left and pick one of their certificates to verify or edit raw OCR details.
+              </p>
+            </>
+          )}
         </div>
       </section>
     </div>
@@ -210,10 +220,9 @@ function SupplierPicker({ searchQuery, onSearchChange, isLoading, suppliers, onS
         ) : (
           suppliers.map(name => (
             <div key={name} onClick={() => onSelect(name)}
-              className="p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] hover:border-[var(--border-visible)] hover:bg-[var(--bg-surface-hover)] transition-all duration-300 cursor-pointer relative group overflow-hidden"
+              className="p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] hover:border-emerald-500 hover:bg-emerald-900/10 transition-all duration-300 cursor-pointer"
             >
-              <div className="absolute left-0 top-0 bottom-0 w-[3px] bg-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-              <h4 className="font-semibold text-sm text-[var(--heading-color)] group-hover:text-[var(--match-text)] transition-colors">{name}</h4>
+              <h4 className="font-semibold text-sm text-[var(--heading-color)]">{name}</h4>
             </div>
           ))
         )}
@@ -253,12 +262,11 @@ function SupplierFileList({ supplierName, files, selectedEvidence, onSelectFile,
               const isSelected = selectedEvidence?.audit_id === ev.audit_id && selectedEvidence?.filename === ev.filename;
               return (
                 <div key={`${ev.audit_id}-${ev.filename}`} onClick={() => onSelectFile(ev)}
-                  className={`p-4 rounded-xl border transition-all duration-300 cursor-pointer relative group overflow-hidden ${isSelected
+                  className={`p-4 rounded-xl border transition-all duration-300 cursor-pointer ${isSelected
                     ? "bg-[var(--bg-surface-hover)] border-[var(--match-border)] glow-success"
-                    : "bg-[var(--bg-surface)] border-[var(--border-visible)] hover:border-[var(--border-visible)] hover:bg-[var(--bg-surface-hover)]"
+                    : "bg-[var(--bg-surface)] border-[var(--border-visible)] hover:border-emerald-500 hover:bg-emerald-900/10"
                   }`}
                 >
-                  <div className="absolute left-0 top-0 bottom-0 w-[3px] bg-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity"></div>
                   <div className="flex justify-between items-start mb-1.5">
                     <p className="text-xs font-semibold text-[var(--heading-color)] truncate pr-2">{ev.filename}</p>
                   </div>
@@ -290,7 +298,7 @@ function CertificateViewer({ evidence }: { evidence: DocumentEvidence }) {
     <>
       <div className="flex justify-between items-center mb-4 pb-3 border-b border-[var(--border-subtle)] shrink-0">
         <h3 className="text-[10px] font-bold text-[var(--text-tertiary)] uppercase tracking-wider">Certificate Document</h3>
-        <a href={proxyUrl} target="_blank" rel="noreferrer"
+        <a href={proxyUrl ?? ""} target="_blank" rel="noreferrer"
           className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-visible)] text-[10px] text-[var(--text-secondary)] hover:text-[var(--heading-color)] hover:bg-[var(--bg-surface-hover)] transition-all duration-200 cursor-pointer active:scale-95"
         >
           <IconArrowUpRight className="h-3.5 w-3.5" />
@@ -315,7 +323,7 @@ function CertificateViewer({ evidence }: { evidence: DocumentEvidence }) {
             <p className="text-sm font-semibold text-[var(--heading-color)]">Preview unavailable for this format</p>
             <p className="text-xs text-[var(--text-tertiary)] mt-1">Download file to view the content details.</p>
           </div>
-          <a href={proxyUrl} download
+          <a href={proxyUrl ?? ""} download
             className="flex items-center gap-1.5 px-4.5 py-2 rounded-xl bg-emerald-600 text-xs font-semibold text-[var(--heading-color)] hover:bg-emerald-500 transition-all duration-300 cursor-pointer active:scale-95 glow-success mt-2"
           >
             <IconDownload className="h-4 w-4" />

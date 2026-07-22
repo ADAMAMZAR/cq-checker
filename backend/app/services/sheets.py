@@ -33,6 +33,9 @@ def find_metadata_by_hash(file_hash: str, ariba_question_label: str) -> Optional
 def update_audit_result(audit_id: str, result: str, suggested_comment: str, comparison_table: Optional[dict] = None) -> bool:
     return update_audit_result_via_supabase(audit_id, result, suggested_comment, comparison_table)
 
+def get_cost_analytics() -> dict:
+    return get_cost_analytics_via_supabase()
+
 # ---------------------------------------------------------------------------
 # Supabase Cloud Database Integration Functions
 # ---------------------------------------------------------------------------
@@ -185,7 +188,21 @@ def get_next_audit_id_via_supabase() -> str:
 def log_audit_run_via_supabase(supplier_name: str, doc_evidences: List[DocumentEvidence], audit_log: Optional[AuditLogEntry] = None) -> Optional[str]:
     try:
         supplier_id = get_or_create_supplier_via_supabase(supplier_name)
-        audit_id = get_next_audit_id_via_supabase()
+
+        existing_pattern = re.compile(r"^AUDIT_\d+$", re.IGNORECASE)
+        existing_id = None
+        if audit_log and existing_pattern.match(audit_log.audit_id):
+            existing_id = audit_log.audit_id
+        if not existing_id:
+            for doc in doc_evidences:
+                if existing_pattern.match(doc.audit_id):
+                    existing_id = doc.audit_id
+                    break
+
+        if existing_id:
+            audit_id = existing_id
+        else:
+            audit_id = get_next_audit_id_via_supabase()
 
         for doc in doc_evidences:
             doc.supplier_id = supplier_id
@@ -348,10 +365,10 @@ def find_metadata_by_hash_via_supabase(file_hash: str, ariba_question_label: str
         }
     return None
 
-def get_evidence_urls_by_supplier(supplier_name: str) -> List[Dict[str, str]]:
+def get_evidence_urls_by_supplier_id(supplier_id: int) -> List[Dict[str, str]]:
     """Return filename + file_url pairs for a supplier, fetching only needed columns."""
     records = call_supabase_select("document_evidence", {
-        "supplier_name": f"ilike.{supplier_name.strip()}",
+        "supplier_id": f"eq.{supplier_id}",
         "select": "filename,file_url",
     })
     return [
@@ -359,16 +376,42 @@ def get_evidence_urls_by_supplier(supplier_name: str) -> List[Dict[str, str]]:
         for r in records if r.get("file_url")
     ]
 
-def get_screenshot_urls_by_supplier(supplier_name: str) -> List[str]:
+def get_screenshot_urls_by_supplier_id(supplier_id: int) -> List[str]:
     """Return screenshot URLs for a supplier, fetching only needed columns."""
     records = call_supabase_select("audit_results", {
-        "supplier_name": f"ilike.{supplier_name.strip()}",
+        "supplier_id": f"eq.{supplier_id}",
         "select": "screenshot_url",
     })
     return [
         str(r.get("screenshot_url", ""))
         for r in records if r.get("screenshot_url")
     ]
+
+def get_cost_analytics_via_supabase() -> dict:
+    records = call_supabase_select("document_evidence", {
+        "select": "supplier_name,cost_usd,cost_myr",
+    })
+    total_cost_myr = 0.0
+    total_documents = len(records)
+    supplier_map: dict[str, dict] = {}
+    for r in records:
+        name = str(r.get("supplier_name", "Unknown"))
+        cost_usd = float(r.get("cost_usd") or 0.0)
+        cost_myr = float(r.get("cost_myr") or 0.0)
+        if not cost_myr and cost_usd:
+            cost_myr = cost_usd * 4.70
+        total_cost_myr += cost_myr
+        if name not in supplier_map:
+            supplier_map[name] = {"supplier_name": name, "document_count": 0, "cost_myr": 0.0}
+        supplier_map[name]["document_count"] += 1
+        supplier_map[name]["cost_myr"] += cost_myr
+    breakdown = sorted(supplier_map.values(), key=lambda s: s["cost_myr"], reverse=True)
+    return {
+        "total_cost_myr": round(total_cost_myr, 4),
+        "total_documents": total_documents,
+        "average_cost_myr": round(total_cost_myr / total_documents, 4) if total_documents else 0.0,
+        "breakdown": [{**s, "cost_myr": round(s["cost_myr"], 4)} for s in breakdown],
+    }
 
 def update_audit_result_via_supabase(audit_id: str, result: str, suggested_comment: str, comparison_table: Optional[dict] = None) -> bool:
     filters = {"audit_id": f"eq.{audit_id}"}
