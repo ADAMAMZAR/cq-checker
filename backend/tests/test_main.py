@@ -6,9 +6,9 @@ import os
 # Force pure Python implementation of Protobuf to bypass Python 3.14 C-extension incompatibilities
 os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 
-from unittest.mock import MagicMock, patch
-from fastapi.testclient import TestClient
+from unittest.mock import MagicMock, patch, PropertyMock
 import pytest
+from fastapi.testclient import TestClient
 from app.main import app
 from app.schemas import DocumentEvidence
 
@@ -164,12 +164,10 @@ def test_run_audit_duplicate_file_different_questions(mock_log_audit, mock_extra
     assert response.status_code == 200
     json_data = response.json()
     assert json_data["audit_id"] == "AUDIT_0003"
-    assert mock_extract.call_count == 2
-    
+    assert mock_extract.call_count == 1
+
     first_call_args = mock_extract.call_args_list[0][0]
-    second_call_args = mock_extract.call_args_list[1][0]
     assert first_call_args[2] == "1.1 CIDB"
-    assert second_call_args[2] == "1.2 BEM"
 
 @patch("app.services.gemini.extract_certificate_data")
 def test_extract_endpoint(mock_extract):
@@ -217,9 +215,23 @@ def test_get_evidence_endpoint(mock_get_evidence):
     assert json_data[0]["supplier_name"] == "ACME Corp"
     mock_get_evidence.assert_called_once()
 
+@patch("app.services.auditor.run_full_audit")
 @patch("app.services.sheets.update_document_evidence")
-def test_update_evidence_endpoint_success(mock_update):
+@patch("app.services.sheets.get_document_evidence_logs")
+def test_update_evidence_endpoint_success(mock_get_logs, mock_update, mock_audit):
+    mock_get_logs.return_value = [
+        DocumentEvidence(
+            audit_id="audit-123", supplier_id=1, timestamp="now",
+            supplier_name="ACME Corp", filename="cert.pdf",
+            ariba_question_label="1.1 Certificate", ariba_qa_answers="[]",
+            gemini_extracted_supplier_name="ACME Corp",
+            gemini_extracted_metadata='{"certificateOwnerName":"ACME Corp"}',
+            file_content_type="application/pdf",
+            input_tokens=100, output_tokens=20, cost_usd=0.000018,
+        )
+    ]
     mock_update.return_value = True
+    mock_audit.return_value = ("Match", "All match.", {"tables": []})
     payload = {
         "audit_id": "audit-123",
         "filename": "cert.pdf",
@@ -228,21 +240,33 @@ def test_update_evidence_endpoint_success(mock_update):
     response = client.put("/api/evidence", json=payload)
     assert response.status_code == 200
     assert response.json()["status"] == "success"
+    assert response.json()["audit_result"] == "Match"
     mock_update.assert_called_once_with(
         audit_id="audit-123",
         filename="cert.pdf",
         updated_metadata={"certificateOwnerName": "New Name"}
     )
 
-@patch("app.services.sheets.update_document_evidence")
-def test_update_evidence_endpoint_failure(mock_update):
-    mock_update.return_value = False
+
+@patch("app.services.sheets.get_document_evidence_logs")
+def test_update_evidence_endpoint_failure(mock_get_logs):
+    mock_get_logs.return_value = [
+        DocumentEvidence(
+            audit_id="audit-123", supplier_id=1, timestamp="now",
+            supplier_name="ACME Corp", filename="cert.pdf",
+            ariba_question_label="1.1 Certificate", ariba_qa_answers="[]",
+            gemini_extracted_supplier_name="ACME Corp",
+            gemini_extracted_metadata='{"certificateOwnerName":"ACME Corp"}',
+            file_content_type="application/pdf",
+            input_tokens=100, output_tokens=20, cost_usd=0.000018,
+        )
+    ]
     payload = {
         "audit_id": "audit-123",
         "filename": "cert.pdf",
         "updated_metadata": {"certificateOwnerName": "New Name"}
     }
     response = client.put("/api/evidence", json=payload)
-    assert response.status_code == 404
-    mock_update.assert_called_once()
+    assert response.status_code == 500
+    assert "failed" in response.json()["detail"].lower()
 

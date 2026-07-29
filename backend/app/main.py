@@ -16,10 +16,11 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.schemas import AuditLogEntry, AuditResultResponse, DocumentEvidence, UpdateEvidenceRequest
+from app.schemas import AuditLogEntry, AuditResultResponse, DocumentEvidence, UpdateEvidenceRequest, AuditRegistryEntry
 import uuid
 from app.services import sheets, gemini
 from app.services import auditor
+from app.services.gemini import clean_question_label
 
 app = FastAPI(
     title="GPO Automatic Certificate Auditor API",
@@ -42,6 +43,95 @@ app.add_middleware(
 def read_root():
     return {"status": "healthy", "service": "GPO Automatic Certificate Auditor API"}
 
+async def _process_uploaded_files(
+    supplier_name: str,
+    safe_supplier_name: str,
+    files: List[UploadFile],
+    qa_list: list,
+    temp_audit_id: str,
+    timestamp: str,
+):
+    """
+    Single-pass file processing: read -> match -> hash -> upload -> dispatch Gemini.
+    Returns (doc_evidences, file_contexts, extracted_docs, total_extraction_cost).
+    No file_bytes_map accumulation — each file is processed and discarded in one iteration.
+    """
+    file_tasks = []
+    file_contexts = []
+
+    qa_attachments = {}
+    for block in qa_list:
+        attached = block.get("attachedFile", "").strip().lower()
+        if attached and attached not in qa_attachments:
+            q_label = clean_question_label(block.get("questionLabel", "General Question"))
+            q_answers = json.dumps(block.get("answers", []))
+            qa_attachments[attached] = (q_label, q_answers)
+
+    for file in files:
+        raw = await file.read()
+        fname_lower = file.filename.lower() if file.filename else ""
+        content_type = file.content_type or "application/pdf"
+        orig_filename = file.filename or "document"
+
+        q_label = "General Attachment"
+        q_answers = "[]"
+        for attached_name, (ql, qa) in qa_attachments.items():
+            if attached_name in fname_lower or fname_lower in attached_name:
+                q_label = ql
+                q_answers = qa
+                break
+
+        fhash = hashlib.sha256(raw).hexdigest()
+        cached_record = sheets.find_metadata_by_hash(fhash, q_label)
+        if cached_record:
+            try:
+                metadata_dict = json.loads(cached_record["gemini_extracted_metadata"])
+            except Exception:
+                metadata_dict = {}
+            task = asyncio.to_thread(lambda md=metadata_dict: (md, 0, 0, 0.0))
+        else:
+            task = asyncio.to_thread(gemini.extract_certificate_data, raw, content_type, q_label)
+
+        file_url = None
+        if settings.supabase_url and settings.supabase_key:
+            file_url = sheets.upload_file_to_supabase_storage(raw, safe_supplier_name, orig_filename, content_type)
+
+        file_contexts.append({
+            "filename": orig_filename, "content_type": content_type,
+            "ariba_question_label": q_label, "ariba_qa_answers": q_answers,
+            "file_hash": fhash, "file_url": file_url,
+        })
+        file_tasks.append(task)
+
+    extraction_results = await asyncio.gather(*file_tasks)
+
+    doc_evidences = []
+    extracted_docs = []
+    total_cost = 0.0
+
+    for ctx, (extracted_data, in_t, out_t, cost) in zip(file_contexts, extraction_results):
+        gemini_supp_name = extracted_data.get("certificateOwnerName", supplier_name)
+        total_cost += cost
+        extracted_docs.append({
+            "filename": ctx["filename"], "extracted_data": extracted_data,
+            "input_tokens": in_t, "output_tokens": out_t, "cost_usd": cost,
+        })
+        doc_evidences.append(DocumentEvidence(
+            audit_id=temp_audit_id, supplier_id=0, timestamp=timestamp,
+            supplier_name=supplier_name, filename=ctx["filename"],
+            ariba_question_label=ctx["ariba_question_label"],
+            ariba_qa_answers=ctx["ariba_qa_answers"],
+            gemini_extracted_supplier_name=gemini_supp_name,
+            gemini_extracted_metadata=json.dumps(extracted_data),
+            file_content_type=ctx["content_type"],
+            input_tokens=in_t, output_tokens=out_t,
+            cost_usd=cost,
+            file_hash=ctx["file_hash"], file_url=ctx.get("file_url"),
+        ))
+
+    return doc_evidences, file_contexts, extracted_docs, total_cost
+
+
 @app.get("/api/logs", response_model=List[AuditLogEntry])
 def get_logs():
     """
@@ -49,6 +139,13 @@ def get_logs():
     """
     logs = sheets.get_audit_logs()
     return logs
+
+@app.get("/api/audit-registry", response_model=List[AuditRegistryEntry])
+def get_audit_registry():
+    """
+    Consolidated audit registry with supplier info, result, and document counts.
+    """
+    return sheets.get_audit_registry()
 
 @app.get("/api/evidence", response_model=List[DocumentEvidence])
 def get_evidence():
@@ -64,73 +161,77 @@ def update_evidence(payload: UpdateEvidenceRequest):
     """
     Updates the extracted certificate details (JSON metadata) for a specific document evidence
     record identified by its Audit ID and Filename, and re-runs the comparison table audit.
+    Computation happens BEFORE any DB mutation — returns 500 if verdict cannot be computed.
     """
+    matching_docs = sheets.get_document_evidence_logs(audit_id=payload.audit_id)
+    if not matching_docs:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Audit ID not found."
+        )
+
+    record_found = any(d.filename == payload.filename for d in matching_docs)
+    if not record_found:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Matching document evidence record not found."
+        )
+
+    supplier_name = matching_docs[0].supplier_name
+    file_contexts = []
+    extracted_results = []
+    combined_title = " ".join(d.ariba_question_label for d in matching_docs)
+
+    for doc in matching_docs:
+        file_contexts.append({
+            "filename": doc.filename,
+            "ariba_question_label": gemini.clean_question_label(doc.ariba_question_label),
+            "ariba_qa_answers": doc.ariba_qa_answers,
+        })
+        if doc.filename == payload.filename:
+            extracted_results.append(payload.updated_metadata)
+        else:
+            try:
+                meta = json.loads(doc.gemini_extracted_metadata)
+            except Exception:
+                meta = {}
+            extracted_results.append(meta)
+
+    try:
+        audit_result, suggested_comment, comparison_table = auditor.run_full_audit(
+            supplier_name, file_contexts, extracted_results,
+            qa_data_title=combined_title,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Verdict recalculation failed — no data was saved: {e}"
+        )
+
     success = sheets.update_document_evidence(
         audit_id=payload.audit_id,
         filename=payload.filename,
-        updated_metadata=payload.updated_metadata
+        updated_metadata=payload.updated_metadata,
     )
     if not success:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Matching document evidence record not found or update failed."
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to save updated metadata."
         )
 
-    # Re-run comparison audit for all evidence attached to this audit_id
-    recalculated_result = None
-    recalculated_comment = None
-    recalculated_comp_table = None
-
-    try:
-        all_evidence = sheets.get_document_evidence_logs()
-        matching_docs = [doc for doc in all_evidence if str(doc.audit_id).strip() == str(payload.audit_id).strip()]
-
-        if matching_docs:
-            supplier_name = matching_docs[0].supplier_name
-            file_contexts = []
-            extracted_results = []
-
-            for doc in matching_docs:
-                file_contexts.append({
-                    "filename": doc.filename,
-                    "ariba_question_label": gemini.clean_question_label(doc.ariba_question_label),
-                    "ariba_qa_answers": doc.ariba_qa_answers
-                })
-                if doc.filename == payload.filename:
-                    extracted_results.append(payload.updated_metadata)
-                else:
-                    try:
-                        meta = json.loads(doc.gemini_extracted_metadata)
-                    except Exception:
-                        meta = {}
-                    extracted_results.append(meta)
-
-            combined_title = " ".join(
-                doc.ariba_question_label for doc in matching_docs
-            ) if matching_docs else ""
-            recalculated_result, recalculated_comment, recalculated_comp_table = auditor.run_full_audit(
-                supplier_name,
-                file_contexts,
-                extracted_results,
-                qa_data_title=combined_title,
-            )
-
-            # Update Audit_Results database log with recalculated comparison table & verdict
-            sheets.update_audit_result(
-                audit_id=payload.audit_id,
-                result=recalculated_result,
-                suggested_comment=recalculated_comment,
-                comparison_table=recalculated_comp_table
-            )
-    except Exception as e:
-        print(f"Warning: Failed to recalculate comparison table after evidence update: {e}")
+    sheets.update_audit_result(
+        audit_id=payload.audit_id,
+        result=audit_result,
+        suggested_comment=suggested_comment,
+        comparison_table=comparison_table,
+    )
 
     return {
         "status": "success",
         "message": "Document evidence updated successfully.",
-        "audit_result": recalculated_result,
-        "suggested_comment": recalculated_comment,
-        "comparison_table": recalculated_comp_table
+        "audit_result": audit_result,
+        "suggested_comment": suggested_comment,
+        "comparison_table": comparison_table,
     }
 
 @app.post("/api/test/extract")
@@ -163,25 +264,10 @@ async def extract_documents(
 ):
     """
     Phase 1 endpoint called by the Chrome Extension.
-    Saves attachments locally, runs Gemini Worker + LLM Judge extraction,
+    Runs single-pass file processing (read -> match -> hash -> upload -> Gemini),
     saves DocumentEvidence to database, and returns audit_id for the comparison phase.
-
-    supplier_name: real/unedited supplier name (goes into DB).
-    supplier_folder: folder-safe short name for local file paths
-                     (falls back to alphanumeric-only sanitization if not provided).
     """
     safe_supplier_name = supplier_folder or "".join(c for c in supplier_name if c.isalnum() or c in (" ", "_", "-")).strip()
-
-    saved_filenames = []
-    file_bytes_map = {}
-    file_content_type_map = {}
-
-    for file in files:
-        file_bytes = await file.read()
-        await file.seek(0)
-        saved_filenames.append(file.filename)
-        file_bytes_map[file.filename.lower()] = file_bytes
-        file_content_type_map[file.filename.lower()] = file.content_type or "application/pdf"
 
     screenshot_url = None
     if screenshot:
@@ -205,113 +291,10 @@ async def extract_documents(
     except Exception:
         qa_list = []
 
-    file_contexts = []
-    file_tasks = []
-    matched_file_keys = set()
-    items_to_process = []
+    doc_evidences, file_contexts, extracted_docs, total_extraction_cost = await _process_uploaded_files(
+        supplier_name, safe_supplier_name, files, qa_list, temp_audit_id, timestamp,
+    )
 
-    if qa_list:
-        for block in qa_list:
-            attached = block.get("attachedFile", "").strip()
-            q_label = gemini.clean_question_label(block.get("questionLabel", "General Question"))
-            q_answers = json.dumps(block.get("answers", []))
-            matching_file_tuple = None
-            if attached:
-                for fname_lower, fbytes in file_bytes_map.items():
-                    if attached.lower() in fname_lower or fname_lower in attached.lower():
-                        matching_file_tuple = (fname_lower, fbytes, file_content_type_map[fname_lower])
-                        matched_file_keys.add(fname_lower)
-                        break
-            if matching_file_tuple:
-                fname_lower, fbytes, ctype = matching_file_tuple
-                orig_fname = next((n for n in saved_filenames if n.lower() == fname_lower), attached)
-                items_to_process.append({
-                    "question_label": q_label, "qa_answers": q_answers,
-                    "filename": orig_fname, "file_bytes": fbytes, "content_type": ctype
-                })
-
-    for fname_lower, fbytes in file_bytes_map.items():
-        if fname_lower not in matched_file_keys:
-            orig_fname = next((n for n in saved_filenames if n.lower() == fname_lower), fname_lower)
-            items_to_process.append({
-                "question_label": "General Attachment", "qa_answers": "[]",
-                "filename": orig_fname, "file_bytes": fbytes, "content_type": file_content_type_map[fname_lower]
-            })
-
-    if not items_to_process:
-        for fname_lower, fbytes in file_bytes_map.items():
-            orig_fname = next((n for n in saved_filenames if n.lower() == fname_lower), fname_lower)
-            items_to_process.append({
-                "question_label": "General Attachment", "qa_answers": "[]",
-                "filename": orig_fname, "file_bytes": fbytes, "content_type": file_content_type_map[fname_lower]
-            })
-
-    for item in items_to_process:
-        ariba_question_label = item["question_label"]
-        ariba_qa_answers = item["qa_answers"]
-        file_bytes = item["file_bytes"]
-        filename = item["filename"]
-        content_type = item["content_type"]
-        file_hash = hashlib.sha256(file_bytes).hexdigest()
-
-        cached_record = sheets.find_metadata_by_hash(file_hash, ariba_question_label)
-        if cached_record:
-            try:
-                metadata_dict = json.loads(cached_record["gemini_extracted_metadata"])
-            except Exception:
-                metadata_dict = {}
-            task = asyncio.to_thread(lambda md=metadata_dict: (
-                md, 0, 0, 0.0
-            ))
-        else:
-            task = asyncio.to_thread(
-                gemini.extract_certificate_data,
-                file_bytes, content_type, ariba_question_label
-            )
-
-        file_url = None
-        if settings.supabase_url and settings.supabase_key:
-            file_url = sheets.upload_file_to_supabase_storage(
-                file_bytes, safe_supplier_name, filename, content_type
-            )
-
-        file_contexts.append({
-            "filename": filename, "content_type": content_type,
-            "ariba_question_label": ariba_question_label,
-            "ariba_qa_answers": ariba_qa_answers,
-            "file_hash": file_hash, "file_url": file_url
-        })
-        file_tasks.append(task)
-
-    extraction_results = await asyncio.gather(*file_tasks)
-
-    doc_evidences = []
-    extracted_docs = []
-    total_extraction_cost = 0.0
-
-    for ctx, (extracted_data, in_t, out_t, cost) in zip(file_contexts, extraction_results):
-        extracted_docs.append({
-            "filename": ctx["filename"],
-            "extracted_data": extracted_data,
-            "input_tokens": in_t, "output_tokens": out_t, "cost_usd": cost
-        })
-        gemini_supp_name = extracted_data.get("certificateOwnerName", supplier_name)
-        total_extraction_cost += cost
-
-        doc_evidences.append(DocumentEvidence(
-            audit_id=temp_audit_id, supplier_id=0, timestamp=timestamp,
-            supplier_name=supplier_name, filename=ctx["filename"],
-            ariba_question_label=ctx["ariba_question_label"],
-            ariba_qa_answers=ctx["ariba_qa_answers"],
-            gemini_extracted_supplier_name=gemini_supp_name,
-            gemini_extracted_metadata=json.dumps(extracted_data),
-            file_content_type=ctx["content_type"],
-            input_tokens=in_t, output_tokens=out_t,
-            cost_usd=cost, cost_myr=cost * 4.70,
-            file_hash=ctx["file_hash"], file_url=ctx.get("file_url")
-        ))
-
-    # Save DocumentEvidence to DB (no audit_log yet — that happens in comparison phase)
     resolved_audit_id = sheets.log_audit_run(supplier_name, doc_evidences, None)
     if not resolved_audit_id:
         resolved_audit_id = temp_audit_id
@@ -326,7 +309,6 @@ async def extract_documents(
         "timestamp": timestamp,
         "file_count": len(doc_evidences),
         "total_extraction_cost_usd": total_extraction_cost,
-        "total_extraction_cost_myr": total_extraction_cost * 4.70
     }
 
 
@@ -346,8 +328,7 @@ async def run_audit_comparison(
     saves the full audit log including results, and returns the verdict.
     """
     # Load existing DocumentEvidence records from DB
-    all_evidence = sheets.get_document_evidence_logs()
-    matching_docs = [doc for doc in all_evidence if str(doc.audit_id).strip() == str(audit_id).strip()]
+    matching_docs = sheets.get_document_evidence_logs(audit_id=audit_id)
 
     file_contexts = []
     extracted_results = []
@@ -403,9 +384,7 @@ async def run_audit_comparison(
         comparison_input_tokens=0,
         comparison_output_tokens=0,
         comparison_cost_usd=0.0,
-        comparison_cost_myr=0.0,
         total_run_cost_usd=total_run_cost,
-        total_run_cost_myr=total_run_cost * 4.70,
         comparison_table=comparison_table_dict
     )
 
@@ -440,33 +419,17 @@ async def run_audit(
     supplier_folder: Optional[str] = Form(None),
     workspace_title: str = Form(...),
     cert_type: str = Form(...),
-    qa_data: str = Form(...),  # Scraped QA questions & answers
+    qa_data: str = Form(...),
     files: List[UploadFile] = File(...),
     screenshot: Optional[UploadFile] = File(None)
 ):
     """
     Main endpoint called by the Chrome Extension.
-    Saves attachments locally, triggers the audit,
+    Runs single-pass file processing, then runs the code-based auditor comparison
     and records results in Google Sheets.
-
-    supplier_folder: folder-safe short name for file paths
-                     (falls back to alphanumeric-only sanitization if not provided).
     """
     safe_supplier_name = supplier_folder or "".join(c for c in supplier_name if c.isalnum() or c in (" ", "_", "-")).strip()
-    
-    # Keep file bytes in memory for processing
-    saved_filenames = []
-    file_bytes_map = {}  # filename_lower -> bytes
-    file_content_type_map = {}
-    
-    for file in files:
-        file_bytes = await file.read()
-        await file.seek(0)
-        saved_filenames.append(file.filename)
-        file_bytes_map[file.filename.lower()] = file_bytes
-        file_content_type_map[file.filename.lower()] = file.content_type or "application/pdf"
-        
-    # Save screenshot if provided
+
     screenshot_url = None
     if screenshot:
         screenshot_filename = f"screenshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
@@ -477,11 +440,9 @@ async def run_audit(
                 screenshot_bytes, safe_supplier_name, screenshot_filename, "image/png"
             )
 
-    # Relational Database Auditing Setup (Initial temp ID)
     temp_audit_id = f"TEMP_{uuid.uuid4()}"
     timestamp = datetime.now().strftime("%d/%m/%Y, %H:%M:%S")
 
-    # Parse QA list to link questions/responses to specific files
     try:
         qa_list = json.loads(qa_data)
         if isinstance(qa_list, dict):
@@ -491,167 +452,16 @@ async def run_audit(
     except Exception:
         qa_list = []
 
-    file_contexts = []
-    file_tasks = []
+    doc_evidences, file_contexts, extracted_docs, total_extraction_cost = await _process_uploaded_files(
+        supplier_name, safe_supplier_name, files, qa_list, temp_audit_id, timestamp,
+    )
 
-    # Keep track of which uploaded files were matched to question blocks
-    matched_file_keys = set()
-    items_to_process = []
+    all_filenames = [d.filename for d in doc_evidences]
 
-    if qa_list:
-        for block in qa_list:
-            attached = block.get("attachedFile", "").strip()
-            q_label = gemini.clean_question_label(block.get("questionLabel", "General Question"))
-            q_answers = json.dumps(block.get("answers", []))
-            
-            matching_file_tuple = None
-            if attached:
-                # Find matching file in file_bytes_map
-                for fname_lower, fbytes in file_bytes_map.items():
-                    # Check substring match both ways to be resilient
-                    if attached.lower() in fname_lower or fname_lower in attached.lower():
-                        matching_file_tuple = (fname_lower, fbytes, file_content_type_map[fname_lower])
-                        matched_file_keys.add(fname_lower)
-                        break
-            
-            if matching_file_tuple:
-                fname_lower, fbytes, ctype = matching_file_tuple
-                orig_fname = next((n for n in saved_filenames if n.lower() == fname_lower), attached)
-                items_to_process.append({
-                    "question_label": q_label,
-                    "qa_answers": q_answers,
-                    "filename": orig_fname,
-                    "file_bytes": fbytes,
-                    "content_type": ctype
-                })
-
-    # Now add any uploaded files that were NOT matched to any question block as General Attachments
-    for fname_lower, fbytes in file_bytes_map.items():
-        if fname_lower not in matched_file_keys:
-            orig_fname = next((n for n in saved_filenames if n.lower() == fname_lower), fname_lower)
-            items_to_process.append({
-                "question_label": "General Attachment",
-                "qa_answers": "[]",
-                "filename": orig_fname,
-                "file_bytes": fbytes,
-                "content_type": file_content_type_map[fname_lower]
-            })
-
-    # Fallback if no items matched (e.g. no qa_list or empty): process all uploaded files
-    if not items_to_process:
-        for fname_lower, fbytes in file_bytes_map.items():
-            orig_fname = next((n for n in saved_filenames if n.lower() == fname_lower), fname_lower)
-            items_to_process.append({
-                "question_label": "General Attachment",
-                "qa_answers": "[]",
-                "filename": orig_fname,
-                "file_bytes": fbytes,
-                "content_type": file_content_type_map[fname_lower]
-            })
-
-    for item in items_to_process:
-        ariba_question_label = item["question_label"]
-        ariba_qa_answers = item["qa_answers"]
-        file_bytes = item["file_bytes"]
-        filename = item["filename"]
-        content_type = item["content_type"]
-
-        file_hash = hashlib.sha256(file_bytes).hexdigest()
-
-        # Check if already processed (cache hit)
-        cached_record = sheets.find_metadata_by_hash(file_hash, ariba_question_label)
-        if cached_record:
-            # Reconstruct dummy/empty task for gather since we have a hit
-            try:
-                metadata_dict = json.loads(cached_record["gemini_extracted_metadata"])
-            except Exception:
-                metadata_dict = {}
-            task = asyncio.to_thread(lambda: (
-                metadata_dict,
-                0,  # input tokens
-                0,  # output tokens
-                0.0 # cost
-            ))
-        else:
-            # Schedule Gemini OCR extraction concurrently in thread
-            task = asyncio.to_thread(
-                gemini.extract_certificate_data,
-                file_bytes,
-                content_type,
-                ariba_question_label
-            )
-
-        # Upload file to Supabase Storage if enabled
-        file_url = None
-        if settings.supabase_url and settings.supabase_key:
-            file_url = sheets.upload_file_to_supabase_storage(
-                file_bytes, safe_supplier_name, filename, content_type
-            )
-
-        file_contexts.append({
-            "filename": filename,
-            "content_type": content_type,
-            "ariba_question_label": ariba_question_label,
-            "ariba_qa_answers": ariba_qa_answers,
-            "file_hash": file_hash,
-            "file_url": file_url
-        })
-        
-        file_tasks.append(task)
-
-    # Await parallel execution of all file extractions
-    extraction_results = await asyncio.gather(*file_tasks)
-
-    doc_evidences = []
-    extracted_docs = []
-    total_extraction_cost = 0.0
-
-    for ctx, (extracted_data, in_t, out_t, cost) in zip(file_contexts, extraction_results):
-        extracted_docs.append({
-            "filename": ctx["filename"],
-            "extracted_data": extracted_data,
-            "input_tokens": in_t,
-            "output_tokens": out_t,
-            "cost_usd": cost
-        })
-        
-        gemini_supp_name = extracted_data.get("certificateOwnerName", supplier_name)
-        total_extraction_cost += cost
-
-        doc_evidence = DocumentEvidence(
-            audit_id=temp_audit_id,
-            supplier_id=0,  # Populated by sheets service
-            timestamp=timestamp,
-            supplier_name=supplier_name,
-            filename=ctx["filename"],
-            ariba_question_label=ctx["ariba_question_label"],
-            ariba_qa_answers=ctx["ariba_qa_answers"],
-            gemini_extracted_supplier_name=gemini_supp_name,
-            gemini_extracted_metadata=json.dumps(extracted_data),
-            file_content_type=ctx["content_type"],
-            input_tokens=in_t,
-            output_tokens=out_t,
-            cost_usd=cost,
-            cost_myr=cost * 4.70,
-            file_hash=ctx["file_hash"],
-            file_url=ctx.get("file_url")
-        )
-        doc_evidences.append(doc_evidence)
-
-    # Commented out the audit path to end the flow at document extraction as requested
-    # Run overall validation comparison report using Gemini
-    # comparison, comp_in_t, comp_out_t, comp_cost = await asyncio.to_thread(
-    #     gemini.run_audit_comparison,
-    #     qa_data,
-    #     json.dumps(extracted_docs)
-    # )
-
-    # Try to extract expiration date from first document
     expiration_date = "N/A"
     if extracted_docs:
         expiration_date = extracted_docs[0]["extracted_data"].get("expirationDate", "N/A")
 
-    # Run programmatic comparison locally (code-based, no AI)
     qa_data_title = f"{workspace_title} {cert_type}"
     audit_result, suggested_comment, comparison_table_dict = auditor.run_full_audit(
         supplier_name,
@@ -663,15 +473,12 @@ async def run_audit(
     comp_in_t = 0
     comp_out_t = 0
     comp_cost = 0.0
-    comp_cost_myr = 0.0
 
     total_run_cost = total_extraction_cost + comp_cost
-    total_run_cost_myr = total_run_cost * 4.70
 
-    # Build the AuditLogEntry record
     audit_log = AuditLogEntry(
         audit_id=temp_audit_id,
-        supplier_id=0,  # Populated by sheets service
+        supplier_id=0,
         timestamp=timestamp,
         supplier_name=supplier_name,
         workspace_title=workspace_title,
@@ -685,13 +492,10 @@ async def run_audit(
         comparison_input_tokens=0,
         comparison_output_tokens=0,
         comparison_cost_usd=0.0,
-        comparison_cost_myr=0.0,
         total_run_cost_usd=total_run_cost,
-        total_run_cost_myr=total_run_cost_myr,
-        comparison_table=comparison_table_dict
+        comparison_table=comparison_table_dict,
     )
 
-    # Save log records to Supplier_List, Document_Evidence and Audit_Results
     resolved_audit_id = sheets.log_audit_run(supplier_name, doc_evidences, audit_log)
     supplier_id = doc_evidences[0].supplier_id if doc_evidences else 0
 
@@ -705,7 +509,7 @@ async def run_audit(
         supplier_name=supplier_name,
         workspace_title=workspace_title,
         cert_type=cert_type,
-        filename=", ".join(saved_filenames),
+        filename=", ".join(all_filenames),
         result=audit_result,
         expiration_date=expiration_date,
         suggested_comment=suggested_comment,
@@ -713,10 +517,8 @@ async def run_audit(
         comparison_input_tokens=comp_in_t,
         comparison_output_tokens=comp_out_t,
         comparison_cost_usd=comp_cost,
-        comparison_cost_myr=comp_cost_myr,
         total_run_cost_usd=total_run_cost,
-        total_run_cost_myr=total_run_cost_myr,
-        comparison_table=comparison_table_dict
+        comparison_table=comparison_table_dict,
     )
 
 @app.get("/api/costs")
@@ -733,35 +535,64 @@ def get_supplier_assets(supplier_id: int):
     return {"screenshots": screenshots, "documents": documents}
 
 
+MAX_PROXY_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+
+
+def _build_proxy_url(raw_url: str) -> str:
+    import base64
+    padded = raw_url + "=" * ((4 - len(raw_url) % 4) % 4)
+    return base64.urlsafe_b64decode(padded).decode("utf-8")
+
+
 @app.get("/api/files/{encoded_url:path}")
 def proxy_supabase_file(encoded_url: str):
     """
     Proxies a file from Supabase Storage through the backend.
+    Only allows URLs matching the configured SUPABASE_URL storage prefix.
     The frontend passes the Supabase Storage URL base64-encoded (url-safe, no padding).
     """
     try:
-        import base64
-        # Add padding back if needed
-        padded = encoded_url + "=" * ((4 - len(encoded_url) % 4) % 4)
-        url = base64.urlsafe_b64decode(padded).decode("utf-8")
+        url = _build_proxy_url(encoded_url)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid URL encoding: {e}")
 
+    allowed_prefix = settings.supabase_url.rstrip("/") + "/storage/v1/object/public/certificates/"
+    if not url.startswith(allowed_prefix):
+        raise HTTPException(status_code=404, detail="Not found.")
+
     try:
-        resp = requests.get(url, timeout=30, headers={"User-Agent": "GPO-Auditor/1.0"})
+        resp = requests.get(url, stream=True, timeout=30, headers={"User-Agent": "GPO-Auditor/1.0"})
         resp.raise_for_status()
+
+        content_length = resp.headers.get("content-length")
+        if content_length and int(content_length) > MAX_PROXY_FILE_SIZE:
+            resp.close()
+            raise HTTPException(status_code=413, detail="File too large.")
+
+        chunks = []
+        total = 0
+        for chunk in resp.iter_content(65536):
+            total += len(chunk)
+            if total > MAX_PROXY_FILE_SIZE:
+                resp.close()
+                raise HTTPException(status_code=413, detail="File too large.")
+            chunks.append(chunk)
+        body = b"".join(chunks)
+
         filename = url.split("/")[-1].split("?")[0]
         from urllib.parse import unquote
         filename = unquote(filename)
         content_type = resp.headers.get("content-type", "application/octet-stream")
         from fastapi.responses import Response
-        return Response(content=resp.content, media_type=content_type,
+        return Response(content=body, media_type=content_type,
                         headers={
                             "Content-Disposition": f'inline; filename="{filename}"',
                             "Access-Control-Allow-Origin": "*",
                         })
     except requests.HTTPError as e:
         raise HTTPException(status_code=502, detail=f"Storage fetch failed: {e}")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Failed to fetch file: {e}")
 

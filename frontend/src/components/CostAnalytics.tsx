@@ -1,15 +1,14 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { IconLoader2 } from "@tabler/icons-react";
 import type { CostAnalyticsData } from "@/types";
 import { fetchCostAnalytics } from "@/lib/api";
 
-let costAnalyticsFetched = false;
-
 export default function CostAnalytics() {
   const [data, setData] = useState<CostAnalyticsData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const costAnalyticsFetched = useRef(false);
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -24,8 +23,8 @@ export default function CostAnalytics() {
   }, []);
 
   useEffect(() => {
-    if (!costAnalyticsFetched) {
-      costAnalyticsFetched = true;
+    if (!costAnalyticsFetched.current) {
+      costAnalyticsFetched.current = true;
       load();
     }
   }, [load]);

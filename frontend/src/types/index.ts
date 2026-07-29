@@ -72,6 +72,19 @@ export interface CostAnalyticsData {
   breakdown: CostBreakdownItem[];
 }
 
+export interface AuditRegistryEntry {
+  audit_id: string;
+  supplier_id: number;
+  supplier_name: string;
+  result: string;
+  timestamp: string;
+  cert_type: string;
+  document_count: number;
+  suggested_comment: string;
+  screenshot_url?: string;
+  comparison_table?: any;
+}
+
 export const FIELD_NAME_TO_META_KEY: Record<string, string> = {
   "Certificate Type": "certificateType",
   "Supplier Name": "certificateOwnerName",

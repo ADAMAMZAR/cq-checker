@@ -1,14 +1,14 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   IconSearch, IconCopy, IconCheck, IconAlertTriangle, IconCircleCheck,
   IconExternalLink, IconLoader2, IconPhoto, IconArrowUpRight, IconEdit,
   IconChevronDown, IconChevronLeft, IconFiles, IconX
 } from "@tabler/icons-react";
-import type { AuditLog, DocumentEvidence, SupplierAssets, ComparisonTable } from "@/types";
+import type { AuditRegistryEntry, DocumentEvidence, SupplierAssets, ComparisonTable } from "@/types";
 import { FIELD_NAME_TO_META_KEY, INITIAL_FORM_FIELDS } from "@/types";
-import { fetchAuditLogs, fetchSupplierAssets, fetchEvidenceLogs, updateEvidenceMetadata } from "@/lib/api";
+import { fetchAuditRegistry, fetchSupplierAssets, fetchEvidenceLogs, updateEvidenceMetadata } from "@/lib/api";
 import { getCommentAndTable, cleanQuestionLabel, getLabelSortKey, parseEvidenceMetadata } from "@/lib/utils";
 import ScreenshotLightbox from "./ScreenshotLightbox";
 
@@ -19,11 +19,9 @@ interface AuditRegistryProps {
   onRefreshLogs: () => void;
 }
 
-let auditLogsFetched = false;
-
 export default function AuditRegistry({ evidenceLogs, isEvidenceLoading, onRefreshEvidence, onRefreshLogs }: AuditRegistryProps) {
-  const [logs, setLogs] = useState<AuditLog[]>([]);
-  const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
+  const [logs, setLogs] = useState<AuditRegistryEntry[]>([]);
+  const [selectedLog, setSelectedLog] = useState<AuditRegistryEntry | null>(null);
   const [assets, setAssets] = useState<SupplierAssets>({ screenshots: [], documents: [] });
   const [assetsLoading, setAssetsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -39,12 +37,13 @@ export default function AuditRegistry({ evidenceLogs, isEvidenceLoading, onRefre
   const [tableEditValues, setTableEditValues] = useState<Record<number, Record<number, string>>>({});
   const [isSavingTableEdits, setIsSavingTableEdits] = useState(false);
   const [tableEditMsg, setTableEditMsg] = useState<string | null>(null);
+  const auditLogsFetched = useRef(false);
 
   const loadLogs = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
-      const data = await fetchAuditLogs();
+      const data = await fetchAuditRegistry();
       setLogs(data);
     } catch (err: any) {
       setError(err.message || "Could not establish database connection.");
@@ -54,13 +53,13 @@ export default function AuditRegistry({ evidenceLogs, isEvidenceLoading, onRefre
   }, []);
 
   useEffect(() => {
-    if (!auditLogsFetched) {
-      auditLogsFetched = true;
+    if (!auditLogsFetched.current) {
+      auditLogsFetched.current = true;
       loadLogs();
     }
   }, [loadLogs]);
 
-  const handleSelectLog = async (log: AuditLog) => {
+  const handleSelectLog = async (log: AuditRegistryEntry) => {
     setSelectedLog(log);
     setActiveTableIdx(null);
     setExpandedQaIdx(0);
@@ -253,9 +252,9 @@ function LogListPanel({
   statusFilter: "ALL" | "MATCH" | "MISMATCH";
   onStatusFilterChange: (v: "ALL" | "MATCH" | "MISMATCH") => void;
   isLoading: boolean;
-  filteredLogs: AuditLog[];
-  selectedLog: AuditLog | null;
-  onSelectLog: (log: AuditLog) => void;
+  filteredLogs: AuditRegistryEntry[];
+  selectedLog: AuditRegistryEntry | null;
+  onSelectLog: (log: AuditRegistryEntry) => void;
 }) {
   return (
     <section className="lg:col-span-5 flex flex-col min-h-[600px] double-bezel">
@@ -331,7 +330,7 @@ function DetailPane({
   onSaveTableEdits, onCancelTableEdit, isSavingTableEdits, tableEditMsg,
   selectedScreenshot, onScreenshotClick
 }: {
-  log: AuditLog;
+  log: AuditRegistryEntry;
   assets: SupplierAssets;
   assetsLoading: boolean;
   isEvidenceLoading: boolean;
@@ -411,7 +410,7 @@ function ComparisonTab({
   editingTableIdx, tableEditValues, onStartTableEdit, onUpdateTableEditValue,
   onSaveTableEdits, onCancelTableEdit, isSavingTableEdits, tableEditMsg
 }: {
-  log: AuditLog; assets: SupplierAssets;
+  log: AuditRegistryEntry; assets: SupplierAssets;
   copied: boolean; onCopyComment: (c: string) => void;
   activeTableIdx: number | null; onTableToggle: (idx: number | null) => void;
   editingTableIdx: number | null; tableEditValues: Record<number, Record<number, string>>;
@@ -474,7 +473,7 @@ function JsonComparisonTables({
   editingTableIdx, tableEditValues, onStartTableEdit, onUpdateTableEditValue,
   onSaveTableEdits, onCancelTableEdit, isSavingTableEdits, tableEditMsg
 }: {
-  log: AuditLog; assets: SupplierAssets;
+  log: AuditRegistryEntry; assets: SupplierAssets;
   activeTableIdx: number | null; onTableToggle: (idx: number | null) => void;
   editingTableIdx: number | null; tableEditValues: Record<number, Record<number, string>>;
   onStartTableEdit: (idx: number) => void;
@@ -638,7 +637,7 @@ function TableGrid({
 }
 
 function LegacyComparisonTables({ log, table, tables }: {
-  log: AuditLog;
+  log: AuditRegistryEntry;
   table: { headers: string[]; rows: string[][] } | null;
   tables: ComparisonTable[];
 }) {
@@ -739,7 +738,7 @@ function LegacyComparisonTables({ log, table, tables }: {
 }
 
 function EvidenceTab({ log, assets, assetsLoading, isEvidenceLoading, evidenceLogs, onScreenshotClick }: {
-  log: AuditLog;
+  log: AuditRegistryEntry;
   assets: SupplierAssets;
   assetsLoading: boolean;
   isEvidenceLoading: boolean;

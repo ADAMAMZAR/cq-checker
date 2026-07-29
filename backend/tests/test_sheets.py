@@ -3,105 +3,54 @@ import pytest
 from app.schemas import AuditLogEntry, DocumentEvidence
 from app.services import sheets
 
-@pytest.fixture
-def mock_sheets_client():
-    with patch("app.services.sheets.get_sheets_client") as mock_get_client:
-        mock_client = MagicMock()
-        mock_get_client.return_value = mock_client
-        yield mock_client
 
 @pytest.fixture
-def mock_worksheet():
-    with patch("app.services.sheets.get_or_create_worksheet") as mock_get_worksheet:
-        mock_ws = MagicMock()
-        mock_get_worksheet.return_value = mock_ws
-        yield mock_ws
+def mock_call_supabase_select():
+    with patch("app.services.sheets.call_supabase_select") as mock:
+        yield mock
+
 
 @pytest.fixture
-def mock_get_or_create_supplier():
-    with patch("app.services.sheets.get_or_create_supplier") as mock_get_supplier:
-        mock_get_supplier.return_value = 1
-        yield mock_get_supplier
+def mock_call_supabase_insert():
+    with patch("app.services.sheets.call_supabase_insert") as mock:
+        yield mock
 
-def test_log_audit_run_success(mock_sheets_client, mock_worksheet, mock_get_or_create_supplier):
-    doc = DocumentEvidence(
-        audit_id="audit-uuid",
-        supplier_id=0,
-        timestamp="17/07/2026, 11:00:00",
-        supplier_name="ACME Corp",
-        filename="qshe_cert.pdf",
-        ariba_question_label="Please upload QSHE certificate",
-        ariba_qa_answers='[]',
-        gemini_extracted_supplier_name="ACME Corp",
-        gemini_extracted_metadata='{}',
-        file_content_type="application/pdf"
-    )
-    
-    entry = AuditLogEntry(
-        audit_id="audit-uuid",
-        supplier_id=0,
-        timestamp="17/07/2026, 11:00:00",
-        supplier_name="ACME Corp",
-        workspace_title="Workspace A",
-        cert_type="QSHE",
-        complete_qa_data_dump='[]',
-        compiled_extracted_data='[]',
-        result="Match",
-        expiration_date="2029-12-31",
-        suggested_comment="All match.",
-        screenshot_url="http://screenshot"
-    )
-    
-    mock_worksheet.get_all_records.return_value = []
-    mock_worksheet.append_rows.return_value = {}
-    mock_worksheet.append_row.return_value = {}
-    
-    result = sheets.log_audit_run("ACME Corp", [doc], entry)
-    
-    assert result == "AUDIT_0001"
-    # Verify mock_get_or_create_supplier was executed
-    mock_get_or_create_supplier.assert_called_once_with(mock_sheets_client, "ACME Corp")
-    # Verify Supplier ID is populated on inputs
-    assert doc.supplier_id == 1
-    assert entry.supplier_id == 1
 
-def test_log_audit_run_failure(mock_sheets_client, mock_worksheet, mock_get_or_create_supplier):
-    mock_get_or_create_supplier.side_effect = Exception("Google API Error")
-    result = sheets.log_audit_run("ACME Corp", [], None)
-    # Errors should be caught and returned as None
-    assert result is None
+@pytest.fixture
+def mock_call_supabase_rpc():
+    with patch("app.services.sheets.call_supabase_rpc") as mock:
+        yield mock
 
-def test_get_audit_logs_success(mock_sheets_client, mock_worksheet):
-    mock_worksheet.get_all_values.return_value = [
-        ["Audit ID", "Supplier ID", "Timestamp", "Supplier Name", "Compiled Extracted Data", "Suggested Comments", "Screenshot URL", "Comparison Table JSON"],
-        ["audit-uuid", 1, "17/07/2026, 11:00:00", "ACME Corp", "[]", "All match.", "http://screenshot", '{"tables": []}']
+
+def test_get_or_create_supplier_exists(mock_call_supabase_select):
+    mock_call_supabase_select.return_value = [{"supplier_id": 5}]
+    result = sheets.get_or_create_supplier("ACME Corp")
+    assert result == 5
+    mock_call_supabase_select.assert_called_once()
+
+
+def test_get_or_create_supplier_creates(
+    mock_call_supabase_select, mock_call_supabase_insert
+):
+    mock_call_supabase_select.side_effect = [
+        [],
+        [{"supplier_id": 6}],
+        [{"supplier_id": 7}],
     ]
-    mock_worksheet.get_all_records.return_value = [
-        {
-            "Audit ID": "audit-uuid",
-            "Supplier ID": 1,
-            "Timestamp": "17/07/2026, 11:00:00",
-            "Supplier Name": "ACME Corp",
-            "Compiled Extracted Data": "[]",
-            "Suggested Comments": "All match.",
-            "Screenshot URL": "http://screenshot",
-            "Comparison Table JSON": '{"tables": []}'
-        }
-    ]
-    
-    logs = sheets.get_audit_logs()
-    
-    assert len(logs) == 1
-    assert logs[0].audit_id == "audit-uuid"
-    assert logs[0].supplier_id == 1
-    assert logs[0].supplier_name == "ACME Corp"
-    assert logs[0].result == "Match"
-    assert logs[0].expiration_date == "N/A"
-    assert logs[0].comparison_table == {"tables": []}
+    mock_call_supabase_insert.return_value = True
+    result = sheets.get_or_create_supplier("ACME Corp")
+    assert result == 7
 
-def test_get_audit_logs_failure(mock_sheets_client, mock_worksheet):
-    mock_worksheet.get_all_records.side_effect = Exception("API Out of Quota")
-    
-    logs = sheets.get_audit_logs()
-    
-    assert logs == []
+
+def test_get_next_audit_id_success(mock_call_supabase_rpc):
+    mock_call_supabase_rpc.return_value = "AUDIT_0043"
+    result = sheets.get_next_audit_id()
+    assert result == "AUDIT_0043"
+    mock_call_supabase_rpc.assert_called_once_with("fn_next_audit_id")
+
+
+def test_get_next_audit_id_fallback(mock_call_supabase_rpc):
+    mock_call_supabase_rpc.return_value = None
+    result = sheets.get_next_audit_id()
+    assert len(result) == 36
+    assert "-" in result

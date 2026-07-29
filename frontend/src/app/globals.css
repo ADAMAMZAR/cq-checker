@@ -73,18 +73,27 @@
 }
 
 @theme inline {
-  --font-sans: var(--font-plus-jakarta);
+  --font-sans: var(--font-league-spartan);
+  --font-serif: var(--font-libre-baskerville);
   --font-mono: var(--font-geist-mono);
 }
 
 body {
   background: var(--bg-page);
   color: var(--text-primary);
-  font-family: var(--font-plus-jakarta), system-ui, sans-serif;
+  font-family: var(--font-league-spartan), system-ui, sans-serif;
   min-height: 100vh;
   position: relative;
   overflow-x: hidden;
   transition: background 0.3s ease, color 0.3s ease;
+}
+
+.font-serif {
+  font-family: var(--font-libre-baskerville), Georgia, serif;
+}
+
+.font-sans {
+  font-family: var(--font-league-spartan), sans-serif;
 }
 
 [data-theme="light"] body {

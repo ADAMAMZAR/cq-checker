@@ -1,4 +1,4 @@
-import type { AuditLog, DocumentEvidence, SupplierAssets, CostAnalyticsData } from "@/types";
+import type { AuditLog, AuditRegistryEntry, DocumentEvidence, SupplierAssets, CostAnalyticsData } from "@/types";
 
 const BASE = "http://127.0.0.1:8000/api";
 
@@ -9,10 +9,16 @@ export async function fetchAuditLogs(): Promise<AuditLog[]> {
   return data;
 }
 
+export async function fetchAuditRegistry(): Promise<AuditRegistryEntry[]> {
+  const res = await fetch(`${BASE}/audit-registry`);
+  if (!res.ok) throw new Error(`Failed to load audit registry: HTTP ${res.status}`);
+  return res.json();
+}
+
 export async function fetchSupplierAssets(supplierId: number): Promise<SupplierAssets> {
   const res = await fetch(`${BASE}/logs/${supplierId}/assets`);
-  if (res.ok) return res.json();
-  return { screenshots: [], documents: [] };
+  if (!res.ok) throw new Error(`Failed to load supplier assets: HTTP ${res.status}`);
+  return res.json();
 }
 
 export async function fetchCostAnalytics(): Promise<CostAnalyticsData> {
@@ -23,8 +29,8 @@ export async function fetchCostAnalytics(): Promise<CostAnalyticsData> {
 
 export async function fetchEvidenceLogs(): Promise<DocumentEvidence[]> {
   const res = await fetch(`${BASE}/evidence`);
-  if (res.ok) return res.json();
-  throw new Error("Failed to load document evidence logs");
+  if (!res.ok) throw new Error(`Failed to load evidence logs: HTTP ${res.status}`);
+  return res.json();
 }
 
 export async function updateEvidenceMetadata(

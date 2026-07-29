@@ -1,6 +1,6 @@
 "use client";
 
-import { IconLoader2 } from "@tabler/icons-react";
+import { IconLoader2, IconHome } from "@tabler/icons-react";
 import ThemeToggle from "./ThemeToggle";
 
 interface HeaderProps {
@@ -8,13 +8,23 @@ interface HeaderProps {
   isLoading: boolean;
   isEvidenceLoading: boolean;
   onRefresh: () => void;
+  onGoHome?: () => void;
 }
 
-export default function Header({ error, isLoading, isEvidenceLoading, onRefresh }: HeaderProps) {
+export default function Header({ error, isLoading, isEvidenceLoading, onRefresh, onGoHome }: HeaderProps) {
   return (
     <header className="flex justify-between items-center mb-6 pb-6 border-b border-[var(--border-subtle)]">
-      <div className="flex items-center gap-3">
-        <h1 className="text-lg font-bold tracking-tight text-[var(--heading-color)]">GPO Automatic Certificate Auditor</h1>
+      <div
+        onClick={onGoHome}
+        className={`flex items-center gap-3 ${onGoHome ? 'cursor-pointer group' : ''}`}
+        title={onGoHome ? "Return to Main Home" : undefined}
+      >
+        <div className="p-2 rounded-xl bg-blue-500/10 text-blue-400 border border-blue-500/20 group-hover:scale-105 transition-transform">
+          <IconHome className="h-5 w-5" />
+        </div>
+        <h1 className="font-sans text-lg font-bold tracking-tight text-[var(--heading-color)] group-hover:text-blue-400 transition-colors">
+          Gamuda Group Procurement Office
+        </h1>
       </div>
       <div className="flex items-center gap-3">
         <ThemeToggle />

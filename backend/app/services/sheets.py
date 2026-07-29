@@ -12,32 +12,8 @@ from app.schemas import SupplierEntry, DocumentEvidence, AuditLogEntry
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Routing functions — delegate directly to Supabase
 # ---------------------------------------------------------------------------
-
-def log_audit_run(supplier_name: str, doc_evidences: List[DocumentEvidence], audit_log: Optional[AuditLogEntry] = None) -> Optional[str]:
-    return log_audit_run_via_supabase(supplier_name, doc_evidences, audit_log)
-
-def get_audit_logs() -> List[AuditLogEntry]:
-    return get_audit_logs_via_supabase()
-
-def get_document_evidence_logs() -> List[DocumentEvidence]:
-    return get_document_evidence_logs_via_supabase()
-
-def update_document_evidence(audit_id: str, filename: str, updated_metadata: Dict[str, Any]) -> bool:
-    return update_document_evidence_via_supabase(audit_id, filename, updated_metadata)
-
-def find_metadata_by_hash(file_hash: str, ariba_question_label: str) -> Optional[Dict[str, Any]]:
-    return find_metadata_by_hash_via_supabase(file_hash, ariba_question_label)
-
-def update_audit_result(audit_id: str, result: str, suggested_comment: str, comparison_table: Optional[dict] = None) -> bool:
-    return update_audit_result_via_supabase(audit_id, result, suggested_comment, comparison_table)
-
-def get_cost_analytics() -> dict:
-    return get_cost_analytics_via_supabase()
-
-# ---------------------------------------------------------------------------
-# Supabase Cloud Database Integration Functions
+# All functions below directly call Supabase REST API (no Google Sheets)
 # ---------------------------------------------------------------------------
 
 def get_supabase_headers() -> Dict[str, str]:
@@ -137,9 +113,30 @@ def upload_file_to_supabase_storage(file_bytes: bytes, safe_supplier_name: str, 
         logger.error(f"Supabase storage upload exception: {e}")
         return None
 
-def get_or_create_supplier_via_supabase(supplier_name: str) -> int:
+def call_supabase_rpc(function_name: str, params: Optional[Dict[str, Any]] = None) -> Optional[Any]:
+    if not settings.supabase_url or not settings.supabase_key:
+        return None
+    try:
+        url = f"{settings.supabase_url.rstrip('/')}/rest/v1/rpc/{function_name}"
+        response = requests.post(
+            url,
+            headers=get_supabase_headers(),
+            json=params or {},
+            timeout=15
+        )
+        if response.status_code == 200:
+            return response.json()
+        logger.error(f"Supabase RPC failed: {response.status_code} - {response.text[:250]}")
+        return None
+    except Exception as e:
+        logger.error(f"Supabase RPC exception: {e}")
+        return None
+
+def get_or_create_supplier(supplier_name: str) -> int:
+    name = supplier_name.strip()
+
     records = call_supabase_select("supplier_list", {
-        "supplier_name": f"ilike.{supplier_name.strip()}",
+        "supplier_name": f"ilike.{name}",
         "select": "supplier_id",
     })
     if records:
@@ -153,56 +150,52 @@ def get_or_create_supplier_via_supabase(supplier_name: str) -> int:
         "order": "supplier_id.desc.nullslast",
         "limit": "1",
     })
-    highest_id = int(max_records[0]["supplier_id"]) if max_records else 0
-
-    new_id = highest_id + 1
+    new_id = (int(max_records[0]["supplier_id"]) if max_records else 0) + 1
     timestamp = datetime.now().strftime("%d/%m/%Y, %H:%M:%S")
-    call_supabase_insert("supplier_list", [{
+
+    inserted = call_supabase_insert("supplier_list", [{
         "supplier_id": new_id,
-        "supplier_name": supplier_name,
+        "supplier_name": name,
         "date_added": timestamp
     }])
-    return new_id
+    if inserted:
+        return new_id
 
-def get_next_audit_id_via_supabase() -> str:
-    highest_idx = 0
-    pattern = re.compile(r"^AUDIT_(\d+)$", re.IGNORECASE)
+    records = call_supabase_select("supplier_list", {
+        "supplier_name": f"ilike.{name}",
+        "select": "supplier_id",
+    })
+    if records:
+        try:
+            return int(records[0]["supplier_id"])
+        except (ValueError, TypeError, KeyError):
+            pass
 
-    for table in ("audit_results", "document_evidence"):
-        records = call_supabase_select(table, {
-            "select": "audit_id",
-            "order": "audit_id.desc.nullslast",
-            "limit": "1",
-        })
-        if records:
-            audit_id_val = str(records[0].get("audit_id", "")).strip()
-            match = pattern.match(audit_id_val)
-            if match:
-                idx = int(match.group(1))
-                if idx > highest_idx:
-                    highest_idx = idx
+    logger.error(f"Failed to create or find supplier: {name}")
+    return 0
 
-    next_idx = highest_idx + 1
-    return f"AUDIT_{next_idx:04d}"
+def get_next_audit_id() -> str:
+    result = call_supabase_rpc("fn_next_audit_id")
+    if result and isinstance(result, str):
+        return result
+    logger.error("fn_next_audit_id RPC returned unexpected result, falling back to UUID")
+    import uuid
+    return str(uuid.uuid4())
 
-def log_audit_run_via_supabase(supplier_name: str, doc_evidences: List[DocumentEvidence], audit_log: Optional[AuditLogEntry] = None) -> Optional[str]:
+def log_audit_run(supplier_name: str, doc_evidences: List[DocumentEvidence], audit_log: Optional[AuditLogEntry] = None) -> Optional[str]:
     try:
-        supplier_id = get_or_create_supplier_via_supabase(supplier_name)
+        supplier_id = get_or_create_supplier(supplier_name)
 
-        existing_pattern = re.compile(r"^AUDIT_\d+$", re.IGNORECASE)
-        existing_id = None
-        if audit_log and existing_pattern.match(audit_log.audit_id):
-            existing_id = audit_log.audit_id
-        if not existing_id:
+        audit_id = None
+        if audit_log and not audit_log.audit_id.startswith("TEMP_"):
+            audit_id = audit_log.audit_id
+        if not audit_id:
             for doc in doc_evidences:
-                if existing_pattern.match(doc.audit_id):
-                    existing_id = doc.audit_id
+                if not doc.audit_id.startswith("TEMP_"):
+                    audit_id = doc.audit_id
                     break
-
-        if existing_id:
-            audit_id = existing_id
-        else:
-            audit_id = get_next_audit_id_via_supabase()
+        if not audit_id:
+            audit_id = get_next_audit_id()
 
         for doc in doc_evidences:
             doc.supplier_id = supplier_id
@@ -227,7 +220,6 @@ def log_audit_run_via_supabase(supplier_name: str, doc_evidences: List[DocumentE
                 "input_tokens": doc.input_tokens,
                 "output_tokens": doc.output_tokens,
                 "cost_usd": doc.cost_usd,
-                "cost_myr": doc.cost_myr,
                 "file_hash": doc.file_hash,
                 "file_url": doc.file_url
             })
@@ -243,14 +235,13 @@ def log_audit_run_via_supabase(supplier_name: str, doc_evidences: List[DocumentE
                 "complete_qa_data_dump": audit_log.complete_qa_data_dump or "[]",
                 "compiled_extracted_data": audit_log.compiled_extracted_data,
                 "suggested_comments": audit_log.suggested_comment,
+                "result": audit_log.result or "Mismatch",
                 "screenshot_url": audit_log.screenshot_url,
                 "comparison_table": audit_log.comparison_table,
                 "comparison_input_tokens": audit_log.comparison_input_tokens,
                 "comparison_output_tokens": audit_log.comparison_output_tokens,
                 "comparison_cost_usd": audit_log.comparison_cost_usd,
-                "comparison_cost_myr": audit_log.comparison_cost_myr,
-                "total_run_cost_usd": audit_log.total_run_cost_usd,
-                "total_run_cost_myr": audit_log.total_run_cost_myr
+                "total_run_cost_usd": audit_log.total_run_cost_usd
             }]
             call_supabase_insert("audit_results", results_row)
 
@@ -259,8 +250,13 @@ def log_audit_run_via_supabase(supplier_name: str, doc_evidences: List[DocumentE
         logger.error(f"Failed to log audit run via Supabase: {e}")
         return None
 
-def get_audit_logs_via_supabase() -> List[AuditLogEntry]:
-    records = call_supabase_select("audit_results")
+def get_audit_logs(
+    audit_id: Optional[str] = None,
+) -> List[AuditLogEntry]:
+    query_params = {}
+    if audit_id is not None:
+        query_params["audit_id"] = f"eq.{audit_id}"
+    records = call_supabase_select("audit_results", query_params or None)
     logs = []
     for r in records:
         compiled_data = str(r.get("compiled_extracted_data", ""))
@@ -275,9 +271,7 @@ def get_audit_logs_via_supabase() -> List[AuditLogEntry]:
         workspace_title = str(r.get("workspace_title", "")) or "Ariba Workspace"
         complete_qa_data_dump = str(r.get("complete_qa_data_dump", "")) or "[]"
 
-        result = "Match"
-        if "Mismatch" in comments or "revise" in comments.lower():
-            result = "Mismatch"
+        result = str(r.get("result", "Match")) or "Mismatch"
         expiration_date = "N/A"
         cert_type = "Relational evidence"
         try:
@@ -307,15 +301,21 @@ def get_audit_logs_via_supabase() -> List[AuditLogEntry]:
             comparison_input_tokens=int(r.get("comparison_input_tokens", 0)) if r.get("comparison_input_tokens") else 0,
             comparison_output_tokens=int(r.get("comparison_output_tokens", 0)) if r.get("comparison_output_tokens") else 0,
             comparison_cost_usd=float(r.get("comparison_cost_usd", 0.0)) if r.get("comparison_cost_usd") else 0.0,
-            comparison_cost_myr=float(r.get("comparison_cost_myr", 0.0)) if r.get("comparison_cost_myr") else 0.0,
             total_run_cost_usd=float(r.get("total_run_cost_usd", 0.0)) if r.get("total_run_cost_usd") else 0.0,
-            total_run_cost_myr=float(r.get("total_run_cost_myr", 0.0)) if r.get("total_run_cost_myr") else 0.0,
             comparison_table=comp_table
         ))
     return logs
 
-def get_document_evidence_logs_via_supabase() -> List[DocumentEvidence]:
-    records = call_supabase_select("document_evidence")
+def get_document_evidence_logs(
+    audit_id: Optional[str] = None,
+    supplier_name: Optional[str] = None,
+) -> List[DocumentEvidence]:
+    query_params = {}
+    if audit_id is not None:
+        query_params["audit_id"] = f"eq.{audit_id}"
+    if supplier_name is not None:
+        query_params["supplier_name"] = f"ilike.{supplier_name}"
+    records = call_supabase_select("document_evidence", query_params or None)
     logs = []
     for r in records:
         logs.append(DocumentEvidence(
@@ -332,13 +332,49 @@ def get_document_evidence_logs_via_supabase() -> List[DocumentEvidence]:
             input_tokens=int(r.get("input_tokens", 0)) if r.get("input_tokens") else 0,
             output_tokens=int(r.get("output_tokens", 0)) if r.get("output_tokens") else 0,
             cost_usd=float(r.get("cost_usd", 0.0)) if r.get("cost_usd") else 0.0,
-            cost_myr=float(r.get("cost_myr", 0.0)) if r.get("cost_myr") else 0.0,
             file_hash=str(r.get("file_hash", "")) if r.get("file_hash") else None,
             file_url=str(r.get("file_url", "")) if r.get("file_url") else None
         ))
     return logs
 
-def update_document_evidence_via_supabase(audit_id: str, filename: str, updated_metadata: Dict[str, Any]) -> bool:
+def get_audit_registry() -> List[dict]:
+    """Return consolidated audit registry data with document counts per audit."""
+    ar_records = call_supabase_select("audit_results", {
+        "select": "audit_id,supplier_id,supplier_name,timestamp,result,suggested_comments,screenshot_url,comparison_table",
+    })
+    de_records = call_supabase_select("document_evidence", {
+        "select": "audit_id",
+    })
+
+    de_counts: dict[str, int] = {}
+    for r in de_records:
+        aid = str(r.get("audit_id", ""))
+        de_counts[aid] = de_counts.get(aid, 0) + 1
+
+    result = []
+    for r in ar_records:
+        aid = str(r.get("audit_id", ""))
+        comp_table = r.get("comparison_table")
+        if isinstance(comp_table, str) and comp_table:
+            try:
+                comp_table = json.loads(comp_table)
+            except Exception:
+                comp_table = None
+        result.append({
+            "audit_id": aid,
+            "supplier_id": int(r.get("supplier_id", 0)),
+            "supplier_name": str(r.get("supplier_name", "")),
+            "result": str(r.get("result", "Match")),
+            "timestamp": str(r.get("timestamp", "")),
+            "cert_type": "Relational evidence",
+            "document_count": de_counts.get(aid, 0),
+            "suggested_comment": str(r.get("suggested_comments", "")),
+            "screenshot_url": str(r.get("screenshot_url", "")) if r.get("screenshot_url") else None,
+            "comparison_table": comp_table,
+        })
+    return result
+
+def update_document_evidence(audit_id: str, filename: str, updated_metadata: Dict[str, Any]) -> bool:
     filters = {"audit_id": f"eq.{audit_id}", "filename": f"eq.{filename}"}
     updates = {
         "gemini_extracted_metadata": json.dumps(updated_metadata)
@@ -349,7 +385,7 @@ def update_document_evidence_via_supabase(audit_id: str, filename: str, updated_
 
     return call_supabase_update("document_evidence", filters, updates)
 
-def find_metadata_by_hash_via_supabase(file_hash: str, ariba_question_label: str) -> Optional[Dict[str, Any]]:
+def find_metadata_by_hash(file_hash: str, ariba_question_label: str) -> Optional[Dict[str, Any]]:
     records = call_supabase_select("document_evidence", {
         "file_hash": f"eq.{file_hash}",
         "ariba_question_label": f"eq.{ariba_question_label}",
@@ -387,19 +423,18 @@ def get_screenshot_urls_by_supplier_id(supplier_id: int) -> List[str]:
         for r in records if r.get("screenshot_url")
     ]
 
-def get_cost_analytics_via_supabase() -> dict:
+def get_cost_analytics() -> dict:
     records = call_supabase_select("document_evidence", {
-        "select": "supplier_name,cost_usd,cost_myr",
+        "select": "supplier_name,cost_usd",
     })
+    MYR_RATE = 4.70
     total_cost_myr = 0.0
     total_documents = len(records)
     supplier_map: dict[str, dict] = {}
     for r in records:
         name = str(r.get("supplier_name", "Unknown"))
         cost_usd = float(r.get("cost_usd") or 0.0)
-        cost_myr = float(r.get("cost_myr") or 0.0)
-        if not cost_myr and cost_usd:
-            cost_myr = cost_usd * 4.70
+        cost_myr = cost_usd * MYR_RATE
         total_cost_myr += cost_myr
         if name not in supplier_map:
             supplier_map[name] = {"supplier_name": name, "document_count": 0, "cost_myr": 0.0}
@@ -413,7 +448,7 @@ def get_cost_analytics_via_supabase() -> dict:
         "breakdown": [{**s, "cost_myr": round(s["cost_myr"], 4)} for s in breakdown],
     }
 
-def update_audit_result_via_supabase(audit_id: str, result: str, suggested_comment: str, comparison_table: Optional[dict] = None) -> bool:
+def update_audit_result(audit_id: str, result: str, suggested_comment: str, comparison_table: Optional[dict] = None) -> bool:
     filters = {"audit_id": f"eq.{audit_id}"}
     updates = {
         "suggested_comments": suggested_comment

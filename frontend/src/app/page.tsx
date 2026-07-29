@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type { MainTab } from "@/components/SubNavTabs";
 import type { DocumentEvidence } from "@/types";
 import { fetchEvidenceLogs } from "@/lib/api";
@@ -11,14 +11,14 @@ import SupplierDataEditor from "@/components/SupplierDataEditor";
 import CostAnalytics from "@/components/CostAnalytics";
 import ComparisonPlayground from "@/components/ComparisonPlayground";
 import SupplierAudit from "@/components/SupplierAudit";
-
-let evidenceFetched = false;
+import MainHome from "@/components/MainHome";
 
 export default function Dashboard() {
-  const [activeMainTab, setActiveMainTab] = useState<MainTab>("registry");
+  const [activeMainTab, setActiveMainTab] = useState<MainTab>("home");
   const [evidenceLogs, setEvidenceLogs] = useState<DocumentEvidence[]>([]);
   const [isEvidenceLoading, setIsEvidenceLoading] = useState(false);
   const [globalError, setGlobalError] = useState<string | null>(null);
+  const evidenceFetched = useRef(false);
 
   const loadEvidence = useCallback(async () => {
     setIsEvidenceLoading(true);
@@ -33,8 +33,8 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
-    if (!evidenceFetched) {
-      evidenceFetched = true;
+    if (!evidenceFetched.current) {
+      evidenceFetched.current = true;
       loadEvidence();
     }
   }, [loadEvidence]);
@@ -44,10 +44,34 @@ export default function Dashboard() {
     loadEvidence();
   };
 
+  const handleGoHome = () => {
+    setActiveMainTab("home");
+  };
+
   return (
     <div className="flex-1 flex flex-col w-full p-4 md:p-8">
-      <Header error={globalError} isLoading={false} isEvidenceLoading={isEvidenceLoading} onRefresh={handleRefresh} />
-      <SubNavTabs active={activeMainTab} onChange={setActiveMainTab} />
+      <Header
+        error={globalError}
+        isLoading={false}
+        isEvidenceLoading={isEvidenceLoading}
+        onRefresh={handleRefresh}
+        onGoHome={handleGoHome}
+      />
+
+      {/* Hide SubNavTabs on Main Home page; show SubNavTabs only when viewing audit log modules */}
+      {activeMainTab !== "home" && (
+        <SubNavTabs
+          active={activeMainTab}
+          onChange={setActiveMainTab}
+          onGoHome={handleGoHome}
+        />
+      )}
+
+      {activeMainTab === "home" && (
+        <div className="flex-1 flex flex-col">
+          <MainHome onNavigate={setActiveMainTab} />
+        </div>
+      )}
 
       {activeMainTab === "registry" && (
         <div className="flex-1 flex flex-col">
