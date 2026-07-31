@@ -12,6 +12,7 @@ import CostAnalytics from "@/components/CostAnalytics";
 import ComparisonPlayground from "@/components/ComparisonPlayground";
 import SupplierAudit from "@/components/SupplierAudit";
 import MainHome from "@/components/MainHome";
+import ProcurementAssistant from "@/components/ProcurementAssistant";
 
 export default function Dashboard() {
   const [activeMainTab, setActiveMainTab] = useState<MainTab>("home");
@@ -58,8 +59,8 @@ export default function Dashboard() {
         onGoHome={handleGoHome}
       />
 
-      {/* Hide SubNavTabs on Main Home page; show SubNavTabs only when viewing audit log modules */}
-      {activeMainTab !== "home" && (
+      {/* Hide SubNavTabs on Main Home page and Assistant page */}
+      {activeMainTab !== "home" && activeMainTab !== "assistant" && (
         <SubNavTabs
           active={activeMainTab}
           onChange={setActiveMainTab}
@@ -70,6 +71,12 @@ export default function Dashboard() {
       {activeMainTab === "home" && (
         <div className="flex-1 flex flex-col">
           <MainHome onNavigate={setActiveMainTab} />
+        </div>
+      )}
+
+      {activeMainTab === "assistant" && (
+        <div className="flex-1 flex flex-col">
+          <ProcurementAssistant onGoHome={handleGoHome} />
         </div>
       )}
 

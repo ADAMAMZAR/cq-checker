@@ -2,7 +2,7 @@
 
 import { IconHome, IconFiles, IconEdit, IconCoin, IconPlaylist, IconSearch } from "@tabler/icons-react";
 
-export type MainTab = "home" | "registry" | "editor" | "costs" | "playground" | "audit";
+export type MainTab = "home" | "registry" | "editor" | "costs" | "playground" | "audit" | "assistant";
 
 interface SubNavTabsProps {
   active: MainTab;
