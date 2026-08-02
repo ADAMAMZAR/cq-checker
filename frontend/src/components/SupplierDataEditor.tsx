@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useId } from "react";
 import {
   IconSearch, IconChevronLeft, IconEdit, IconFiles, IconLoader2,
   IconArrowUpRight, IconDownload, IconCircleCheck, IconAlertTriangle
@@ -39,7 +39,7 @@ export default function SupplierDataEditor({ evidenceLogs, isEvidenceLoading, on
     setSelectedEvidence(ev);
     setFormSuccessMessage(null);
     setFormErrorMessage(null);
-    const fields = parseEvidenceMetadata(ev, INITIAL_FORM_FIELDS);
+    const fields = parseEvidenceMetadata(ev);
     setFormFields(fields);
     setInitialFields(fields);
   }, []);
@@ -53,7 +53,7 @@ export default function SupplierDataEditor({ evidenceLogs, isEvidenceLoading, on
     setFormSuccessMessage(null);
     setFormErrorMessage(null);
     try {
-      const responseData = await updateEvidenceMetadata(
+      await updateEvidenceMetadata(
         selectedEvidence.audit_id,
         selectedEvidence.filename,
         formFields
@@ -67,8 +67,8 @@ export default function SupplierDataEditor({ evidenceLogs, isEvidenceLoading, on
         gemini_extracted_supplier_name: formFields.certificateOwnerName,
         gemini_extracted_metadata: JSON.stringify(formFields)
       } : null);
-    } catch (err: any) {
-      setFormErrorMessage(err.message || "An unexpected error occurred while saving.");
+    } catch (err: unknown) {
+      setFormErrorMessage(err instanceof Error ? err.message : "An unexpected error occurred while saving.");
     } finally {
       setIsSavingForm(false);
     }
@@ -76,7 +76,7 @@ export default function SupplierDataEditor({ evidenceLogs, isEvidenceLoading, on
 
   if (selectedEvidence) {
     return (
-      <div className="flex-1 flex flex-col gap-5 min-h-[600px]">
+      <div className="flex-1 flex flex-col gap-5 min-h-0 lg:min-h-[600px]">
         <div className="flex items-center gap-3">
           <button onClick={() => { setSelectedEvidence(null); setFormSuccessMessage(null); setFormErrorMessage(null); }}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-visible)] text-xs text-[var(--text-secondary)] hover:text-[var(--heading-color)] hover:bg-[var(--bg-surface-hover)] transition-all duration-200 cursor-pointer active:scale-95 shrink-0"
@@ -93,7 +93,7 @@ export default function SupplierDataEditor({ evidenceLogs, isEvidenceLoading, on
 
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-0">
           <section className="lg:col-span-7 flex flex-col double-bezel">
-            <div className="double-bezel-inner flex-1 flex flex-col h-full" style={{ minHeight: '780px' }}>
+            <div className="double-bezel-inner flex-1 flex flex-col h-full min-h-[520px] lg:min-h-[780px]">
               <CertificateViewer evidence={selectedEvidence} />
             </div>
           </section>
@@ -112,12 +112,12 @@ export default function SupplierDataEditor({ evidenceLogs, isEvidenceLoading, on
                   </div>
 
                   {formSuccessMessage && (
-                    <div className="p-3 rounded-xl bg-[var(--match-bg)] border border-[var(--match-border)] text-xs text-[var(--match-text)] flex items-center gap-2 glow-success animate-fade-in">
+                    <div role="status" aria-live="polite" className="p-3 rounded-xl bg-[var(--match-bg)] border border-[var(--match-border)] text-xs text-[var(--match-text)] flex items-center gap-2 glow-success animate-fade-in">
                       <IconCircleCheck className="h-4.5 w-4.5 shrink-0" /><span>{formSuccessMessage}</span>
                     </div>
                   )}
                   {formErrorMessage && (
-                    <div className="p-3 rounded-xl bg-[var(--mismatch-bg)] border border-rose-500/20 text-xs text-[var(--mismatch-text)] flex items-center gap-2 glow-error animate-fade-in">
+                    <div role="alert" className="p-3 rounded-xl bg-[var(--mismatch-bg)] border border-[var(--accent-danger-border)] text-xs text-[var(--mismatch-text)] flex items-center gap-2 glow-error animate-fade-in">
                       <IconAlertTriangle className="h-4.5 w-4.5 shrink-0" /><span>{formErrorMessage}</span>
                     </div>
                   )}
@@ -127,7 +127,7 @@ export default function SupplierDataEditor({ evidenceLogs, isEvidenceLoading, on
 
                 <div className="mt-8 border-t border-[var(--border-subtle)] pt-4 flex justify-end">
                   <button type="submit" disabled={isSavingForm || !isFormDirty}
-                    className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-[var(--heading-color)] text-xs font-semibold tracking-wide transition-all duration-300 ease-out cursor-pointer active:scale-[0.97] flex items-center gap-2 glow-success disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="px-6 py-2.5 rounded-xl bg-[var(--accent-success-strong)] hover:bg-[var(--accent-success)] text-[var(--heading-color)] text-xs font-semibold tracking-wide transition-all duration-300 ease-out cursor-pointer active:scale-[0.97] flex items-center gap-2 glow-success disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {isSavingForm ? <><IconLoader2 className="h-4 w-4 animate-spin" /> Saving Changes...</> : "Save"}
                   </button>
@@ -141,8 +141,8 @@ export default function SupplierDataEditor({ evidenceLogs, isEvidenceLoading, on
   }
 
   return (
-    <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch min-h-[600px]">
-      <section className="lg:col-span-4 flex flex-col min-h-[600px] double-bezel">
+    <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch min-h-0 lg:min-h-[600px]">
+      <section className="lg:col-span-4 flex flex-col min-h-0 lg:min-h-[600px] double-bezel">
         <div className="double-bezel-inner flex-1 flex flex-col h-full">
           {!selectedSupplierName ? (
             <SupplierPicker
@@ -205,10 +205,11 @@ function SupplierPicker({ searchQuery, onSearchChange, isLoading, suppliers, onS
         <IconSearch className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] h-4.5 w-4.5" />
         <input type="text" placeholder="Search supplier..." value={searchQuery}
           onChange={(e) => onSearchChange(e.target.value)}
+          aria-label="Search suppliers"
           className="w-full pl-11 pr-4 py-2.5 rounded-xl bg-[var(--bg-input)] border border-[var(--border-subtle)] text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--match-border)] transition-all font-sans"
         />
       </div>
-      <div className="flex-1 overflow-y-auto space-y-3 max-h-[480px] pr-2">
+      <div className="flex-1 overflow-y-auto space-y-3 max-h-none lg:max-h-[480px] pr-2">
         {isLoading ? (
           Array.from({ length: 3 }).map((_, idx) => (
             <div key={idx} className="p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] animate-pulse">
@@ -219,11 +220,11 @@ function SupplierPicker({ searchQuery, onSearchChange, isLoading, suppliers, onS
           <div className="text-center py-12 text-[var(--text-tertiary)]"><p className="text-sm">No suppliers found.</p></div>
         ) : (
           suppliers.map(name => (
-            <div key={name} onClick={() => onSelect(name)}
-              className="p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] hover:border-emerald-500 hover:bg-emerald-900/10 transition-all duration-300 cursor-pointer"
+            <button key={name} type="button" onClick={() => onSelect(name)}
+              className="w-full text-left p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] hover:border-[var(--accent-success)] hover:bg-[var(--accent-success-soft)] transition-all duration-300 cursor-pointer"
             >
               <h4 className="font-semibold text-sm text-[var(--heading-color)]">{name}</h4>
-            </div>
+            </button>
           ))
         )}
       </div>
@@ -254,24 +255,24 @@ function SupplierFileList({ supplierName, files, selectedEvidence, onSelectFile,
           <IconFiles className="h-4 w-4 text-[var(--match-text)]" />
           Available Certificates ({files.length})
         </h4>
-        <div className="flex-1 overflow-y-auto space-y-3 max-h-[420px] pr-2">
+        <div className="flex-1 overflow-y-auto space-y-3 max-h-none lg:max-h-[420px] pr-2">
           {files.length === 0 ? (
             <p className="text-xs text-[var(--text-tertiary)] italic">No certificates recorded for this supplier.</p>
           ) : (
             files.map(ev => {
               const isSelected = selectedEvidence?.audit_id === ev.audit_id && selectedEvidence?.filename === ev.filename;
               return (
-                <div key={`${ev.audit_id}-${ev.filename}`} onClick={() => onSelectFile(ev)}
-                  className={`p-4 rounded-xl border transition-all duration-300 cursor-pointer ${isSelected
+                <button key={`${ev.audit_id}-${ev.filename}`} type="button" onClick={() => onSelectFile(ev)}
+                  className={`w-full text-left p-4 rounded-xl border transition-all duration-300 cursor-pointer ${isSelected
                     ? "bg-[var(--bg-surface-hover)] border-[var(--match-border)] glow-success"
-                    : "bg-[var(--bg-surface)] border-[var(--border-visible)] hover:border-emerald-500 hover:bg-emerald-900/10"
+                    : "bg-[var(--bg-surface)] border-[var(--border-visible)] hover:border-[var(--accent-success)] hover:bg-[var(--accent-success-soft)]"
                   }`}
                 >
                   <div className="flex justify-between items-start mb-1.5">
                     <p className="text-xs font-semibold text-[var(--heading-color)] truncate pr-2">{ev.filename}</p>
                   </div>
                   <div className="text-[10px] text-[var(--text-tertiary)] font-medium truncate">{cleanQuestionLabel(ev.ariba_question_label)}</div>
-                </div>
+                </button>
               );
             })
           )}
@@ -308,14 +309,14 @@ function CertificateViewer({ evidence }: { evidence: DocumentEvidence }) {
 
       {ct.includes('pdf') ? (
         <iframe src={`${proxyUrl}#toolbar=0`} title="Certificate PDF"
-          className="flex-1 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-input)]" style={{ minHeight: '700px' }}
+          className="flex-1 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-input)] min-h-[420px] lg:min-h-[700px]"
         />
       ) : ct.startsWith('image/') ? (
-        <div className="flex-1 flex items-center justify-center rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-input)] overflow-hidden" style={{ minHeight: '700px' }}>
-          <img src={`${fileUrl}#toolbar=0`} alt="Certificate document" className="max-w-full max-h-full object-contain" />
+        <div className="flex-1 flex items-center justify-center rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-input)] overflow-hidden min-h-[420px] lg:min-h-[700px]">
+          <img src={`${fileUrl}#toolbar=0`} alt="Certificate document" loading="lazy" decoding="async" className="max-w-full max-h-full object-contain" />
         </div>
       ) : (
-        <div className="flex-1 flex flex-col items-center justify-center rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-input)] gap-4" style={{ minHeight: '700px' }}>
+        <div className="flex-1 flex flex-col items-center justify-center rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-input)] gap-4 min-h-[420px] lg:min-h-[700px]">
           <div className="h-14 w-14 rounded-full bg-[var(--bg-surface)] border border-[var(--border-visible)] flex items-center justify-center text-[var(--text-tertiary)]">
             <IconFiles className="h-7 w-7" />
           </div>
@@ -324,7 +325,7 @@ function CertificateViewer({ evidence }: { evidence: DocumentEvidence }) {
             <p className="text-xs text-[var(--text-tertiary)] mt-1">Download file to view the content details.</p>
           </div>
           <a href={proxyUrl ?? ""} download
-            className="flex items-center gap-1.5 px-4.5 py-2 rounded-xl bg-emerald-600 text-xs font-semibold text-[var(--heading-color)] hover:bg-emerald-500 transition-all duration-300 cursor-pointer active:scale-95 glow-success mt-2"
+            className="flex items-center gap-1.5 px-4.5 py-2 rounded-xl bg-[var(--accent-success-strong)] text-xs font-semibold text-[var(--heading-color)] hover:bg-[var(--accent-success)] transition-all duration-300 cursor-pointer active:scale-95 glow-success mt-2"
           >
             <IconDownload className="h-4 w-4" />
             Open / Download File
@@ -364,10 +365,11 @@ function Field({ label, value, onChange, placeholder, required }: {
   placeholder?: string;
   required?: boolean;
 }) {
+  const id = useId();
   return (
     <div>
-      <label className="text-[10px] font-semibold text-[var(--text-secondary)] block mb-1">{label}</label>
-      <input type="text" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
+      <label htmlFor={id} className="text-[10px] font-semibold text-[var(--text-secondary)] block mb-1">{label}</label>
+      <input id={id} type="text" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
         required={required}
         className="w-full px-4.5 py-2.5 rounded-xl bg-[var(--bg-input)] border border-[var(--border-subtle)] text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--match-border)] transition-all duration-300 font-sans"
       />

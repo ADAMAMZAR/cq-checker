@@ -153,6 +153,7 @@ export default function ComparisonPlayground() {
                           value={row.evidence}
                           onChange={e => updateRow(idx, "evidence", e.target.value)}
                           placeholder="Enter value from certificate..."
+                          aria-label={`${row.field} value in evidence`}
                           rows={2}
                           className="w-full bg-transparent border border-[var(--border-subtle)] rounded-lg px-3 py-2 text-xs font-sans text-[var(--text-primary)] placeholder-[var(--text-muted)] resize-none focus:outline-none focus:border-[var(--match-border)] hover:border-[var(--border-visible)] transition-colors"
                         />
@@ -162,6 +163,7 @@ export default function ComparisonPlayground() {
                           value={row.qa}
                           onChange={e => updateRow(idx, "qa", e.target.value)}
                           placeholder="Enter value from questionnaire..."
+                          aria-label={`${row.field} value in questionnaire`}
                           rows={2}
                           className="w-full bg-transparent border border-[var(--border-subtle)] rounded-lg px-3 py-2 text-xs font-sans text-[var(--text-primary)] placeholder-[var(--text-muted)] resize-none focus:outline-none focus:border-[var(--match-border)] hover:border-[var(--border-visible)] transition-colors"
                         />

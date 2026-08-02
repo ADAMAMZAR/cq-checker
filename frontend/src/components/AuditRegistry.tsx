@@ -4,22 +4,21 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   IconSearch, IconCopy, IconCheck, IconAlertTriangle, IconCircleCheck,
   IconExternalLink, IconLoader2, IconPhoto, IconArrowUpRight, IconEdit,
-  IconChevronDown, IconChevronLeft, IconFiles, IconX
+  IconChevronLeft, IconFiles, IconX
 } from "@tabler/icons-react";
 import type { AuditRegistryEntry, DocumentEvidence, SupplierAssets, ComparisonTable } from "@/types";
-import { FIELD_NAME_TO_META_KEY, INITIAL_FORM_FIELDS } from "@/types";
-import { fetchAuditRegistry, fetchSupplierAssets, fetchEvidenceLogs, updateEvidenceMetadata } from "@/lib/api";
-import { getCommentAndTable, cleanQuestionLabel, getLabelSortKey, parseEvidenceMetadata } from "@/lib/utils";
+import { FIELD_NAME_TO_META_KEY } from "@/types";
+import { fetchAuditRegistry, fetchSupplierAssets, updateEvidenceMetadata } from "@/lib/api";
+import { getCommentAndTable, cleanQuestionLabel, getLabelSortKey } from "@/lib/utils";
 import ScreenshotLightbox from "./ScreenshotLightbox";
 
 interface AuditRegistryProps {
   evidenceLogs: DocumentEvidence[];
   isEvidenceLoading: boolean;
   onRefreshEvidence: () => void;
-  onRefreshLogs: () => void;
 }
 
-export default function AuditRegistry({ evidenceLogs, isEvidenceLoading, onRefreshEvidence, onRefreshLogs }: AuditRegistryProps) {
+export default function AuditRegistry({ evidenceLogs, isEvidenceLoading, onRefreshEvidence }: AuditRegistryProps) {
   const [logs, setLogs] = useState<AuditRegistryEntry[]>([]);
   const [selectedLog, setSelectedLog] = useState<AuditRegistryEntry | null>(null);
   const [assets, setAssets] = useState<SupplierAssets>({ screenshots: [], documents: [] });
@@ -32,7 +31,6 @@ export default function AuditRegistry({ evidenceLogs, isEvidenceLoading, onRefre
   const [activeTab, setActiveTab] = useState<"comparison" | "assets">("comparison");
   const [selectedScreenshot, setSelectedScreenshot] = useState<string | null>(null);
   const [activeTableIdx, setActiveTableIdx] = useState<number | null>(null);
-  const [expandedQaIdx, setExpandedQaIdx] = useState<number | null>(0);
   const [editingTableIdx, setEditingTableIdx] = useState<number | null>(null);
   const [tableEditValues, setTableEditValues] = useState<Record<number, Record<number, string>>>({});
   const [isSavingTableEdits, setIsSavingTableEdits] = useState(false);
@@ -62,7 +60,6 @@ export default function AuditRegistry({ evidenceLogs, isEvidenceLoading, onRefre
   const handleSelectLog = async (log: AuditRegistryEntry) => {
     setSelectedLog(log);
     setActiveTableIdx(null);
-    setExpandedQaIdx(0);
     setAssets({ screenshots: [], documents: [] });
     setAssetsLoading(true);
     setActiveTab("comparison");
@@ -165,14 +162,14 @@ export default function AuditRegistry({ evidenceLogs, isEvidenceLoading, onRefre
       {error && logs.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center p-12 text-center double-bezel max-w-lg mx-auto my-12">
           <div className="double-bezel-inner flex flex-col items-center gap-4">
-            <div className="h-12 w-12 rounded-full bg-[var(--mismatch-bg)] flex items-center justify-center text-rose-500 glow-error">
+            <div className="h-12 w-12 rounded-full bg-[var(--mismatch-bg)] flex items-center justify-center text-[var(--accent-danger-text)] glow-error">
               <IconAlertTriangle className="h-6 w-6" />
             </div>
             <h3 className="text-lg font-semibold text-[var(--heading-color)]">Database connection failure</h3>
             <p className="text-sm text-[var(--text-secondary)] max-w-sm">
-              We couldn't connect to the local Google Sheets database server. Make sure your FastAPI backend API is running at <code className="px-1.5 py-0.5 rounded bg-[var(--bg-input)] text-[var(--mismatch-text)] font-mono text-xs">http://127.0.0.1:8000</code>.
+              We couldn&apos;t connect to the local Google Sheets database server. Make sure your FastAPI backend API is running at <code className="px-1.5 py-0.5 rounded bg-[var(--bg-input)] text-[var(--mismatch-text)] font-mono text-xs">http://127.0.0.1:8000</code>.
             </p>
-            <button onClick={loadLogs} className="mt-2 px-5 py-2.5 rounded-full bg-[var(--bg-card-solid)] hover:bg-[var(--bg-card-solid)] text-[var(--heading-color)] font-medium text-xs transition-all cursor-pointer active:scale-98 border border-[var(--border-subtle)]">
+            <button onClick={loadLogs} className="mt-2 px-5 py-2.5 rounded-full bg-[var(--bg-card-solid)] text-[var(--heading-color)] font-medium text-xs transition-all cursor-pointer active:scale-98 border border-[var(--border-subtle)]">
               Retry Connection
             </button>
           </div>
@@ -257,7 +254,7 @@ function LogListPanel({
   onSelectLog: (log: AuditRegistryEntry) => void;
 }) {
   return (
-    <section className="lg:col-span-5 flex flex-col min-h-[600px] double-bezel">
+    <section className="lg:col-span-5 flex flex-col min-h-0 lg:min-h-[600px] double-bezel">
       <div className="double-bezel-inner flex-1 flex flex-col h-full">
         <div className="mb-6 space-y-4">
           <div className="relative">
@@ -265,14 +262,15 @@ function LogListPanel({
             <input
               type="text" placeholder="Search supplier" value={searchQuery}
               onChange={(e) => onSearchChange(e.target.value)}
+              aria-label="Search suppliers"
               className="w-full pl-11 pr-4 py-2.5 rounded-xl bg-[var(--bg-input)] border border-[var(--border-subtle)] text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--match-border)] transition-all font-sans"
             />
           </div>
           <div className="flex gap-2">
             {(["ALL", "MATCH", "MISMATCH"] as const).map(f => (
               <button key={f} onClick={() => onStatusFilterChange(f)}
-                className={`px-4 py-1.5 rounded-full text-xs font-semibold tracking-wider transition-all duration-300 ease-out cursor-pointer active:scale-[0.97] ${statusFilter === f
-                  ? "bg-emerald-600/10 text-[var(--match-text)] border border-[var(--match-border)] shadow-md"
+                className={`icon-action px-4 py-1.5 rounded-full text-xs font-semibold tracking-wider transition-all duration-300 ease-out cursor-pointer active:scale-[0.97] ${statusFilter === f
+                  ? "bg-[var(--accent-success-soft)] text-[var(--match-text)] border border-[var(--match-border)] shadow-md"
                   : "bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface-hover)]"
                   }`}
               >
@@ -281,7 +279,7 @@ function LogListPanel({
             ))}
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto space-y-3 max-h-[620px] pr-2">
+        <div className="flex-1 overflow-y-auto space-y-3 max-h-none lg:max-h-[620px] pr-2">
           {isLoading ? (
             Array.from({ length: 4 }).map((_, idx) => (
               <div key={idx} className="p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] animate-pulse">
@@ -292,15 +290,18 @@ function LogListPanel({
           ) : filteredLogs.length === 0 ? (
             <div className="text-center py-12 text-[var(--text-tertiary)]"><p className="text-sm">No audit logs match current filters.</p></div>
           ) : (
-            filteredLogs.map((log) => {
+            filteredLogs.map((log, idx) => {
               const isSelected = selectedLog?.timestamp === log.timestamp && selectedLog?.supplier_name === log.supplier_name;
               const isMatch = log.result.toLowerCase() === "match";
               return (
-                <div key={`${log.timestamp}-${log.supplier_name}`}
+                <button
+                  key={`${log.timestamp}-${log.supplier_name}`}
+                  type="button"
                   onClick={() => onSelectLog(log)}
-                  className={`p-4 rounded-xl border transition-all duration-300 cursor-pointer ${isSelected
+                  style={{ animationDelay: `${Math.min(idx * 40, 400)}ms` }}
+                  className={`rise-in group w-full text-left p-4 rounded-xl border transition-all duration-300 cursor-pointer ${isSelected
                     ? "bg-[var(--bg-surface-hover)] border-[var(--match-border)] glow-success"
-                    : "bg-[var(--bg-surface)] border-[var(--border-subtle)] hover:border-emerald-500 hover:bg-emerald-900/10"
+                    : "bg-[var(--bg-surface)] border-[var(--border-subtle)] hover:border-[var(--accent-success)] hover:bg-[var(--accent-success-soft)]"
                     }`}
                 >
                   <div className="flex justify-between items-start mb-2">
@@ -312,7 +313,7 @@ function LogListPanel({
                       {log.result}
                     </span>
                   </div>
-                </div>
+                </button>
               );
             })
           )}
@@ -370,13 +371,13 @@ function DetailPane({
       <div className="flex gap-4 mb-6 border-b border-[var(--border-subtle)]">
         <button onClick={() => onTabChange("comparison")}
           className={`pb-2.5 px-0.5 text-xs font-semibold tracking-wider uppercase border-b-2 transition-all duration-300 ease-out cursor-pointer active:scale-[0.97] ${activeTab === "comparison"
-            ? "border-emerald-500 text-[var(--heading-color)] font-bold"
+            ? "border-[var(--accent-success)] text-[var(--heading-color)] font-bold"
             : "border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
             }`}
         >Audit Results</button>
         <button onClick={() => onTabChange("assets")}
           className={`pb-2.5 px-0.5 text-xs font-semibold tracking-wider uppercase border-b-2 transition-all duration-300 ease-out cursor-pointer active:scale-[0.97] ${activeTab === "assets"
-            ? "border-emerald-500 text-[var(--heading-color)] font-bold"
+            ? "border-[var(--accent-success)] text-[var(--heading-color)] font-bold"
             : "border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
             }`}
         >Evidence</button>
@@ -423,11 +424,11 @@ function ComparisonTab({
   const hasJsonTable = log.comparison_table && Array.isArray(log.comparison_table.tables);
 
   return (
-    <div className="flex-1 flex flex-col gap-6 overflow-y-auto max-h-[620px] pr-2">
+    <div className="flex-1 flex flex-col gap-6 overflow-y-auto max-h-none lg:max-h-[620px] pr-2">
       <div className="p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-input)]">
         <h4 className="text-[10px] font-bold text-[var(--text-tertiary)] uppercase tracking-wider mb-3">Overall Auditor Verdict</h4>
         <div className="flex items-center gap-2">
-          <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider ${log.result.toLowerCase() === "match"
+          <span key={`verdict-${log.audit_id}`} className={`pop-in px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider ${log.result.toLowerCase() === "match"
             ? "bg-[var(--match-bg)] text-[var(--match-text)] border border-[var(--match-border)] glow-success"
             : "bg-[var(--mismatch-bg)] text-[var(--mismatch-text)] border border-[var(--mismatch-border)] glow-error"
             }`}>{log.result}</span>
@@ -445,8 +446,9 @@ function ComparisonTab({
           &ldquo;{comment || "No detailed comments provided."}&rdquo;
         </p>
         <button onClick={() => onCopyComment(comment)}
-          className="absolute right-4 top-4 p-2 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-visible)] hover:bg-[var(--bg-surface-hover)] transition-all duration-300 cursor-pointer active:scale-95 text-[var(--text-secondary)] hover:text-[var(--heading-color)]"
+          className="icon-action absolute right-4 top-4 p-2 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-visible)] hover:bg-[var(--bg-surface-hover)] transition-all duration-300 cursor-pointer active:scale-95 text-[var(--text-secondary)] hover:text-[var(--heading-color)]"
           title="Copy suggested comment"
+          aria-label="Copy suggested comment"
         >
           {copied ? <IconCheck className="h-4.5 w-4.5 text-[var(--match-text)]" /> : <IconCopy className="h-4.5 w-4.5" />}
         </button>
@@ -484,7 +486,7 @@ function JsonComparisonTables({
   return (
     <div className="p-5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-input)] space-y-6">
       {tableEditMsg && (
-        <div className={`p-3 rounded-xl text-xs flex items-center gap-2 ${tableEditMsg.includes("recalculated")
+        <div role="status" aria-live="polite" className={`p-3 rounded-xl text-xs flex items-center gap-2 ${tableEditMsg.includes("recalculated")
           ? "bg-[var(--match-bg)] border border-[var(--match-border)] text-[var(--match-text)]"
           : "bg-[var(--mismatch-bg)] border border-[var(--mismatch-border)] text-[var(--mismatch-text)]"
           }`}>
@@ -516,7 +518,16 @@ function JsonComparisonTables({
 
         return (
           <div key={tIdx}
+            role="button"
+            tabIndex={0}
+            aria-expanded={isActive}
             onClick={() => onTableToggle(isActive ? null : tIdx)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onTableToggle(isActive ? null : tIdx);
+              }
+            }}
             className={`p-4 rounded-xl border transition-all duration-300 cursor-pointer ${isActive
               ? "bg-[var(--match-bg)] border-[var(--match-border)] shadow-[0_0_15px_rgba(16,185,129,0.04)]"
               : "bg-[var(--bg-surface)] border-[var(--border-subtle)] hover:bg-[var(--bg-surface-hover)] hover:border-[var(--match-border)]"
@@ -545,19 +556,20 @@ function JsonComparisonTables({
                       {editingTableIdx === tIdx ? (
                         <>
                           <button onClick={() => onSaveTableEdits(tIdx)} disabled={isSavingTableEdits}
-                            className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-[var(--heading-color)] text-[10px] font-semibold tracking-wide transition-all cursor-pointer active:scale-95 flex items-center gap-1 disabled:opacity-50"
+                            className="icon-action px-2.5 py-1 rounded-lg bg-[var(--accent-success-strong)] hover:bg-[var(--accent-success)] text-[var(--heading-color)] text-[10px] font-semibold tracking-wide transition-all cursor-pointer active:scale-95 flex items-center gap-1 disabled:opacity-50"
                           >
                             {isSavingTableEdits ? <IconLoader2 className="h-3 w-3 animate-spin" /> : <IconCheck className="h-3.5 w-3.5" />}
                             Save
                           </button>
                           <button onClick={onCancelTableEdit}
-                            className="px-2.5 py-1 rounded-lg bg-[var(--bg-surface-hover)] hover:bg-[var(--bg-surface-hover)] text-[var(--text-secondary)] hover:text-[var(--heading-color)] text-[10px] font-semibold tracking-wide transition-all cursor-pointer active:scale-95 flex items-center gap-1"
+                            className="icon-action px-2.5 py-1 rounded-lg bg-[var(--bg-surface-hover)] hover:bg-[var(--bg-surface-hover)] text-[var(--text-secondary)] hover:text-[var(--heading-color)] text-[10px] font-semibold tracking-wide transition-all cursor-pointer active:scale-95 flex items-center gap-1"
                           ><IconX className="h-3.5 w-3.5" /> Cancel</button>
                         </>
                       ) : (
                         <button onClick={() => onStartTableEdit(tIdx)}
-                          className="p-1 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-visible)] hover:bg-[var(--bg-surface-hover)] text-[var(--text-tertiary)] hover:text-[var(--match-text)] transition-all cursor-pointer active:scale-90"
+                          className="icon-action p-1 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-visible)] hover:bg-[var(--bg-surface-hover)] text-[var(--text-tertiary)] hover:text-[var(--match-text)] transition-all cursor-pointer active:scale-90"
                           title="Edit all values in evidence"
+                          aria-label="Edit all values in evidence"
                         ><IconEdit className="h-3.5 w-3.5" /></button>
                       )}
                     </div>
@@ -615,6 +627,7 @@ function TableGrid({
                   {editing ? (
                     <textarea value={editValues[rIdx] ?? row.value_evidence}
                       onChange={(e) => onUpdateValue(rIdx, e.target.value)}
+                      aria-label={`${row.field_name} value in evidence`}
                       className="w-full bg-transparent border border-[var(--match-border)] rounded px-1.5 py-1 text-xs font-sans text-[var(--text-primary)] resize-none focus:outline-none focus:border-[var(--match-border)] transition-colors" rows={2}
                     />
                   ) : (
@@ -623,7 +636,7 @@ function TableGrid({
                 </td>
                 <td className="py-2.5 px-3 text-[var(--text-primary)] font-medium border-r border-[var(--border-subtle)] whitespace-normal break-words align-top">{row.value_in_ariba}</td>
                 <td className="py-2.5 px-3 text-[var(--text-primary)] font-medium whitespace-normal break-words align-top">
-                  <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${isMatch ? "bg-[var(--match-bg)] text-[var(--match-text)]" : isMismatch ? "bg-[var(--mismatch-bg)] text-[var(--mismatch-text)]" : "bg-amber-500/10 text-amber-400"}`}>
+                  <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${isMatch ? "bg-[var(--match-bg)] text-[var(--match-text)]" : isMismatch ? "bg-[var(--mismatch-bg)] text-[var(--mismatch-text)]" : "bg-[var(--accent-warning-soft)] text-[var(--accent-warning-text)]"}`}>
                     {row.result}
                   </span>
                 </td>
@@ -676,7 +689,7 @@ function LegacyComparisonTables({ log, table, tables }: {
                       return (
                         <td key={cIdx} className={`py-2.5 px-3 text-[var(--text-primary)] font-medium whitespace-normal break-words align-top ${cIdx < row.length - 1 ? 'border-r border-[var(--border-subtle)]' : ''}`}>
                           {isStatusCell ? (
-                            <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${isMatch ? "bg-[var(--match-bg)] text-[var(--match-text)]" : isMismatch ? "bg-[var(--mismatch-bg)] text-[var(--mismatch-text)]" : "bg-amber-500/10 text-amber-400"}`}>
+                            <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${isMatch ? "bg-[var(--match-bg)] text-[var(--match-text)]" : isMismatch ? "bg-[var(--mismatch-bg)] text-[var(--mismatch-text)]" : "bg-[var(--accent-warning-soft)] text-[var(--accent-warning-text)]"}`}>
                               {cleanCell}
                             </span>
                           ) : cleanCell}
@@ -719,7 +732,7 @@ function LegacyComparisonTables({ log, table, tables }: {
                       return (
                         <td key={cIdx} className={`py-2.5 px-3 text-[var(--text-primary)] font-medium whitespace-normal break-words align-top ${cIdx < row.length - 1 ? 'border-r border-[var(--border-subtle)]' : ''}`}>
                           {isStatusCell ? (
-                            <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${isMatch ? "bg-[var(--match-bg)] text-[var(--match-text)]" : isMismatch ? "bg-[var(--mismatch-bg)] text-[var(--mismatch-text)]" : "bg-amber-500/10 text-amber-400"}`}>
+                            <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${isMatch ? "bg-[var(--match-bg)] text-[var(--match-text)]" : isMismatch ? "bg-[var(--mismatch-bg)] text-[var(--mismatch-text)]" : "bg-[var(--accent-warning-soft)] text-[var(--accent-warning-text)]"}`}>
                               {cleanCell}
                             </span>
                           ) : cleanCell}
@@ -747,7 +760,7 @@ function EvidenceTab({ log, assets, assetsLoading, isEvidenceLoading, evidenceLo
 }) {
   if (isEvidenceLoading) {
     return (
-      <div className="flex-1 flex flex-col gap-6 overflow-y-auto max-h-[620px] pr-2">
+      <div className="flex-1 flex flex-col gap-6 overflow-y-auto max-h-none lg:max-h-[620px] pr-2">
         <div className="space-y-6 animate-pulse">
           {Array.from({ length: 2 }).map((_, idx) => (
             <div key={idx} className="p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-input)] space-y-4">
@@ -783,7 +796,7 @@ function EvidenceTab({ log, assets, assetsLoading, isEvidenceLoading, evidenceLo
   }
 
   return (
-    <div className="flex-1 flex flex-col gap-6 overflow-y-auto max-h-[620px] pr-2">
+    <div className="flex-1 flex flex-col gap-6 overflow-y-auto max-h-none lg:max-h-[620px] pr-2">
       <div className="space-y-6">
         {(() => {
           const matchingEvidence = evidenceLogs.filter(e =>
@@ -883,17 +896,19 @@ function EvidenceTab({ log, assets, assetsLoading, isEvidenceLoading, evidenceLo
               {assets.screenshots.map((shot, idx) => {
                 const fullShotUrl = shot.startsWith("http") ? shot : `http://127.0.0.1:8000${shot}`;
                 return (
-                  <div key={idx} onClick={() => onScreenshotClick(fullShotUrl)}
+                  <button key={idx} type="button" onClick={() => onScreenshotClick(fullShotUrl)}
                     className="w-[10%] min-w-[80px] aspect-video border border-[var(--border-subtle)] rounded overflow-hidden relative group cursor-zoom-in bg-[var(--bg-input)]"
                     title="Expand capture"
+                    aria-label="Expand screenshot capture"
                   >
                     <img src={fullShotUrl} alt="Audit verification capture"
+                      loading="lazy" decoding="async"
                       className="w-full h-full object-cover group-hover:scale-105 transition-all duration-300"
                     />
                     <div className="absolute inset-0 bg-[var(--bg-surface)] opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all duration-300">
                       <IconExternalLink className="h-3 w-3 text-[var(--heading-color)]" />
                     </div>
-                  </div>
+                  </button>
                 );
               })}
             </div>

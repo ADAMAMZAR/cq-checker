@@ -1,18 +1,20 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import dynamic from "next/dynamic";
 import type { MainTab } from "@/components/SubNavTabs";
 import type { DocumentEvidence } from "@/types";
 import { fetchEvidenceLogs } from "@/lib/api";
 import Header from "@/components/Header";
 import SubNavTabs from "@/components/SubNavTabs";
 import AuditRegistry from "@/components/AuditRegistry";
-import SupplierDataEditor from "@/components/SupplierDataEditor";
-import CostAnalytics from "@/components/CostAnalytics";
-import ComparisonPlayground from "@/components/ComparisonPlayground";
-import SupplierAudit from "@/components/SupplierAudit";
 import MainHome from "@/components/MainHome";
-import ProcurementAssistant from "@/components/ProcurementAssistant";
+
+const SupplierDataEditor = dynamic(() => import("@/components/SupplierDataEditor"), { ssr: false });
+const CostAnalytics = dynamic(() => import("@/components/CostAnalytics"), { ssr: false });
+const ComparisonPlayground = dynamic(() => import("@/components/ComparisonPlayground"), { ssr: false });
+const SupplierAudit = dynamic(() => import("@/components/SupplierAudit"), { ssr: false });
+const ProcurementAssistant = dynamic(() => import("@/components/ProcurementAssistant"), { ssr: false });
 
 export default function Dashboard() {
   const [activeMainTab, setActiveMainTab] = useState<MainTab>("home");
@@ -86,7 +88,6 @@ export default function Dashboard() {
             evidenceLogs={evidenceLogs}
             isEvidenceLoading={isEvidenceLoading}
             onRefreshEvidence={loadEvidence}
-            onRefreshLogs={handleRefresh}
           />
         </div>
       )}

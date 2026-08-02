@@ -79,7 +79,7 @@ export function getLabelSortKey(label: string): number[] {
   return match ? match[1].split('.').map(Number) : [999];
 }
 
-export function parseEvidenceMetadata(ev: DocumentEvidence, targetFields: Record<string, string>): Record<string, string> {
+export function parseEvidenceMetadata(ev: DocumentEvidence): Record<string, string> {
   try {
     const parsed = JSON.parse(ev.gemini_extracted_metadata);
     return {

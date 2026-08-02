@@ -28,7 +28,7 @@ export default function SubNavTabs({ active, onChange, onGoHome }: SubNavTabsPro
             onClick={() => onChange(key)}
             className={`pb-3 px-1 text-sm font-medium tracking-tight border-b-2 transition-all duration-300 ease-out cursor-pointer flex items-center gap-2 hover:text-[var(--heading-color)] active:scale-[0.97] ${
               active === key
-                ? "border-emerald-500 text-[var(--heading-color)] font-semibold"
+                ? "border-[var(--accent-success)] text-[var(--heading-color)] font-semibold"
                 : "border-transparent text-[var(--text-tertiary)]"
             }`}
           >
@@ -41,7 +41,7 @@ export default function SubNavTabs({ active, onChange, onGoHome }: SubNavTabsPro
       {onGoHome && (
         <button
           onClick={onGoHome}
-          className="pb-3 px-2 text-xs font-semibold text-emerald-400 hover:text-emerald-300 flex items-center gap-1.5 transition-colors cursor-pointer"
+          className="pb-3 px-2 text-xs font-semibold text-[var(--accent-success-text)] hover:text-[var(--accent-success-text-hover)] flex items-center gap-1.5 transition-colors cursor-pointer"
           title="Return to Main Portal"
         >
           <IconHome className="h-3.5 w-3.5" />

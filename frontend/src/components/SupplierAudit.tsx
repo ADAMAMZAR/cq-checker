@@ -43,7 +43,7 @@ export default function SupplierAudit({ evidenceLogs, isEvidenceLoading }: Suppl
           </div>
         ) : (
           <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-6">
-            <label className="block mb-2 text-xs tracking-wider text-[var(--text-secondary)] font-medium uppercase">
+            <label htmlFor="supplier-audit-search" className="block mb-2 text-xs tracking-wider text-[var(--text-secondary)] font-medium uppercase">
               Supplier Name
             </label>
 
@@ -53,6 +53,7 @@ export default function SupplierAudit({ evidenceLogs, isEvidenceLoading }: Suppl
               </div>
 
               <input
+                id="supplier-audit-search"
                 type="text"
                 placeholder="Search supplier..."
                 value={selected && query === selected ? selected : query}
@@ -79,7 +80,7 @@ export default function SupplierAudit({ evidenceLogs, isEvidenceLoading }: Suppl
 
             <button
               disabled={!selected}
-              className="mt-6 w-full py-2.5 rounded-xl text-sm font-semibold tracking-tight transition-all duration-200 cursor-pointer active:scale-98 disabled:opacity-40 disabled:cursor-not-allowed bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/20"
+              className="mt-6 w-full py-2.5 rounded-xl text-sm font-semibold tracking-tight transition-all duration-200 cursor-pointer active:scale-98 disabled:opacity-40 disabled:cursor-not-allowed bg-[var(--accent-success-strong)] hover:bg-[var(--accent-success)] text-white shadow-lg shadow-[var(--accent-success-shadow)]"
             >
               Audit
             </button>

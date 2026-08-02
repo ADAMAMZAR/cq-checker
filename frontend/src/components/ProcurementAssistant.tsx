@@ -1,20 +1,14 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   IconRobot,
   IconSend,
   IconUser,
-  IconSparkles,
   IconTrash,
-  IconCopy,
-  IconCheck,
-  IconShieldCheck,
   IconBulb,
-  IconBuildingStore,
-  IconFileText,
-  IconAlertCircle,
-  IconRefresh,
   IconArrowLeft,
 } from "@tabler/icons-react";
 
@@ -42,7 +36,7 @@ const INITIAL_SUGGESTIONS = [
 ];
 
 export default function ProcurementAssistant({ onGoHome }: ProcurementAssistantProps = {}) {
-  const [messages, setMessages] = useState<Message[]>([
+  const [messages, setMessages] = useState<Message[]>(() => [
     {
       id: "welcome-1",
       sender: "ai",
@@ -57,11 +51,12 @@ export default function ProcurementAssistant({ onGoHome }: ProcurementAssistantP
   ]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const reduceMotion = typeof window !== "undefined" &&
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    chatEndRef.current?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth" });
   };
 
   useEffect(() => {
@@ -133,12 +128,6 @@ export default function ProcurementAssistant({ onGoHome }: ProcurementAssistantP
     }, 1000);
   };
 
-  const handleCopy = (id: string, text: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
-  };
-
   const handleClearChat = () => {
     setMessages([
       {
@@ -156,9 +145,9 @@ export default function ProcurementAssistant({ onGoHome }: ProcurementAssistantP
       {/* ── Top Header ── */}
       <header className="px-6 py-4 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3.5">
-          <div className="relative p-2.5 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400">
+          <div className="relative p-2.5 rounded-xl bg-[var(--accent-primary-soft)] border border-[var(--accent-primary-border)] text-[var(--accent-primary-text)]">
             <IconRobot className="w-6 h-6" />
-            <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-[var(--bg-surface)] animate-pulse" />
+            <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-[var(--accent-success)] border-2 border-[var(--bg-surface)] animate-pulse" />
           </div>
           <div>
             <div className="flex items-center gap-2">
@@ -173,7 +162,7 @@ export default function ProcurementAssistant({ onGoHome }: ProcurementAssistantP
           {onGoHome && (
             <button
               onClick={onGoHome}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400 hover:bg-blue-500/20 text-xs font-semibold transition-all cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[var(--accent-primary-soft)] border border-[var(--accent-primary-border)] text-[var(--accent-primary-text)] hover:bg-[var(--accent-primary-soft-strong)] text-xs font-semibold transition-all cursor-pointer"
               title="Return to Main Portal"
             >
               <IconArrowLeft className="w-3.5 h-3.5" />
@@ -182,8 +171,9 @@ export default function ProcurementAssistant({ onGoHome }: ProcurementAssistantP
           )}
           <button
             onClick={handleClearChat}
-            className="p-2 rounded-xl bg-[var(--bg-card)] border border-[var(--border-subtle)] hover:border-rose-500/40 text-[var(--text-secondary)] hover:text-rose-400 transition-all cursor-pointer"
+            className="icon-action p-2 rounded-xl bg-[var(--bg-card)] border border-[var(--border-subtle)] hover:border-[var(--accent-danger-border)] text-[var(--text-secondary)] hover:text-[var(--accent-danger-text)] transition-all cursor-pointer"
             title="Clear Chat History"
+            aria-label="Clear chat history"
           >
             <IconTrash className="w-4 h-4" />
           </button>
@@ -191,7 +181,7 @@ export default function ProcurementAssistant({ onGoHome }: ProcurementAssistantP
       </header>
 
       {/* ── Chat Messages Container ── */}
-      <div className="flex-1 overflow-y-auto p-4 sm:p-6 flex flex-col gap-6 space-y-2 scrollbar-thin">
+      <div className="flex-1 overflow-y-auto p-4 sm:p-6 flex flex-col gap-6 space-y-2">
         {messages.map((msg) => (
           <div
             key={msg.id}
@@ -201,8 +191,8 @@ export default function ProcurementAssistant({ onGoHome }: ProcurementAssistantP
             {/* Avatar */}
             <div
               className={`p-2 rounded-xl shrink-0 border ${msg.sender === "user"
-                ? "bg-blue-600 border-blue-400 text-white"
-                : "bg-blue-500/10 border-blue-500/20 text-blue-400"
+                ? "bg-[var(--accent-primary)] border-[var(--accent-primary-border-strong)] text-white"
+                : "bg-[var(--accent-primary-soft)] border-[var(--accent-primary-border)] text-[var(--accent-primary-text)]"
                 }`}
             >
               {msg.sender === "user" ? (
@@ -223,10 +213,10 @@ export default function ProcurementAssistant({ onGoHome }: ProcurementAssistantP
                 {msg.statusBadge && (
                   <span
                     className={`ml-1 px-2 py-0.5 rounded-full text-[9px] font-bold border ${msg.statusBadge.type === "success"
-                      ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                      ? "bg-[var(--accent-success-soft)] text-[var(--accent-success-text)] border-[var(--accent-success-border)]"
                       : msg.statusBadge.type === "warning"
-                        ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
-                        : "bg-blue-500/10 text-blue-400 border-blue-500/20"
+                        ? "bg-[var(--accent-warning-soft)] text-[var(--accent-warning-text)] border-[var(--accent-warning-border)]"
+                        : "bg-[var(--accent-primary-soft)] text-[var(--accent-primary-text)] border-[var(--accent-primary-border)]"
                       }`}
                   >
                     {msg.statusBadge.label}
@@ -237,14 +227,17 @@ export default function ProcurementAssistant({ onGoHome }: ProcurementAssistantP
               {/* Message Bubble */}
               <div
                 className={`p-4 rounded-2xl text-sm leading-relaxed ${msg.sender === "user"
-                  ? "bg-blue-600 text-white rounded-tr-none shadow-lg"
+                  ? "bg-[var(--accent-primary)] text-white rounded-tr-none shadow-lg"
                   : "bg-[var(--bg-surface)] border border-[var(--border-visible)] text-[var(--heading-color)] rounded-tl-none shadow-md"
                   }`}
               >
-                {/* Formatted Markdown text rendering */}
-                <div className="prose prose-invert prose-sm max-w-none whitespace-pre-wrap font-sans">
-                  {msg.text}
-                </div>
+                {msg.sender === "user" ? (
+                  <p className="whitespace-pre-wrap break-words">{msg.text}</p>
+                ) : (
+                  <div className="prose prose-sm max-w-none font-sans">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.text}</ReactMarkdown>
+                  </div>
+                )}
               </div>
 
               {/* Suggested Follow-up Prompts */}
@@ -254,9 +247,9 @@ export default function ProcurementAssistant({ onGoHome }: ProcurementAssistantP
                     <button
                       key={idx}
                       onClick={() => handleSend(action)}
-                      className="px-3 py-1.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] hover:border-blue-500/40 text-xs font-medium text-[var(--text-secondary)] hover:text-blue-400 transition-all text-left cursor-pointer active:scale-95 flex items-center gap-1.5 shadow-sm"
+                      className="px-3 py-1.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] hover:border-[var(--accent-primary-border-hover)] text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--accent-primary-text)] transition-all text-left cursor-pointer active:scale-95 flex items-center gap-1.5 shadow-sm"
                     >
-                      <IconBulb className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <IconBulb className="w-3.5 h-3.5 text-[var(--accent-warning-text)] shrink-0" />
                       <span>{action}</span>
                     </button>
                   ))}
@@ -268,16 +261,16 @@ export default function ProcurementAssistant({ onGoHome }: ProcurementAssistantP
 
         {/* Typing Indicator */}
         {isTyping && (
-          <div className="flex items-start gap-3 self-start max-w-xl animate-pulse">
-            <div className="p-2 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400 shrink-0">
+          <div className="flex items-start gap-3 self-start max-w-xl">
+            <div className="p-2 rounded-xl bg-[var(--accent-primary-soft)] border border-[var(--accent-primary-border)] text-[var(--accent-primary-text)] shrink-0">
               <IconRobot className="w-5 h-5 animate-spin" />
             </div>
             <div className="p-4 rounded-2xl rounded-tl-none bg-[var(--bg-surface)] border border-[var(--border-visible)] text-xs text-[var(--text-secondary)] flex items-center gap-2">
-              <span className="font-semibold text-blue-400">Autonomous Assistant is analyzing GPO database...</span>
-              <div className="flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: "0ms" }} />
-                <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: "150ms" }} />
-                <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: "300ms" }} />
+              <span className="font-semibold text-[var(--accent-primary-text)]">Autonomous Assistant is analyzing GPO database...</span>
+              <div className="flex items-center gap-1" aria-hidden="true">
+                <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-primary-text)] typing-dot" style={{ animationDelay: "0ms" }} />
+                <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-primary-text)] typing-dot" style={{ animationDelay: "150ms" }} />
+                <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-primary-text)] typing-dot" style={{ animationDelay: "300ms" }} />
               </div>
             </div>
           </div>
@@ -295,13 +288,14 @@ export default function ProcurementAssistant({ onGoHome }: ProcurementAssistantP
           }}
           className="flex flex-col gap-2"
         >
-          <div className="relative flex items-center gap-2 rounded-xl bg-[var(--bg-card)] border border-[var(--border-visible)] p-2 focus-within:border-blue-500/60 focus-within:ring-2 focus-within:ring-blue-500/20 transition-all">
+          <div className="relative flex items-center gap-2 rounded-xl bg-[var(--bg-card)] border border-[var(--border-visible)] p-2 focus-within:border-[var(--accent-primary-border-focus)] focus-within:ring-2 focus-within:ring-[var(--accent-primary-ring)] transition-all">
             <input
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="Ask GPO AI"
               disabled={isTyping}
+              aria-label="Ask GPO AI"
               className="flex-1 bg-transparent px-3 py-2 text-sm text-[var(--heading-color)] placeholder-[var(--text-tertiary)] outline-none border-none"
             />
 
@@ -309,11 +303,12 @@ export default function ProcurementAssistant({ onGoHome }: ProcurementAssistantP
             <button
               type="submit"
               disabled={!input.trim() || isTyping}
-              className={`p-2.5 rounded-xl font-bold text-white transition-all flex items-center justify-center shrink-0 cursor-pointer ${input.trim() && !isTyping
-                ? "bg-blue-600 hover:bg-blue-500 shadow-md shadow-blue-500/30 active:scale-95"
-                : "bg-gray-700/50 text-gray-500 cursor-not-allowed"
+              className={`icon-action p-2.5 rounded-xl font-bold text-white transition-all flex items-center justify-center shrink-0 cursor-pointer ${input.trim() && !isTyping
+                ? "bg-[var(--accent-primary)] hover:bg-[var(--accent-primary-hover)] shadow-md shadow-[var(--accent-primary-shadow)] active:scale-95"
+                : "bg-[var(--accent-neutral-bg)] text-[var(--accent-neutral-text)] cursor-not-allowed"
                 }`}
               title="Send Message"
+              aria-label="Send message"
             >
               <IconSend className="w-4 h-4" />
             </button>

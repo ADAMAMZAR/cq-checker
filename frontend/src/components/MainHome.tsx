@@ -8,8 +8,6 @@ import {
   IconBuildingStore,
   IconArrowRight,
   IconExternalLink,
-  IconSparkles,
-  IconActivity,
 } from "@tabler/icons-react";
 import type { MainTab } from "./SubNavTabs";
 
@@ -85,9 +83,9 @@ export default function MainHome({ onNavigate }: MainHomeProps) {
           <div className="max-w-3xl flex flex-col items-start gap-4">
             {/* Main Title - Solid Blue Text */}
             <h1 className="font-sans text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-extrabold tracking-tight text-[var(--heading-color)] leading-[1.1]">
-              Gamuda Group <br className="hidden sm:inline" />
-              <span className="text-blue-500">
-                Procurement Office
+              Operations Deck <br className="hidden sm:inline" />
+              <span className="text-[var(--accent-primary-text-strong)]">
+                Group Procurement Office
               </span>
             </h1>
 
@@ -111,20 +109,20 @@ export default function MainHome({ onNavigate }: MainHomeProps) {
               target={item.isExternal ? "_blank" : "_self"}
               rel={item.isExternal ? "noopener noreferrer" : undefined}
               onClick={(e) => handleContainerClick(e, item)}
-              className="group relative flex flex-col justify-between p-5 sm:p-6 rounded-xl bg-[var(--bg-card)] border border-[var(--border-visible)] hover:border-blue-500/50 hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 cursor-pointer no-underline overflow-hidden"
+              className="group relative flex flex-col justify-between p-5 sm:p-6 rounded-xl bg-[var(--bg-card)] border border-[var(--border-visible)] hover:border-[var(--accent-primary-border-hover)] hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 cursor-pointer no-underline overflow-hidden"
             >
               {/* Card Header Content */}
               <div className="relative z-10 flex flex-col gap-3">
                 <div className="flex items-center justify-between">
                   {/* Icon Badge */}
-                  <div className="p-2.5 rounded-lg bg-blue-500/10 text-blue-400 border border-blue-500/20 group-hover:scale-105 group-hover:bg-blue-500/20 transition-all duration-300 shadow-sm">
+                  <div className="p-2.5 rounded-lg bg-[var(--accent-primary-soft)] text-[var(--accent-primary-text)] border border-[var(--accent-primary-border)] group-hover:scale-105 group-hover:bg-[var(--accent-primary-soft-strong)] transition-all duration-300 shadow-sm">
                     <Icon className="w-5 h-5" />
                   </div>
                 </div>
 
                 {/* Title & Tag */}
                 <div className="flex flex-col gap-1 mt-1">
-                  <h2 className="font-sans text-base sm:text-lg font-bold text-[var(--heading-color)] group-hover:text-blue-400 transition-colors leading-snug">
+                  <h2 className="font-sans text-base sm:text-lg font-bold text-[var(--heading-color)] group-hover:text-[var(--accent-primary-text)] transition-colors leading-snug">
                     {item.title}
                   </h2>
                   <p className="font-serif text-[11px] sm:text-xs text-[var(--text-secondary)] line-clamp-3 leading-relaxed mt-0.5">
@@ -135,7 +133,7 @@ export default function MainHome({ onNavigate }: MainHomeProps) {
 
               {/* Click Here Button Bottom Anchor */}
               <div className="relative z-10 mt-5 pt-3 border-t border-[var(--border-subtle)]">
-                <div className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs transition-all duration-200 shadow-md group-hover:shadow-blue-500/30 active:scale-95">
+                <div className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-primary-hover)] text-white font-bold text-xs transition-all duration-200 shadow-md group-hover:shadow-[var(--accent-primary-shadow)] active:scale-95">
                   <span>Click Here</span>
                   {item.isExternal ? (
                     <IconExternalLink className="w-3 h-3 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />

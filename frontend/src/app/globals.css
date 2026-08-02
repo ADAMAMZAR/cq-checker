@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@plugin "@tailwindcss/typography";
+
 /* ── Dark theme (default) ── */
 [data-theme="dark"] {
   --bg-page: #08090d;
@@ -34,6 +36,38 @@
   --table-header-bg: rgba(6, 78, 59, 0.25);
   --table-header-border: rgba(16, 185, 129, 0.2);
   --table-header-text: #34d399;
+  /* Accent palette — semantic roles (brand primary, success, danger, warning) */
+  --accent-primary: #2563eb;
+  --accent-primary-hover: #3b82f6;
+  --accent-primary-soft: rgba(59, 130, 246, 0.10);
+  --accent-primary-soft-strong: rgba(59, 130, 246, 0.20);
+  --accent-primary-border: rgba(59, 130, 246, 0.20);
+  --accent-primary-border-hover: rgba(59, 130, 246, 0.40);
+  --accent-primary-border-focus: rgba(59, 130, 246, 0.60);
+  --accent-primary-ring: rgba(59, 130, 246, 0.20);
+  --accent-primary-text: #60a5fa;
+  --accent-primary-text-hover: #93c5fd;
+  --accent-primary-text-strong: #3b82f6;
+  --accent-primary-border-strong: #60a5fa;
+  --accent-primary-shadow: rgba(59, 130, 246, 0.30);
+  --accent-success: #10b981;
+  --accent-success-hover: #34d399;
+  --accent-success-strong: #059669;
+  --accent-success-soft: rgba(16, 185, 129, 0.10);
+  --accent-success-border: rgba(16, 185, 129, 0.20);
+  --accent-success-text: #34d399;
+  --accent-success-text-hover: #6ee7b7;
+  --accent-success-shadow: rgba(5, 150, 105, 0.20);
+  --accent-danger: #f43f5e;
+  --accent-danger-soft: rgba(244, 63, 94, 0.20);
+  --accent-danger-border: rgba(244, 63, 94, 0.40);
+  --accent-danger-text: #fb7185;
+  --accent-warning: #f59e0b;
+  --accent-warning-soft: rgba(245, 158, 11, 0.10);
+  --accent-warning-border: rgba(245, 158, 11, 0.20);
+  --accent-warning-text: #fbbf24;
+  --accent-neutral-bg: rgba(107, 114, 128, 0.50);
+  --accent-neutral-text: #6b7280;
 }
 
 /* ── Light theme ── */
@@ -70,6 +104,38 @@
   --table-header-bg: rgba(6, 78, 59, 0.08);
   --table-header-border: rgba(16, 185, 129, 0.2);
   --table-header-text: #059669;
+  /* Accent palette — semantic roles (brand primary, success, danger, warning) */
+  --accent-primary: #2563eb;
+  --accent-primary-hover: #1d4ed8;
+  --accent-primary-soft: rgba(37, 99, 235, 0.10);
+  --accent-primary-soft-strong: rgba(37, 99, 235, 0.18);
+  --accent-primary-border: rgba(37, 99, 235, 0.22);
+  --accent-primary-border-hover: rgba(37, 99, 235, 0.40);
+  --accent-primary-border-focus: rgba(37, 99, 235, 0.60);
+  --accent-primary-ring: rgba(37, 99, 235, 0.18);
+  --accent-primary-text: #2563eb;
+  --accent-primary-text-hover: #1d4ed8;
+  --accent-primary-text-strong: #1d4ed8;
+  --accent-primary-border-strong: #2563eb;
+  --accent-primary-shadow: rgba(37, 99, 235, 0.28);
+  --accent-success: #059669;
+  --accent-success-hover: #10b981;
+  --accent-success-strong: #047857;
+  --accent-success-soft: rgba(5, 150, 105, 0.10);
+  --accent-success-border: rgba(5, 150, 105, 0.25);
+  --accent-success-text: #047857;
+  --accent-success-text-hover: #065f46;
+  --accent-success-shadow: rgba(4, 120, 87, 0.22);
+  --accent-danger: #e11d48;
+  --accent-danger-soft: rgba(225, 29, 72, 0.10);
+  --accent-danger-border: rgba(225, 29, 72, 0.28);
+  --accent-danger-text: #be123c;
+  --accent-warning: #d97706;
+  --accent-warning-soft: rgba(217, 119, 6, 0.10);
+  --accent-warning-border: rgba(217, 119, 6, 0.28);
+  --accent-warning-text: #b45309;
+  --accent-neutral-bg: rgba(75, 85, 99, 0.40);
+  --accent-neutral-text: #6b7280;
 }
 
 @theme inline {
@@ -112,6 +178,7 @@ body::before {
   pointer-events: none;
   opacity: var(--grain-opacity);
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+  background-size: 200px 200px;
 }
 
 .bg-mesh {
@@ -136,7 +203,8 @@ body::before {
   border-radius: 20px;
   padding: 5px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
-  backdrop-filter: blur(20px);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -174,9 +242,105 @@ h1, h2, h3, h4, h5, h6 {
 
 label { letter-spacing: 0.05em; }
 
-/* ── Fade animation ── */
+/* ── Motion ── */
+:root {
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out-soft: cubic-bezier(0.45, 0, 0.55, 1);
+}
+
 @keyframes fade-in {
   from { opacity: 0; }
   to { opacity: 1; }
 }
-.animate-fade-in { animation: fade-in 0.2s ease-out; }
+.animate-fade-in { animation: fade-in 0.25s var(--ease-out-expo) both; }
+
+/* List / block entrance — registry rows, chat messages */
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.rise-in { animation: rise-in 0.45s var(--ease-out-expo) both; }
+
+/* Verdict / modal resolution */
+@keyframes pop-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+.pop-in { animation: pop-in 0.3s var(--ease-out-expo) both; }
+
+/* Chat typing indicator — expo rise, soft settle */
+@keyframes typing-dot {
+  0% { transform: scale(0.55); opacity: 0.35; animation-timing-function: var(--ease-out-expo); }
+  45% { transform: scale(1.05); opacity: 1; animation-timing-function: var(--ease-in-out-soft); }
+  100% { transform: scale(0.55); opacity: 0.35; }
+}
+.typing-dot { animation: typing-dot 1.2s var(--ease-in-out-soft) infinite; }
+
+/* Respect reduced motion: collapse decorative motion; keep essential loaders */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .animate-spin {
+    animation-duration: 0.8s !important;
+    animation-iteration-count: infinite !important;
+  }
+}
+
+/* ── Adaptation ──
+   Pointer-aware: coarse (touch) devices get ≥44px hit areas and 16px inputs
+   (prevents iOS Safari auto-zoom on focus). Small viewports get a microtext
+   floor and rely on natural document flow over nested fixed-height scroll. */
+@media (pointer: coarse) {
+  .icon-action { min-width: 44px; min-height: 44px; }
+  input, textarea, select { font-size: 16px; }
+}
+
+@media (max-width: 640px) {
+  [class*="text-[9px]"] { font-size: 0.625rem; }
+  [class*="text-[10px]"] { font-size: 0.6875rem; }
+}
+
+@supports (padding: max(0px, env(safe-area-inset-bottom))) {
+  body {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/* ── Prose (chat markdown) follows theme tokens ── */
+.prose {
+  --tw-prose-body: var(--text-primary);
+  --tw-prose-headings: var(--heading-color);
+  --tw-prose-lead: var(--text-secondary);
+  --tw-prose-links: var(--match-text);
+  --tw-prose-bold: var(--heading-color);
+  --tw-prose-counters: var(--text-secondary);
+  --tw-prose-bullets: var(--text-secondary);
+  --tw-prose-hr: var(--border-subtle);
+  --tw-prose-quotes: var(--text-secondary);
+  --tw-prose-quote-borders: var(--border-visible);
+  --tw-prose-captions: var(--text-tertiary);
+  --tw-prose-code: var(--heading-color);
+  --tw-prose-pre-code: var(--text-primary);
+  --tw-prose-pre-bg: var(--bg-input);
+  --tw-prose-th-borders: var(--border-visible);
+  --tw-prose-td-borders: var(--border-subtle);
+  --tw-prose-invert-body: var(--text-primary);
+  --tw-prose-invert-headings: var(--heading-color);
+  --tw-prose-invert-links: var(--match-text);
+  --tw-prose-invert-bold: var(--heading-color);
+  --tw-prose-invert-counters: var(--text-secondary);
+  --tw-prose-invert-bullets: var(--text-secondary);
+  --tw-prose-invert-hr: var(--border-subtle);
+  --tw-prose-invert-quotes: var(--text-secondary);
+  --tw-prose-invert-quote-borders: var(--border-visible);
+  --tw-prose-invert-captions: var(--text-tertiary);
+  --tw-prose-invert-code: var(--heading-color);
+  --tw-prose-invert-pre-code: var(--text-primary);
+  --tw-prose-invert-pre-bg: var(--bg-input);
+  --tw-prose-invert-th-borders: var(--border-visible);
+  --tw-prose-invert-td-borders: var(--border-subtle);
+}

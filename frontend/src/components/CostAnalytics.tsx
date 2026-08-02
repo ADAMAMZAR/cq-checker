@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { IconLoader2 } from "@tabler/icons-react";
 import type { CostAnalyticsData } from "@/types";
 import { fetchCostAnalytics } from "@/lib/api";
 
