@@ -20,7 +20,7 @@ async def hybrid_search(
     Each result:
       {
         "child_id", "child_content", "parent_id", "parent_content",
-        "page_number", "document_id", "title", "combined_score",
+        "page_number", "document_id", "title", "file_url", "combined_score",
       }
     """
     embedding_str = "[" + ",".join(str(v) for v in query_embedding) + "]"
@@ -34,6 +34,7 @@ async def hybrid_search(
             pc.page_number AS page_number,
             d.id AS document_id,
             d.title AS title,
+            d.file_url AS file_url,
             (0.6 * (1 - (cc.embedding <=> '{embedding_str}'::vector(1536)))
              + 0.4 * COALESCE(ts_rank_cd(cc.tsv_content, websearch_to_tsquery('english', :q)), 0)) AS combined_score
         FROM child_chunks cc
@@ -54,6 +55,7 @@ async def hybrid_search(
             "page_number": r.page_number,
             "document_id": r.document_id,
             "title": r.title,
+            "file_url": r.file_url,
             "combined_score": float(r.combined_score or 0.0),
         })
     return rows

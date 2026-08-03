@@ -120,12 +120,14 @@ class DocumentSummary(BaseModel):
 class ChatRequest(BaseModel):
     query: str
     session_id: Optional[str] = None
+    stream: bool = False
 
 
 class ChatSource(BaseModel):
     title: str
     page_number: Optional[int] = None
     snippet: Optional[str] = None
+    file_url: Optional[str] = None
 
 
 class ChatResponse(BaseModel):

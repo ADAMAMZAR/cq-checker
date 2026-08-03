@@ -14,7 +14,9 @@ const SupplierDataEditor = dynamic(() => import("@/components/SupplierDataEditor
 const CostAnalytics = dynamic(() => import("@/components/CostAnalytics"), { ssr: false });
 const ComparisonPlayground = dynamic(() => import("@/components/ComparisonPlayground"), { ssr: false });
 const SupplierAudit = dynamic(() => import("@/components/SupplierAudit"), { ssr: false });
-const ProcurementAssistant = dynamic(() => import("@/components/ProcurementAssistant"), { ssr: false });
+const Chatbot = dynamic(() => import("@/components/Chatbot"), { ssr: false });
+const DocumentIngest = dynamic(() => import("@/components/DocumentIngest"), { ssr: false });
+const CertificateVerification = dynamic(() => import("@/components/CertificateVerification"), { ssr: false });
 
 export default function Dashboard() {
   const [activeMainTab, setActiveMainTab] = useState<MainTab>("home");
@@ -78,7 +80,25 @@ export default function Dashboard() {
 
       {activeMainTab === "assistant" && (
         <div className="flex-1 flex flex-col">
-          <ProcurementAssistant onGoHome={handleGoHome} />
+          <Chatbot onGoHome={handleGoHome} />
+        </div>
+      )}
+
+      {activeMainTab === "chat" && (
+        <div className="flex-1 flex flex-col">
+          <Chatbot onGoHome={handleGoHome} />
+        </div>
+      )}
+
+      {activeMainTab === "ingest" && (
+        <div className="flex-1 flex flex-col">
+          <DocumentIngest />
+        </div>
+      )}
+
+      {activeMainTab === "verify" && (
+        <div className="flex-1 flex flex-col">
+          <CertificateVerification />
         </div>
       )}
 

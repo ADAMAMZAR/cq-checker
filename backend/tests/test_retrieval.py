@@ -16,6 +16,7 @@ def _row(**kw):
         "child_id": "c1", "child_content": "child text",
         "parent_id": "p1", "parent_content": "parent text",
         "page_number": 2, "document_id": "d1", "title": "Manual",
+        "file_url": "/api/files/local/manuals/manual.pdf",
         "combined_score": 0.85,
     }
     defaults.update(kw)
@@ -35,6 +36,7 @@ async def test_hybrid_search_returns_rows():
     assert len(rows) == 2
     assert rows[0]["title"] == "Manual"
     assert rows[0]["page_number"] == 2
+    assert rows[0]["file_url"] == "/api/files/local/manuals/manual.pdf"
     assert rows[0]["combined_score"] == 0.85
 
 

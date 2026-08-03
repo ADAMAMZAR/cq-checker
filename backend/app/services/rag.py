@@ -2,8 +2,11 @@
 
 Pipeline: semantic cache -> hybrid retrieval -> parent fetch -> DeepSeek
 generation -> write cache + cost log. Multi-turn aware via session history.
+Supports both one-shot (``answer_query``) and SSE streaming
+(``answer_query_stream``) responses.
 """
 
+import json
 import logging
 import time
 from typing import Dict, List, Optional
@@ -56,6 +59,7 @@ def _sources(results: List[dict]) -> List[dict]:
             "title": r["title"],
             "page_number": r["page_number"],
             "snippet": (r["parent_content"] or "")[:300],
+            "file_url": r.get("file_url"),
         })
     return out
 
@@ -81,6 +85,50 @@ def _call_deepseek(messages: List[dict]) -> tuple[str, int, int]:
     return content, in_tokens, out_tokens
 
 
+def _iter_deepseek_stream(messages: List[dict]):
+    """Stream DeepSeek completions.
+
+    Yields ``(delta_text, usage_or_None)`` tuples. The final chunk carries the
+    token usage when ``stream_options.include_usage`` is honoured by the API.
+    """
+    url = settings.deepseek_base_url.rstrip("/") + "/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {settings.deepseek_api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": settings.deepseek_model,
+        "messages": messages,
+        "temperature": 0.2,
+        "stream": True,
+        "stream_options": {"include_usage": True},
+    }
+    with requests.post(url, headers=headers, json=payload, timeout=90, stream=True) as resp:
+        resp.raise_for_status()
+        for raw in resp.iter_lines():
+            if not raw:
+                continue
+            if not raw.startswith(b"data:"):
+                continue
+            line = raw[5:].strip()
+            if not line or line == b"[DONE]":
+                continue
+            try:
+                chunk = json.loads(line)
+            except Exception:
+                continue
+            usage = chunk.get("usage")
+            if usage:
+                yield "", usage
+                continue
+            choices = chunk.get("choices") or []
+            if choices:
+                delta = choices[0].get("delta") or {}
+                text = delta.get("content")
+                if text:
+                    yield text, None
+
+
 def _fallback_answer(results: List[dict]) -> str:
     """Grounded answer when DeepSeek is unavailable — quotes the top parents."""
     if not results:
@@ -92,68 +140,91 @@ def _fallback_answer(results: List[dict]) -> str:
     return "\n".join(lines)
 
 
+async def _prepare(query: str, session_id: Optional[str]):
+    """Shared front-half: embed -> cache check -> retrieval -> build LLM messages.
+
+    Returns ``(cached_answer_or_None, results, messages, query_embedding)``.
+    """
+    factory = get_session_factory()
+    query_embedding = embeddings.embed_text(query)
+    async with factory() as session:
+        cache_repo = CacheRepository(session)
+        cached = await cache_repo.find_cached(query_embedding, threshold=0.93)
+        if cached:
+            return cached.cached_response, [], None, query_embedding
+        results = await hybrid_search(session, query_embedding, query, k=3)
+
+    messages = None
+    if settings.deepseek_api_key and results:
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        if session_id:
+            messages.extend(await _load_history(factory, session_id, limit=6))
+        messages.append({
+            "role": "user",
+            "content": f"Question: {query}\n\nRelevant passages:\n{_build_context(results)}",
+        })
+    return None, results, messages, query_embedding
+
+
+async def _finalize(
+    factory,
+    query: str,
+    answer: str,
+    query_embedding: List[float],
+    in_tokens: int,
+    out_tokens: int,
+    cost: float,
+    cache_hit: bool,
+    start: float,
+    session_id: Optional[str],
+) -> None:
+    """Shared back-half: write cache (on miss), cost log, append history."""
+    if not cache_hit:
+        async with factory() as session:
+            await CacheRepository(session).put(query, answer, query_embedding)
+    await _log(factory, query, in_tokens, out_tokens, cost,
+               cache_hit=cache_hit, latency_ms=latency(start))
+    if session_id:
+        await _append_history(factory, session_id, "user", query)
+        await _append_history(factory, session_id, "assistant", answer)
+
+
+async def _generate(messages: Optional[List[dict]], results: List[dict]) -> tuple:
+    """One-shot generation: DeepSeek with grounded fallback.
+
+    Returns ``(answer, in_tokens, out_tokens, cost)``.
+    """
+    if messages:
+        try:
+            answer, in_tokens, out_tokens = _call_deepseek(messages)
+            cost = _calculate_cost(in_tokens, out_tokens)
+            return answer, in_tokens, out_tokens, cost
+        except Exception as e:
+            logger.warning(f"DeepSeek chat failed ({e}) — using grounded fallback.")
+    answer = _fallback_answer(results)
+    return answer, 0, 0, 0.0
+
+
 async def answer_query(query: str, session_id: Optional[str] = None) -> dict:
     """Run the full RAG pipeline. Returns a dict for ChatResponse."""
     start = time.monotonic()
-    cache_hit = False
-    in_tokens = 0
-    out_tokens = 0
-    cost = 0.0
-
-    query_embedding = embeddings.embed_text(query)
-
     factory = get_session_factory()
-    async with factory() as session:
-        cache_repo = CacheRepository(session)
+    cached, results, messages, query_embedding = await _prepare(query, session_id)
 
-        # 1. Semantic cache
-        cached = await cache_repo.find_cached(query_embedding, threshold=0.93)
-        if cached:
-            answer = cached.cached_response
-            cache_hit = True
-            await _log(factory, query, 0, 0, 0.0, cache_hit=True, latency_ms=latency(start))
-            if session_id:
-                await _append_history(factory, session_id, "user", query)
-                await _append_history(factory, session_id, "assistant", answer)
-            return {
-                "answer": answer,
-                "sources": [],
-                "cost_usd": 0.0,
-                "cache_hit": True,
-                "session_id": session_id,
-            }
+    if cached is not None:
+        await _finalize(factory, query, cached, query_embedding, 0, 0, 0.0,
+                        cache_hit=True, start=start, session_id=session_id)
+        return {
+            "answer": cached,
+            "sources": [],
+            "cost_usd": 0.0,
+            "cache_hit": True,
+            "session_id": session_id,
+        }
 
-        # 2. Hybrid retrieval (top-3)
-        results = await hybrid_search(session, query_embedding, query, k=3)
-
-        # 3. Generation
-        if settings.deepseek_api_key and results:
-            context = _build_context(results)
-            messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-            if session_id:
-                history = await _load_history(factory, session_id, limit=6)
-                messages.extend(history)
-            messages.append({
-                "role": "user",
-                "content": f"Question: {query}\n\nRelevant passages:\n{context}",
-            })
-            try:
-                answer, in_tokens, out_tokens = _call_deepseek(messages)
-                cost = _calculate_cost(in_tokens, out_tokens)
-            except Exception as e:
-                logger.warning(f"DeepSeek chat failed ({e}) — using grounded fallback.")
-                answer = _fallback_answer(results)
-        else:
-            answer = _fallback_answer(results)
-
-        # 4. Write cache + cost log
-        await cache_repo.put(query, answer, query_embedding)
-        await _log(factory, query, in_tokens, out_tokens, cost,
-                   cache_hit=False, latency_ms=latency(start))
-
-        if session_id:
-            await _append_history(factory, session_id, "user", query)
-            await _append_history(factory, session_id, "assistant", answer)
+    answer, in_tokens, out_tokens, cost = await _generate(messages, results)
+    await _finalize(factory, query, answer, query_embedding, in_tokens, out_tokens,
+                    cost, cache_hit=False, start=start, session_id=session_id)
 
     return {
         "answer": answer,
@@ -162,6 +233,53 @@ async def answer_query(query: str, session_id: Optional[str] = None) -> dict:
         "cache_hit": False,
         "session_id": session_id,
     }
+
+
+async def answer_query_stream(query: str, session_id: Optional[str] = None):
+    """Run the full RAG pipeline and yield SSE event dicts.
+
+    Events: ``{"delta": str}`` chunks, then a final
+    ``{"done": true, "sources": [...], "cost_usd": float, "cache_hit": bool,
+    "session_id": str}`` event.
+    """
+    start = time.monotonic()
+    factory = get_session_factory()
+    cached, results, messages, query_embedding = await _prepare(query, session_id)
+
+    if cached is not None:
+        await _finalize(factory, query, cached, query_embedding, 0, 0, 0.0,
+                        cache_hit=True, start=start, session_id=session_id)
+        yield {"delta": cached}
+        yield {"done": True, "sources": [], "cost_usd": 0.0,
+               "cache_hit": True, "session_id": session_id}
+        return
+
+    in_tokens = 0
+    out_tokens = 0
+    if messages:
+        try:
+            parts = []
+            for text, usage in _iter_deepseek_stream(messages):
+                if usage:
+                    in_tokens = int(usage.get("prompt_tokens", 0))
+                    out_tokens = int(usage.get("completion_tokens", 0))
+                else:
+                    parts.append(text)
+                    yield {"delta": text}
+            answer = "".join(parts)
+        except Exception as e:
+            logger.warning(f"DeepSeek stream failed ({e}) — using grounded fallback.")
+            answer = _fallback_answer(results)
+            yield {"delta": answer}
+    else:
+        answer = _fallback_answer(results)
+        yield {"delta": answer}
+
+    cost = _calculate_cost(in_tokens, out_tokens)
+    await _finalize(factory, query, answer, query_embedding, in_tokens, out_tokens,
+                    cost, cache_hit=False, start=start, session_id=session_id)
+    yield {"done": True, "sources": _sources(results), "cost_usd": round(cost, 6),
+           "cache_hit": False, "session_id": session_id}
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────

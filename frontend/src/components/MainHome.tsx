@@ -8,6 +8,8 @@ import {
   IconBuildingStore,
   IconArrowRight,
   IconExternalLink,
+  IconUpload,
+  IconMessageChatbot,
 } from "@tabler/icons-react";
 import type { MainTab } from "./SubNavTabs";
 
@@ -64,6 +66,36 @@ const pageContainers: PageContainerItem[] = [
     anchor: "#registry",
     isExternal: false,
     targetTab: "registry",
+  },
+  {
+    id: "rag-chatbot",
+    title: "RAG Chatbot",
+    subtitle: "Manual Q&A",
+    description: "Ask questions grounded on ingested supplier manuals with citations.",
+    icon: IconMessageChatbot,
+    anchor: "#chat",
+    isExternal: false,
+    targetTab: "chat",
+  },
+  {
+    id: "document-ingest",
+    title: "Document Ingest",
+    subtitle: "Knowledge Base",
+    description: "Upload manuals to be parsed, chunked, and embedded for retrieval.",
+    icon: IconUpload,
+    anchor: "#ingest",
+    isExternal: false,
+    targetTab: "ingest",
+  },
+  {
+    id: "certificate-verify",
+    title: "Certificate Verify",
+    subtitle: "AI Verification",
+    description: "Run a single certificate through extraction, rules, and the Qwen judge.",
+    icon: IconCertificate,
+    anchor: "#verify",
+    isExternal: false,
+    targetTab: "verify",
   },
 ];
 

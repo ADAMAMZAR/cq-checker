@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import List, Optional
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 
 from app.config import settings
 from app.schemas import (
@@ -667,9 +667,31 @@ async def list_documents(limit: int = 50, offset: int = 0):
 async def chat(payload: ChatRequest):
     """
     Phase 6: RAG chatbot query. Semantic cache -> hybrid retrieval -> DeepSeek
-    generation. Multi-turn aware via session_id.
+    generation. Multi-turn aware via session_id. Set `stream: true` for an SSE
+    streaming answer; otherwise returns the full JSON response.
     """
     from app.services import rag
+
+    if payload.stream:
+        async def event_stream():
+            try:
+                async for event in rag.answer_query_stream(
+                    payload.query, session_id=payload.session_id
+                ):
+                    yield f"data: {json.dumps(event)}\n\n"
+            except Exception as e:
+                yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                yield "data: [DONE]\n\n"
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     result = await rag.answer_query(payload.query, session_id=payload.session_id)
     return ChatResponse(

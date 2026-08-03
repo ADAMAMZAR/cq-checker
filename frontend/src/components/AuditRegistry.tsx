@@ -8,7 +8,7 @@ import {
 } from "@tabler/icons-react";
 import type { AuditRegistryEntry, DocumentEvidence, SupplierAssets, ComparisonTable } from "@/types";
 import { FIELD_NAME_TO_META_KEY } from "@/types";
-import { fetchAuditRegistry, fetchSupplierAssets, updateEvidenceMetadata } from "@/lib/api";
+import { fetchAuditRegistry, fetchSupplierAssets, updateEvidenceMetadata, buildFileUrl } from "@/lib/api";
 import { getCommentAndTable, cleanQuestionLabel, getLabelSortKey } from "@/lib/utils";
 import ScreenshotLightbox from "./ScreenshotLightbox";
 
@@ -167,7 +167,7 @@ export default function AuditRegistry({ evidenceLogs, isEvidenceLoading, onRefre
             </div>
             <h3 className="text-lg font-semibold text-[var(--heading-color)]">Database connection failure</h3>
             <p className="text-sm text-[var(--text-secondary)] max-w-sm">
-              We couldn&apos;t connect to the local Google Sheets database server. Make sure your FastAPI backend API is running at <code className="px-1.5 py-0.5 rounded bg-[var(--bg-input)] text-[var(--mismatch-text)] font-mono text-xs">http://127.0.0.1:8000</code>.
+              We couldn&apos;t connect to the local FastAPI backend. Make sure it is running at <code className="px-1.5 py-0.5 rounded bg-[var(--bg-input)] text-[var(--mismatch-text)] font-mono text-xs">http://127.0.0.1:8000</code>.
             </p>
             <button onClick={loadLogs} className="mt-2 px-5 py-2.5 rounded-full bg-[var(--bg-card-solid)] text-[var(--heading-color)] font-medium text-xs transition-all cursor-pointer active:scale-98 border border-[var(--border-subtle)]">
               Retry Connection
@@ -514,7 +514,7 @@ function JsonComparisonTables({
             t.attached_file.toLowerCase().includes(doc.name.toLowerCase()) ||
             doc.name.toLowerCase().includes(t.attached_file.toLowerCase())
           ) : null;
-        const pdfUrl = matchingDoc ? `http://127.0.0.1:8000/api/files/${btoa(matchingDoc.url).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_')}` : null;
+        const pdfUrl = matchingDoc ? buildFileUrl(matchingDoc.url) : null;
 
         return (
           <div key={tIdx}
@@ -858,7 +858,7 @@ function EvidenceTab({ log, assets, assetsLoading, isEvidenceLoading, evidenceLo
                     <div className="flex justify-between items-center">
                       <h5 className="text-[10px] font-bold text-[var(--text-tertiary)] uppercase tracking-wider">Extracted Metadata</h5>
                       {matchingDoc && (
-                        <a href={`http://127.0.0.1:8000${matchingDoc.url}`} target="_blank" rel="noreferrer"
+                        <a href={buildFileUrl(matchingDoc.url)} target="_blank" rel="noreferrer"
                           className="flex items-center gap-1 text-[9px] text-[var(--match-text)] hover:underline hover:text-[var(--match-text)] transition-colors"
                         >Open PDF <IconArrowUpRight className="h-3 w-3" /></a>
                       )}
@@ -894,7 +894,7 @@ function EvidenceTab({ log, assets, assetsLoading, isEvidenceLoading, evidenceLo
           ) : (
             <div className="flex flex-wrap gap-3">
               {assets.screenshots.map((shot, idx) => {
-                const fullShotUrl = shot.startsWith("http") ? shot : `http://127.0.0.1:8000${shot}`;
+                const fullShotUrl = buildFileUrl(shot);
                 return (
                   <button key={idx} type="button" onClick={() => onScreenshotClick(fullShotUrl)}
                     className="w-[10%] min-w-[80px] aspect-video border border-[var(--border-subtle)] rounded overflow-hidden relative group cursor-zoom-in bg-[var(--bg-input)]"

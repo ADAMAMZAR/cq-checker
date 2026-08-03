@@ -7,7 +7,7 @@ import {
 } from "@tabler/icons-react";
 import type { DocumentEvidence } from "@/types";
 import { INITIAL_FORM_FIELDS } from "@/types";
-import { updateEvidenceMetadata } from "@/lib/api";
+import { updateEvidenceMetadata, buildFileUrl } from "@/lib/api";
 import { cleanQuestionLabel, parseEvidenceMetadata } from "@/lib/utils";
 
 interface SupplierDataEditorProps {
@@ -284,13 +284,13 @@ function SupplierFileList({ supplierName, files, selectedEvidence, onSelectFile,
 
 function CertificateViewer({ evidence }: { evidence: DocumentEvidence }) {
   const fileUrl = evidence.file_url;
-  const proxyUrl = fileUrl ? `http://127.0.0.1:8000/api/files/${btoa(fileUrl).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_')}` : null;
+  const proxyUrl = fileUrl ? buildFileUrl(fileUrl) : null;
   const ct = (evidence.file_content_type || '').toLowerCase();
 
   if (!fileUrl) {
     return (
       <div className="flex items-center justify-center h-full text-[10px] text-[var(--text-tertiary)]">
-        File not available (no Supabase Storage URL)
+        File not available (no stored file URL)
       </div>
     );
   }

@@ -217,8 +217,9 @@ def test_get_evidence_endpoint(mock_get_evidence):
 
 @patch("app.services.auditor.run_full_audit")
 @patch("app.services.audit_data.update_document_evidence")
+@patch("app.services.audit_data.update_audit_result")
 @patch("app.services.audit_data.get_document_evidence_logs")
-def test_update_evidence_endpoint_success(mock_get_logs, mock_update, mock_audit):
+def test_update_evidence_endpoint_success(mock_get_logs, mock_update_result, mock_update, mock_audit):
     mock_get_logs.return_value = [
         DocumentEvidence(
             audit_id="audit-123", supplier_id=1, timestamp="now",
@@ -423,6 +424,31 @@ def test_chat_endpoint(mock_answer):
     assert body["answer"] == "Cached answer"
     assert body["cache_hit"] is True
     assert body["session_id"] == "sess-1"
+
+
+def test_chat_endpoint_stream():
+    events_seen = []
+
+    async def fake_stream(query, session_id=None):
+        events_seen.append(query)
+        yield {"delta": "Hel"}
+        yield {"delta": "lo"}
+        yield {"done": True, "sources": [], "cost_usd": 0.0,
+               "cache_hit": False, "session_id": "sess-1"}
+
+    with patch("app.services.rag.answer_query_stream", new=fake_stream):
+        response = client.post(
+            "/api/chat",
+            json={"query": "hello", "session_id": "sess-1", "stream": True},
+        )
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    body = response.text
+    assert "Hel" in body
+    assert "lo" in body
+    assert '"done": true' in body
+    assert '"cache_hit": false' in body
+    assert events_seen == ["hello"]
 
 
 @patch("app.services.rag.clear_cache")

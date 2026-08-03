@@ -236,27 +236,40 @@
 ## Phase 7 — Frontend (Local Dev)
 
 ### Tasks
-- [ ] Update `frontend/src/lib/api.ts` to point at the local backend (`http://localhost:<port>/api/*`)
-- [ ] Add **Next.js rewrites** in `frontend/next.config.ts` so `/api/*` forwards to the local FastAPI backend (mirrors the prod same-origin URL shape; swaps to Cloud Run URL in Phase 8)
-- [ ] Add UI screens:
-  - **Chatbot UI** (query box, streaming answer, source/citation chips from parent chunks)
-  - **Document Ingest UI** (upload manual → show ingestion progress/status)
-  - **Certificate Verification UI** (upload cert → show extracted JSON + judge reasoning + status badge)
-  - Migrate existing **SupplierAudit / AuditRegistry / CostAnalytics** screens off Supabase URLs (use Neon-backed endpoints)
-- [ ] `next build` produces a standard static export (`output: 'export'`) ready for GCS hosting in Phase 8
-- [ ] File rendering: backend serves new uploads from local disk via a `/api/files/*` proxy endpoint (moves to GCS in Phase 8); legacy Supabase URLs still served by the existing proxy
-- [ ] E2E smoke tests (`frontend/tests/`) for the 3 new screens
-- [ ] **Gemini-style Citation Side Panel**: Implement split/resizable view (`react-resizable-panels`) pairing chat on the left with PDF viewer (`react-pdf` / `pdfjs-dist`) on the right. Clicking inline citation badges (`[1]`) jumps the viewer directly to `#page=X` using GCS Signed URLs.
+- [x] Update `frontend/src/lib/api.ts` — single `API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "/api"` seam (same-origin in dev; baked Cloud Run URL in Phase 8). Added `buildFileUrl()` (resolves `/api/files/local/*` + legacy Supabase URLs through the proxy) and typed fns for chat/ingest/certificates. Existing screens migrated off hardcoded `http://127.0.0.1:8000` (`AuditRegistry.tsx`, `SupplierDataEditor.tsx`).
+- [x] **Conditional** Next.js config in `frontend/next.config.ts`: rewrites `/api/* → http://127.0.0.1:8000/api/*` in dev ONLY. Next 16 forbids rewrites under `output: 'export'`, so static export is toggled with `STATIC_EXPORT=1` (`npm run build:static`), which drops rewrites and emits `frontend/out/`.
+- [x] Add UI screens:
+  - **RAG Chatbot** (`Chatbot.tsx`) — real `/api/chat` SSE streaming, `localStorage` session + history restore, markdown answers, cache-hit/cost badges, citation chips.
+  - **Document Ingest** (`DocumentIngest.tsx`) — upload → stage stepper (uploading/parsing/chunking/embedding) → result counts; ingested-documents table.
+  - **Certificate Verification** (`CertificateVerification.tsx`) — upload + supplier → status badge (PASS/FAIL/REQUIRES_HUMAN_REVIEW), extracted fields, judge reasoning, history list.
+  - Migrated existing SupplierAudit / AuditRegistry / CostAnalytics screens to Neon-backed endpoints + shared file-URL builder; removed stale "Google Sheets" copy.
+- [x] `next build` produces a standard static export (`output: 'export'` via `STATIC_EXPORT=1`) ready for GCS hosting in Phase 8. `npm run build` (dev-mode, rewrites) also verified.
+- [x] File rendering: new uploads served via `/api/files/local/*`; legacy Supabase URLs via `/api/files/{b64url}` (both through `buildFileUrl`). Swap to GCS signed URLs in Phase 8 via the same helper.
+- [x] **Backend support** (required by the screens): `/api/chat` now supports SSE streaming (`stream: true`); `ChatSource` carries `file_url` (added to hybrid-retrieval SQL) so citations can open the source PDF at the exact page.
+- [x] E2E smoke tests (`frontend/tests/chat.spec.ts`, `ingest.spec.ts`, `verify.spec.ts`) — 5 tests green (route-mocked, per `dashboard.spec.ts` pattern).
+- [x] **Gemini-style Citation Side Panel** (`CitationSidePanel.tsx`): split/resizable view (`react-resizable-panels` v4 `Group`/`Panel`/`Separator`) pairing chat with a `react-pdf` viewer. Inline citation chips `[1]` jump the viewer to `#page=X`. PDFs load via the local/legacy proxy in Phase 7; GCS Signed URLs in Phase 8.
+- [x] `ProcurementAssistant.tsx` (simulated chatbot) deleted — superseded by `Chatbot.tsx`.
 
 ### Affected files
 - `frontend/next.config.ts`
-- `frontend/src/lib/api.ts`
+- `frontend/src/lib/api.ts`, `frontend/src/types/index.ts`
 - `frontend/src/components/Chatbot.tsx` (new)
 - `frontend/src/components/DocumentIngest.tsx` (new)
 - `frontend/src/components/CertificateVerification.tsx` (new)
+- `frontend/src/components/CitationSidePanel.tsx` (new)
+- `frontend/src/components/ProcurementAssistant.tsx` (deleted)
+- `frontend/src/components/{SubNavTabs,MainHome,AuditRegistry,SupplierDataEditor}.tsx`
+- `frontend/package.json` (+ `react-pdf`, `react-resizable-panels`, `pdfjs-dist`, `cross-env`, `build:static` script)
+- `frontend/.env.example` (new), `frontend/tests/{chat,ingest,verify}.spec.ts` (new)
+- `backend/app/schemas.py` (`ChatSource.file_url`, `ChatRequest.stream`)
+- `backend/app/repositories/retrieval.py` (+ `file_url`)
+- `backend/app/services/rag.py` (SSE `answer_query_stream`, `_iter_deepseek_stream`)
+- `backend/app/main.py` (`/api/chat` SSE via `StreamingResponse`)
+- `backend/tests/{test_rag,test_retrieval,test_main}.py` (+ stream/file_url coverage)
 
 ### Exit criteria
-- All three workflows function end-to-end in a local browser against the Neon backend.
+- All three workflows function end-to-end in a local browser against the Neon backend (SSE verified through the dev rewrite; browser E2E green). Backend suite **156 non-DB tests passing**. `npm run build:static` emits `frontend/out/`; `npm run lint`/`tsc --noEmit` clean for new code (pre-existing `any` lint debt in `AuditRegistry.tsx`/legacy types unchanged).
+- *Note:* DB-backed `test_repositories.py` tests require the docker `pgvector` Postgres (`cq_checker_test`); on this machine a native Postgres occupies port 5432, so they were not run here.
 
 ---
 

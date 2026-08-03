@@ -106,3 +106,82 @@ export const INITIAL_FORM_FIELDS: Record<string, string> = {
   effectiveDate: "",
   certificateLocation: ""
 };
+
+// ── RAG Chatbot ──────────────────────────────────────────────────────────────
+
+export interface ChatSource {
+  title: string;
+  page_number?: number | null;
+  snippet?: string | null;
+  file_url?: string | null;
+}
+
+export interface ChatResponse {
+  answer: string;
+  sources: ChatSource[];
+  cost_usd: number;
+  cache_hit: boolean;
+  session_id?: string | null;
+}
+
+export interface ChatHistoryResponse {
+  session_id: string;
+  messages: { role: string; content: string; created_at?: string | null }[];
+}
+
+export interface ChatStreamDone {
+  done: boolean;
+  sources: ChatSource[];
+  cost_usd: number;
+  cache_hit: boolean;
+  session_id?: string | null;
+  error?: string;
+}
+
+// ── Document Ingestion ───────────────────────────────────────────────────────
+
+export type IngestStatus = "created" | "skipped" | "failed";
+
+export interface DocumentIngestResult {
+  document_id?: string | null;
+  title: string;
+  status: IngestStatus;
+  parent_count: number;
+  child_count: number;
+  cost_usd: number;
+  message: string;
+}
+
+export interface DocumentSummary {
+  id: string;
+  title: string;
+  file_url: string;
+  parent_count: number;
+  child_count: number;
+  created_at?: string | null;
+}
+
+// ── Certificate Verification ─────────────────────────────────────────────────
+
+export type CertificateStatus = "PASS" | "FAIL" | "REQUIRES_HUMAN_REVIEW";
+
+export interface CertificateVerifyResult {
+  status: CertificateStatus;
+  extracted_data: Record<string, unknown>;
+  reasoning_trace: string;
+  confidence: number;
+  judge_source: string;
+  rule_result?: Record<string, unknown> | null;
+  record_id?: string | null;
+}
+
+export interface CertificateVerificationResponse {
+  id: string;
+  file_url: string;
+  extracted_data: Record<string, unknown>;
+  status: CertificateStatus;
+  judge_reasoning?: string | null;
+  confidence?: number | null;
+  judge_source?: string | null;
+  created_at?: string | null;
+}
