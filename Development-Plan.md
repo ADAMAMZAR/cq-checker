@@ -141,26 +141,32 @@
 ## Phase 4 — Certificate Extraction & Verification Pipeline
 
 ### Tasks
-- [ ] **DeepSeek V4 Flash extractor** (`backend/app/services/extractor.py`):
-  - Replace `gemini.extract_certificate_data` call path in `_process_uploaded_files`
-  - Multi-modal / JSON-mode prompt returning strict JSON: Name, ID Number, Expiry Date, Issuing Authority, + confidence scores
-- [ ] **Qwen Reasoning judge** (`backend/app/services/judge.py`):
-  - Input: extracted JSON + company compliance rules (stored in `certificate_verifications` or a new `compliance_rules` table)
-  - CoT reasoning trace + status: `PASS` / `FAIL` / `REQUIRES_HUMAN_REVIEW`
-- [ ] Update `certificate_verifications` flow to save: extracted JSON, confidence, judge reasoning, status, timestamps
-- [ ] Port existing `backend/app/services/auditor.py` comparison rules into the judge config (QA label matching, expiration logic)
-- [ ] Add `/api/certificates/verify` and `/api/certificates` (list) endpoints
-- [ ] Tests: `backend/tests/test_extractor.py`, `test_judge.py`
+- [x] **PDF → image rendering** (`backend/app/services/pdf.py`) — PyMuPDF renders PDF pages to JPEG; caps at 10 pages
+- [x] **DeepSeek V4 Flash extractor** (`backend/app/services/extractor.py`):
+  - Vision JSON-mode (OpenAI-compatible `/chat/completions`), base64 `image_url` per page
+  - Returns Name, ID Number, Expiry Date, Issuing Authority + **confidence scores**
+  - Falls back to mock/failed shape when key missing or call fails
+- [x] **Deterministic rules** (`backend/app/services/rules.py`) — reuses `auditor.py` matchers/expiry/PL/category checks for a single document; the judge always has a code-backed verdict
+- [x] **Qwen Reasoning judge** (`backend/app/services/judge.py`):
+  - CoT prompt → `{status: PASS|FAIL|REQUIRES_HUMAN_REVIEW, reasoning_trace, confidence}`
+  - `QWEN_BASE_URL` (DashScope default) + `QWEN_MODEL` config vars
+  - **Graceful fallback** to deterministic rules when Qwen unreachable
+- [x] Persist to `certificate_verifications` (extracted JSON + confidence + status + reasoning)
+- [x] Add `/api/certificates/verify` and `/api/certificates` (list) endpoints
+- [x] Tests: `test_pdf.py`, `test_rules.py`, `test_extractor.py`, `test_judge.py` + endpoint tests — **112 non-DB tests passing**
 
 ### Affected files
+- `backend/app/services/pdf.py` (new)
 - `backend/app/services/extractor.py` (new)
+- `backend/app/services/rules.py` (new)
 - `backend/app/services/judge.py` (new)
 - `backend/app/repositories/certificates.py`
 - `backend/app/main.py`
 - `backend/app/config.py`
+- `backend/tests/test_pdf.py`, `test_rules.py`, `test_extractor.py`, `test_judge.py` (new)
 
 ### Exit criteria
-- A sample certificate yields valid JSON + a reasoned PASS/FAIL verdict; audit row persisted in Neon.
+- A sample certificate PDF yields valid JSON + confidence + a reasoned PASS/FAIL/REQUIRES_HUMAN_REVIEW verdict; audit row persisted in Neon; `/api/audit` (Gemini flow) untouched; all tests green.
 
 ---
 

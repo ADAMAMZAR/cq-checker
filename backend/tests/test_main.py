@@ -6,7 +6,7 @@ import os
 # Force pure Python implementation of Protobuf to bypass Python 3.14 C-extension incompatibilities
 os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch, PropertyMock, AsyncMock
 import pytest
 from fastapi.testclient import TestClient
 from app.main import app
@@ -271,4 +271,79 @@ def test_update_evidence_endpoint_failure(mock_get_logs, mock_update):
     response = client.put("/api/evidence", json=payload)
     assert response.status_code == 500
     assert "failed" in response.json()["detail"].lower()
+
+
+@patch("app.services.storage.LocalDiskStorage.upload")
+@patch("app.services.judge.judge_certificate")
+@patch("app.services.extractor.extract_certificate_data")
+def test_verify_certificate_endpoint(mock_extract, mock_judge, mock_upload):
+    mock_upload.return_value = "/api/files/local/ACME/cert.pdf"
+    mock_extract.return_value = ({
+        "certificateOwnerName": "ACME Corp",
+        "issuerName": "Issuer",
+        "certificateType": "ISO 9001",
+        "certificateNumber": "C1",
+        "expirationDate": "31/12/2029",
+        "effectiveDate": "01/01/2026",
+        "certificateLocation": "Selangor, Malaysia",
+        "yearOfPublication": "2026",
+    }, 500, 200, 0.0005)
+    mock_judge.return_value = {
+        "status": "PASS",
+        "reasoning_trace": "All match.",
+        "confidence": 0.95,
+        "judge_source": "rules",
+        "rule_result": {"verdict": "Match"},
+    }
+
+    mock_record = MagicMock()
+    mock_record.id = "11111111-2222-3333-4444-555555555555"
+
+    with patch("app.repositories.certificates.CertificateRepository") as mock_repo:
+        mock_repo.return_value.create = AsyncMock(return_value=mock_record)
+        with patch("app.db.session.get_session_factory") as mock_factory:
+            mock_session = MagicMock()
+            mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_factory.return_value.__aexit__ = AsyncMock(return_value=None)
+            files = {"file": ("cert.pdf", b"%PDF-1.4 fake", "application/pdf")}
+            data = {"supplier_name": "ACME Corp"}
+            response = client.post("/api/certificates/verify", files=files, data=data)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "PASS"
+    assert body["extracted_data"]["certificateOwnerName"] == "ACME Corp"
+    assert body["record_id"] is not None
+
+
+@patch("app.services.extractor.extract_certificate_data")
+def test_verify_certificate_endpoint_extraction_failure(mock_extract):
+    mock_extract.return_value = ({"certificateOwnerName": "Extraction Failed"}, 0, 0, 0.0)
+    files = {"file": ("cert.pdf", b"%PDF-1.4 fake", "application/pdf")}
+    data = {"supplier_name": "ACME Corp"}
+    response = client.post("/api/certificates/verify", files=files, data=data)
+    assert response.status_code == 502
+
+
+@patch("app.repositories.certificates.CertificateRepository")
+def test_list_certificates_endpoint(mock_repo):
+    mock_record = MagicMock()
+    mock_record.id = "11111111-2222-3333-4444-555555555555"
+    mock_record.file_url = "http://x/c.pdf"
+    mock_record.extracted_data = {"certificateOwnerName": "ACME", "confidence": 0.9}
+    mock_record.status = "PASS"
+    mock_record.judge_reasoning = "OK"
+    mock_record.created_at = None
+    mock_repo.return_value.list_all = AsyncMock(return_value=[mock_record])
+
+    with patch("app.db.session.get_session_factory") as mock_factory:
+        mock_session = MagicMock()
+        mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_factory.return_value.__aexit__ = AsyncMock(return_value=None)
+        response = client.get("/api/certificates")
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["status"] == "PASS"
+
+
 

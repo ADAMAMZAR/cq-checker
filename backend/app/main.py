@@ -18,7 +18,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
 from app.config import settings
-from app.schemas import AuditLogEntry, AuditResultResponse, DocumentEvidence, UpdateEvidenceRequest, AuditRegistryEntry
+from app.schemas import (
+    AuditLogEntry, AuditResultResponse, DocumentEvidence, UpdateEvidenceRequest,
+    AuditRegistryEntry, CertificateVerificationResponse, CertificateVerifyResult,
+)
 from app.services import audit_data, gemini, storage
 from app.services import auditor
 from app.services.gemini import clean_question_label
@@ -514,6 +517,99 @@ async def run_audit(
 @app.get("/api/costs")
 async def get_cost_analytics():
     return await audit_data.get_cost_analytics()
+
+
+@app.post("/api/certificates/verify", response_model=CertificateVerifyResult)
+async def verify_certificate(
+    file: UploadFile = File(...),
+    supplier_name: str = Form(...),
+    question_label: Optional[str] = Form(None),
+    qa_answers: Optional[str] = Form("[]"),
+    qa_data_title: Optional[str] = Form(""),
+):
+    """
+    Phase 4 pipeline: upload a certificate PDF/image -> DeepSeek extraction ->
+    Qwen judge -> save to certificate_verifications -> return verdict + reasoning.
+    """
+    from app.services import extractor, judge
+    from app.db.session import get_session_factory
+    from app.repositories.certificates import CertificateRepository
+
+    file_bytes = await file.read()
+    mime_type = file.content_type or "application/pdf"
+    filename = file.filename or "certificate"
+
+    file_url = storage.get_storage().upload(file_bytes, supplier_name, filename, mime_type)
+
+    # 1. Extract
+    extracted_data, in_t, out_t, cost = extractor.extract_certificate_data(
+        file_bytes, mime_type, question_label,
+    )
+    if extracted_data.get("certificateOwnerName") == "Extraction Failed":
+        raise HTTPException(status_code=502, detail="Certificate extraction failed.")
+
+    # 2. Judge
+    verdict = judge.judge_certificate(
+        extracted_data,
+        supplier_name,
+        ariba_question_label=question_label,
+        ariba_qa_answers=qa_answers,
+        qa_data_title=qa_data_title,
+    )
+
+    # 3. Persist
+    factory = get_session_factory()
+    record_id = None
+    async with factory() as session:
+        repo = CertificateRepository(session)
+        record = await repo.create(
+            file_url=file_url or "",
+            extracted_data={**extracted_data, "confidence": verdict["confidence"]},
+            status=verdict["status"],
+            judge_reasoning=verdict["reasoning_trace"],
+        )
+        record_id = str(record.id)
+
+    return CertificateVerifyResult(
+        status=verdict["status"],
+        extracted_data=extracted_data,
+        reasoning_trace=verdict["reasoning_trace"],
+        confidence=verdict["confidence"],
+        judge_source=verdict["judge_source"],
+        rule_result=verdict["rule_result"],
+        record_id=record_id,
+    )
+
+
+@app.get("/api/certificates", response_model=List[CertificateVerificationResponse])
+async def list_certificates(limit: int = 50, offset: int = 0):
+    """
+    List past certificate verifications from certificate_verifications.
+    """
+    from app.db.session import get_session_factory
+    from app.repositories.certificates import CertificateRepository
+
+    factory = get_session_factory()
+    async with factory() as session:
+        repo = CertificateRepository(session)
+        records = await repo.list_all(limit=limit, offset=offset)
+
+    results = []
+    for r in records:
+        confidence = None
+        if isinstance(r.extracted_data, dict):
+            confidence = r.extracted_data.get("confidence")
+        results.append(CertificateVerificationResponse(
+            id=str(r.id),
+            file_url=r.file_url,
+            extracted_data=r.extracted_data,
+            status=r.status,
+            judge_reasoning=r.judge_reasoning,
+            confidence=float(confidence) if confidence is not None else None,
+            created_at=r.created_at.isoformat() if r.created_at else None,
+        ))
+    return results
+
 
 @app.get("/api/logs/{supplier_id}/assets")
 async def get_supplier_assets(supplier_id: int):

@@ -76,3 +76,24 @@ class AuditRegistryEntry(BaseModel):
     screenshot_url: Optional[str] = None
     comparison_table: Optional[dict] = None
 
+
+class CertificateVerificationResponse(BaseModel):
+    id: str
+    file_url: str
+    extracted_data: dict
+    status: str
+    judge_reasoning: Optional[str] = None
+    confidence: Optional[float] = None
+    judge_source: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class CertificateVerifyResult(BaseModel):
+    status: str
+    extracted_data: dict
+    reasoning_trace: str
+    confidence: float
+    judge_source: str
+    rule_result: Optional[dict] = None
+    record_id: Optional[str] = None
+

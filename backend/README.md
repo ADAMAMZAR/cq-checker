@@ -46,6 +46,10 @@ The API will be available at `http://localhost:8000`.
 | `MINIMAX_API_KEY` | MiniMax M3 parser API key | — |
 | `DEEPSEEK_API_KEY` | DeepSeek V4 Flash API key | — |
 | `QWEN_API_KEY` | Qwen Reasoning judge API key | — |
+| `DEEPSEEK_BASE_URL` | DeepSeek API base URL | `https://api.deepseek.com` |
+| `DEEPSEEK_MODEL` | DeepSeek model name | `deepseek-v4-flash` |
+| `QWEN_BASE_URL` | Qwen (DashScope) OpenAI-compatible base URL | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| `QWEN_MODEL` | Qwen model name | `qwen-max` |
 | `SUPABASE_URL` | ⚠️ Deprecated — read-only historical files | — |
 | `SUPABASE_KEY` | ⚠️ Deprecated — read-only historical files | — |
 | `VERTEX_PROJECT` | ⚠️ Deprecated — migration only | — |
@@ -102,10 +106,14 @@ backend/
 │   │   ├── cache.py       # Semantic query cache
 │   │   └── audit.py       # Legacy audit/supplier/evidence CRUD
 │   └── services/          # Business logic
-│       ├── auditor.py     # Certificate audit rules
-│       ├── gemini.py      # Gemini extraction
+│       ├── auditor.py     # Certificate audit rules (legacy /api/audit)
+│       ├── gemini.py      # Gemini extraction (legacy /api/audit)
 │       ├── audit_data.py  # Neon-backed data access (replaces legacy sheets.py)
-│       └── storage.py     # StorageProvider (LocalDisk now, GCS in Phase 8)
+│       ├── storage.py     # StorageProvider (LocalDisk now, GCS in Phase 8)
+│       ├── pdf.py         # PDF -> image rendering (PyMuPDF)
+│       ├── rules.py       # Deterministic certificate rules (reuses auditor.py)
+│       ├── extractor.py   # DeepSeek V4 Flash extractor
+│       └── judge.py       # Qwen reasoning judge (with rules fallback)
 ├── migrations/            # Alembic database migrations
 │   ├── env.py
 │   └── versions/
