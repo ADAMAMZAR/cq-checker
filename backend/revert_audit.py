@@ -10,51 +10,58 @@ import os
 os.environ['PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION'] = 'python'
 
 import json
+import asyncio
 import logging
 logging.basicConfig(level=logging.WARNING)
 
-from app.services import sheets
+from app.services import audit_data
 from app.services.gemini import run_programmatic_audit
 
-all_evidence = sheets.get_document_evidence_logs()
-print(f"Found {len(all_evidence)} document evidence records")
 
-groups = {}
-for doc in all_evidence:
-    groups.setdefault(doc.supplier_name.strip(), []).append(doc)
+async def main():
+    all_evidence = await audit_data.get_document_evidence_logs()
+    print(f"Found {len(all_evidence)} document evidence records")
 
-print(f"Grouped into {len(groups)} suppliers")
+    groups = {}
+    for doc in all_evidence:
+        groups.setdefault(doc.supplier_name.strip(), []).append(doc)
 
-count = 0
-for supplier_name, docs in sorted(groups.items()):
-    file_contexts = []
-    extraction_results = []
+    print(f"Grouped into {len(groups)} suppliers")
 
-    for doc in docs:
-        try:
-            metadata = json.loads(doc.gemini_extracted_metadata) if doc.gemini_extracted_metadata else {}
-        except Exception:
-            metadata = {}
+    count = 0
+    for supplier_name, docs in sorted(groups.items()):
+        file_contexts = []
+        extraction_results = []
 
-        file_contexts.append({
-            "filename": doc.filename,
-            "ariba_question_label": doc.ariba_question_label,
-            "ariba_qa_answers": doc.ariba_qa_answers,
-        })
-        extraction_results.append(metadata)
+        for doc in docs:
+            try:
+                metadata = json.loads(doc.gemini_extracted_metadata) if doc.gemini_extracted_metadata else {}
+            except Exception:
+                metadata = {}
 
-    if not file_contexts:
-        continue
+            file_contexts.append({
+                "filename": doc.filename,
+                "ariba_question_label": doc.ariba_question_label,
+                "ariba_qa_answers": doc.ariba_qa_answers,
+            })
+            extraction_results.append(metadata)
 
-    verdict, comment, comp_table = run_programmatic_audit(
-        supplier_name, file_contexts, extraction_results
-    )
+        if not file_contexts:
+            continue
 
-    audit_ids = set(d.audit_id for d in docs)
-    for aid in audit_ids:
-        ok = sheets.update_audit_result(aid, verdict, comment, comp_table)
-        if ok:
-            count += 1
-            print(f"  Reverted {aid} ({supplier_name})")
+        verdict, comment, comp_table = run_programmatic_audit(
+            supplier_name, file_contexts, extraction_results
+        )
 
-print(f"\nReverted {count} audit records to old-style results")
+        audit_ids = set(d.audit_id for d in docs)
+        for aid in audit_ids:
+            ok = await audit_data.update_audit_result(aid, verdict, comment, comp_table)
+            if ok:
+                count += 1
+                print(f"  Reverted {aid} ({supplier_name})")
+
+    print(f"\nReverted {count} audit records to old-style results")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

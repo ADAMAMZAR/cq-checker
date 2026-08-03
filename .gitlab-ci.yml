@@ -1,19 +1,50 @@
 stages:
+  - lint
   - test
 
-# Test FastAPI Python Backend
+# ── Lint: check code style and import health ─────────────────────
+lint_backend:
+  stage: lint
+  image: python:3.10-slim
+  before_script:
+    - cd backend
+    - pip install --no-cache-dir flake8
+  script:
+    - flake8 app/ tests/ --max-line-length=120 --ignore=E501,W503
+
+# ── Test: FastAPI Python Backend (unit tests, no DB) ─────────────
 test_backend:
   stage: test
   image: python:3.10-slim
   before_script:
     - cd backend
-    # Force python to use pure Python implementation of Protobuf in CI environment
     - export PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
     - pip install --no-cache-dir -r requirements.txt
   script:
-    - python -m pytest
+    - python -m pytest -v tests/ --ignore=tests/test_repositories.py
 
-# Test Chrome Extension using Node Playwright
+# ── Test: Repository integration tests (requires PostgreSQL) ────
+test_repositories:
+  stage: test
+  image: python:3.10-slim
+  services:
+    - name: pgvector/pgvector:pg16
+      alias: postgres
+  variables:
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: postgres
+    POSTGRES_DB: cq_checker_test
+    TEST_DATABASE_URL: "postgresql+asyncpg://postgres:postgres@postgres:5432/cq_checker_test"
+    NEON_DATABASE_URL: "postgresql+asyncpg://postgres:postgres@postgres:5432/cq_checker_test"
+  before_script:
+    - cd backend
+    - export PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
+    - pip install --no-cache-dir -r requirements.txt
+  script:
+    - alembic upgrade head
+    - python -m pytest -v tests/test_repositories.py
+
+# ── Test: Chrome Extension (Playwright) ──────────────────────────
 test_extension:
   stage: test
   image: mcr.microsoft.com/playwright:v1.44.0-jammy
@@ -26,7 +57,7 @@ test_extension:
   script:
     - npx playwright test
 
-# Verify Next.js Frontend Compilation
+# ── Test: Next.js Frontend Compilation ───────────────────────────
 test_frontend:
   stage: test
   image: node:18-alpine
@@ -39,5 +70,3 @@ test_frontend:
     - npm ci
   script:
     - npm run build
-
-

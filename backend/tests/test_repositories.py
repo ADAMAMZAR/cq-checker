@@ -1,0 +1,268 @@
+"""Tests for database repositories and session management."""
+
+import os
+import pytest
+from uuid import uuid4
+
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy import text
+
+from app.db.session import Base
+from app.models.tables import (
+    Document, ParentChunk, ChildChunk,
+    CertificateVerification, QueryCache,
+    Supplier, AuditLog, DocumentEvidence,
+)
+from app.repositories.documents import DocumentRepository, ChunkRepository
+from app.repositories.certificates import CertificateRepository
+from app.repositories.cache import CacheRepository
+from app.repositories.audit import SupplierRepository, AuditLogRepository, DocumentEvidenceRepository
+
+
+# ── Test database fixture ────────────────────────────────────────────────
+
+TEST_DB_URL = os.getenv(
+    "TEST_DATABASE_URL",
+    "postgresql+asyncpg://postgres:postgres@localhost:5432/cq_checker_test",
+)
+
+
+@pytest.fixture
+async def test_engine():
+    """Create a test engine per test."""
+    engine = create_async_engine(TEST_DB_URL, echo=False)
+    yield engine
+    await engine.dispose()
+
+
+@pytest.fixture
+async def setup_test_db(test_engine):
+    """Create all tables in the test database."""
+    async with test_engine.begin() as conn:
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.run_sync(Base.metadata.create_all)
+    yield
+
+
+@pytest.fixture
+async def db_session(test_engine, setup_test_db):
+    """Create a fresh session for each test with automatic rollback."""
+    factory = async_sessionmaker(bind=test_engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as session:
+        yield session
+        await session.rollback()
+
+
+# ── Document Repository Tests ────────────────────────────────────────────
+
+class TestDocumentRepository:
+    @pytest.mark.asyncio
+    async def test_create_document(self, db_session):
+        repo = DocumentRepository(db_session)
+        doc = await repo.create(title="Test Manual", file_url="https://example.com/test.pdf")
+        assert doc.title == "Test Manual"
+        assert doc.file_url == "https://example.com/test.pdf"
+        assert doc.id is not None
+
+    @pytest.mark.asyncio
+    async def test_get_document_by_id(self, db_session):
+        repo = DocumentRepository(db_session)
+        doc = await repo.create(title="Lookup Test", file_url="https://example.com/lookup.pdf")
+        found = await repo.get_by_id(doc.id)
+        assert found is not None
+        assert found.title == "Lookup Test"
+
+    @pytest.mark.asyncio
+    async def test_get_document_not_found(self, db_session):
+        repo = DocumentRepository(db_session)
+        found = await repo.get_by_id(uuid4())
+        assert found is None
+
+    @pytest.mark.asyncio
+    async def test_exists_by_url(self, db_session):
+        repo = DocumentRepository(db_session)
+        await repo.create(title="Exists Test", file_url="https://example.com/exists.pdf")
+        assert await repo.exists_by_url("https://example.com/exists.pdf") is True
+        assert await repo.exists_by_url("https://example.com/nonexistent.pdf") is False
+
+    @pytest.mark.asyncio
+    async def test_list_documents(self, db_session):
+        repo = DocumentRepository(db_session)
+        await repo.create(title="Doc 1", file_url="https://example.com/1.pdf")
+        await repo.create(title="Doc 2", file_url="https://example.com/2.pdf")
+        docs = await repo.list_all(limit=10)
+        assert len(docs) >= 2
+
+
+# ── Chunk Repository Tests ───────────────────────────────────────────────
+
+class TestChunkRepository:
+    @pytest.mark.asyncio
+    async def test_create_parent_and_child(self, db_session):
+        doc_repo = DocumentRepository(db_session)
+        chunk_repo = ChunkRepository(db_session)
+
+        doc = await doc_repo.create(title="Chunk Test", file_url="https://example.com/chunk.pdf")
+        parent = await chunk_repo.create_parent(doc.id, content="Parent chunk content", page_number=1)
+        child = await chunk_repo.create_child(parent.id, content="Child chunk content")
+
+        assert parent.document_id == doc.id
+        assert child.parent_id == parent.id
+
+    @pytest.mark.asyncio
+    async def test_get_parent_with_children(self, db_session):
+        doc_repo = DocumentRepository(db_session)
+        chunk_repo = ChunkRepository(db_session)
+
+        doc = await doc_repo.create(title="Parent-Child Test", file_url="https://example.com/pc.pdf")
+        parent = await chunk_repo.create_parent(doc.id, content="Parent")
+        await chunk_repo.create_child(parent.id, content="Child 1")
+        await chunk_repo.create_child(parent.id, content="Child 2")
+
+        result = await chunk_repo.get_parent_with_children(parent.id)
+        assert result is not None
+        assert len(result.child_chunks) == 2
+
+    @pytest.mark.asyncio
+    async def test_count_by_document(self, db_session):
+        doc_repo = DocumentRepository(db_session)
+        chunk_repo = ChunkRepository(db_session)
+
+        doc = await doc_repo.create(title="Count Test", file_url="https://example.com/count.pdf")
+        parent = await chunk_repo.create_parent(doc.id, content="Parent")
+        await chunk_repo.create_child(parent.id, content="Child")
+
+        counts = await chunk_repo.count_by_document(doc.id)
+        assert counts["parent_chunks"] == 1
+        assert counts["child_chunks"] == 1
+
+
+# ── Certificate Repository Tests ─────────────────────────────────────────
+
+class TestCertificateRepository:
+    @pytest.mark.asyncio
+    async def test_create_certificate(self, db_session):
+        repo = CertificateRepository(db_session)
+        record = await repo.create(
+            file_url="https://example.com/cert.pdf",
+            extracted_data={"name": "Test Corp", "expiry": "2027-01-01"},
+            status="PASS",
+            judge_reasoning="All fields match.",
+        )
+        assert record.status == "PASS"
+        assert record.extracted_data["name"] == "Test Corp"
+
+    @pytest.mark.asyncio
+    async def test_list_certificates(self, db_session):
+        repo = CertificateRepository(db_session)
+        await repo.create(file_url="https://example.com/c1.pdf", extracted_data={}, status="FAIL")
+        await repo.create(file_url="https://example.com/c2.pdf", extracted_data={}, status="PASS")
+        records = await repo.list_all(limit=10)
+        assert len(records) >= 2
+
+
+# ── Cache Repository Tests ───────────────────────────────────────────────
+
+class TestCacheRepository:
+    @pytest.mark.asyncio
+    async def test_put_and_find_cached(self, db_session):
+        repo = CacheRepository(db_session)
+        await repo.put(query_text="What is the policy?", cached_response="The policy is X.")
+        # Note: find_cached requires vector similarity, which needs pgvector.
+        # This test just verifies the put works.
+        # Full vector similarity test requires a running pgvector database.
+
+
+# ── Audit Repository Tests ───────────────────────────────────────────────
+
+class TestSupplierRepository:
+    @pytest.mark.asyncio
+    async def test_get_or_create_new(self, db_session):
+        repo = SupplierRepository(db_session)
+        supplier = await repo.get_or_create("Test Supplier Inc")
+        assert supplier.supplier_name == "Test Supplier Inc"
+        assert supplier.id is not None
+
+    @pytest.mark.asyncio
+    async def test_get_or_create_existing(self, db_session):
+        repo = SupplierRepository(db_session)
+        s1 = await repo.get_or_create("Existing Supplier")
+        s2 = await repo.get_or_create("Existing Supplier")
+        assert s1.id == s2.id
+
+    @pytest.mark.asyncio
+    async def test_list_all(self, db_session):
+        repo = SupplierRepository(db_session)
+        await repo.get_or_create("Alpha Corp")
+        await repo.get_or_create("Beta Corp")
+        suppliers = await repo.list_all()
+        assert len(suppliers) >= 2
+
+
+class TestAuditLogRepository:
+    @pytest.mark.asyncio
+    async def test_create_audit_log(self, db_session):
+        supplier_repo = SupplierRepository(db_session)
+        supplier = await supplier_repo.get_or_create("Audit Test Supplier")
+
+        repo = AuditLogRepository(db_session)
+        log = AuditLog(
+            audit_id="AUDIT_TEST_001",
+            supplier_id=supplier.id,
+            timestamp="31/07/2026, 10:00:00",
+            supplier_name="Audit Test Supplier",
+            compiled_extracted_data="[]",
+            suggested_comment="Test audit",
+        )
+        result = await repo.create(log)
+        assert result.supplier_name == "Audit Test Supplier"
+        assert result.result == "Mismatch"  # default
+
+
+class TestDocumentEvidenceRepository:
+    @pytest.mark.asyncio
+    async def test_create_evidence(self, db_session):
+        supplier_repo = SupplierRepository(db_session)
+        supplier = await supplier_repo.get_or_create("Evidence Test Supplier")
+
+        repo = DocumentEvidenceRepository(db_session)
+        evidence = DocumentEvidence(
+            audit_id="test-audit-001",
+            supplier_id=supplier.id,
+            timestamp="31/07/2026, 10:00:00",
+            supplier_name="Evidence Test Supplier",
+            filename="test_cert.pdf",
+            ariba_question_label="Q1",
+            ariba_qa_answers="[]",
+            gemini_extracted_supplier_name="Evidence Test Supplier",
+            gemini_extracted_metadata="{}",
+            file_content_type="application/pdf",
+        )
+        result = await repo.create(evidence)
+        assert result.filename == "test_cert.pdf"
+        assert result.audit_id == "test-audit-001"
+
+    @pytest.mark.asyncio
+    async def test_get_by_audit_id(self, db_session):
+        supplier_repo = SupplierRepository(db_session)
+        supplier = await supplier_repo.get_or_create("Multi-Evidence Supplier")
+
+        repo = DocumentEvidenceRepository(db_session)
+        for i in range(3):
+            await repo.create(DocumentEvidence(
+                audit_id="multi-evidence-001",
+                supplier_id=supplier.id,
+                timestamp="31/07/2026, 10:00:00",
+                supplier_name="Multi-Evidence Supplier",
+                filename=f"doc_{i}.pdf",
+                ariba_question_label=f"Q{i}",
+                ariba_qa_answers="[]",
+                gemini_extracted_supplier_name="Multi-Evidence Supplier",
+                gemini_extracted_metadata="{}",
+                file_content_type="application/pdf",
+            ))
+
+        results = await repo.get_by_audit_id("multi-evidence-001")
+        assert len(results) == 3

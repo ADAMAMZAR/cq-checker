@@ -12,19 +12,16 @@ os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 from app.config import settings
 
 @pytest.fixture(autouse=True)
-def disable_apps_script_url_for_tests():
+def disable_supabase_for_tests():
     """
-    Force google_apps_script_url and supabase credentials to be empty during unit tests,
-    ensuring they use the mock sheets client instead of attempting HTTP/REST requests.
+    Force supabase credentials to be empty during unit tests,
+    so the app never attempts live Supabase REST requests.
     """
-    original_url = settings.google_apps_script_url
     original_sb_url = settings.supabase_url
     original_sb_key = settings.supabase_key
-    
-    settings.google_apps_script_url = ""
+
     settings.supabase_url = ""
     settings.supabase_key = ""
     yield
-    settings.google_apps_script_url = original_url
     settings.supabase_url = original_sb_url
     settings.supabase_key = original_sb_key

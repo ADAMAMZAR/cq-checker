@@ -20,6 +20,7 @@ os.environ['PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION'] = 'python'
 import json
 import logging
 import argparse
+import asyncio
 from datetime import datetime
 from typing import List, Optional
 
@@ -28,12 +29,12 @@ logging.basicConfig(level=logging.WARNING)
 
 from app.config import settings
 from app.schemas import AuditLogEntry, DocumentEvidence
-from app.services import sheets, auditor
+from app.services import audit_data, auditor
 
 
 def get_db_backend() -> str:
-    if settings.supabase_url and settings.supabase_key:
-        return "supabase"
+    if settings.neon_database_url:
+        return "neon"
     return "unknown"
 
 
@@ -75,9 +76,9 @@ def build_workspace_map(audit_logs, all_evidence) -> dict:
     return wm
 
 
-def reaudit_run(supplier_name: str, docs: List[DocumentEvidence],
-                workspace_title: str = "", dry_run: bool = False,
-                force_region: Optional[str] = None) -> Optional[dict]:
+async def reaudit_run(supplier_name: str, docs: List[DocumentEvidence],
+                      workspace_title: str = "", dry_run: bool = False,
+                      force_region: Optional[str] = None) -> Optional[dict]:
     """Re-audit a single audit run's documents and update the database."""
 
     file_contexts = []
@@ -121,8 +122,7 @@ def reaudit_run(supplier_name: str, docs: List[DocumentEvidence],
         return result
 
     # Find the correct audit_results audit_id(s) for this supplier
-    # (may differ from document_evidence audit_ids due to Phase1/Phase2 split)
-    all_logs = sheets.get_audit_logs()
+    all_logs = await audit_data.get_audit_logs()
     supplier_logs = [log for log in all_logs if log.supplier_name.strip().lower() == supplier_name.strip().lower()]
     audit_ids_to_update = set(log.audit_id for log in supplier_logs)
 
@@ -131,7 +131,7 @@ def reaudit_run(supplier_name: str, docs: List[DocumentEvidence],
         audit_ids_to_update = set(d.audit_id for d in docs)
 
     for aid in audit_ids_to_update:
-        success = sheets.update_audit_result(
+        success = await audit_data.update_audit_result(
             audit_id=aid,
             result=verdict,
             suggested_comment=comment,
@@ -153,7 +153,7 @@ def print_result(result: dict, index: int, total: int):
     print(f"  Comment:  {result['suggested_comment'][:200]}...")
 
 
-def main():
+async def _main():
     parser = argparse.ArgumentParser(
         description="Re-run comparison audit on existing database records."
     )
@@ -171,10 +171,7 @@ def main():
     backend = get_db_backend()
     if backend == "unknown":
         print("ERROR: No database configured.")
-        print("Set one of the following in your .env file:")
-        print("  SUPABASE_URL + SUPABASE_KEY")
-        print("  GOOGLE_APPS_SCRIPT_URL")
-        print("  GOOGLE_CREDS_PATH / GOOGLE_CREDS_JSON + GOOGLE_SHEET_NAME")
+        print("Set NEON_DATABASE_URL in your .env file.")
         sys.exit(1)
 
     print(f"Database backend: {backend}")
@@ -183,7 +180,7 @@ def main():
     print()
 
     # Fetch existing records
-    all_evidence = sheets.get_document_evidence_logs()
+    all_evidence = await audit_data.get_document_evidence_logs()
     if not all_evidence:
         print("No document evidence records found in database.")
         sys.exit(0)
@@ -192,7 +189,7 @@ def main():
 
     # Fetch audit logs for workspace_title region detection
     try:
-        all_logs = sheets.get_audit_logs()
+        all_logs = await audit_data.get_audit_logs()
         workspace_map = build_workspace_map(all_logs, all_evidence)
         print(f"Total audit logs fetched: {len(all_logs)}")
     except Exception as e:
@@ -233,8 +230,8 @@ def main():
         # Get workspace title from the first doc's audit_id
         first_aid = docs[0].audit_id if docs else ""
         wt = workspace_map.get(first_aid, "")
-        result = reaudit_run(supplier_name, docs, workspace_title=wt,
-                             dry_run=args.dry_run, force_region=args.region)
+        result = await reaudit_run(supplier_name, docs, workspace_title=wt,
+                                   dry_run=args.dry_run, force_region=args.region)
         if result:
             print_result(result, idx, total)
             succeeded += 1
@@ -246,6 +243,10 @@ def main():
     print(f"Done.  Re-audited: {succeeded}  Skipped: {skipped}")
     if args.dry_run:
         print("*** DRY RUN — no data was modified ***")
+
+
+def main():
+    asyncio.run(_main())
 
 
 if __name__ == "__main__":

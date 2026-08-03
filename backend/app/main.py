@@ -10,21 +10,22 @@ import hashlib
 import json
 import asyncio
 import requests
+import uuid
 from datetime import datetime
 from typing import List, Optional
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 
 from app.config import settings
 from app.schemas import AuditLogEntry, AuditResultResponse, DocumentEvidence, UpdateEvidenceRequest, AuditRegistryEntry
-import uuid
-from app.services import sheets, gemini
+from app.services import audit_data, gemini, storage
 from app.services import auditor
 from app.services.gemini import clean_question_label
 
 app = FastAPI(
     title="GPO Automatic Certificate Auditor API",
-    description="Backend API for auditing certificates and logging results to Google Sheets",
+    description="Backend API for auditing certificates and logging results to Neon PostgreSQL",
     version="1.0.0"
 )
 
@@ -36,8 +37,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Static file serving is no longer needed — Supabase Storage serves files via public URLs
 
 @app.get("/")
 def read_root():
@@ -54,7 +53,6 @@ async def _process_uploaded_files(
     """
     Single-pass file processing: read -> match -> hash -> upload -> dispatch Gemini.
     Returns (doc_evidences, file_contexts, extracted_docs, total_extraction_cost).
-    No file_bytes_map accumulation — each file is processed and discarded in one iteration.
     """
     file_tasks = []
     file_contexts = []
@@ -82,7 +80,7 @@ async def _process_uploaded_files(
                 break
 
         fhash = hashlib.sha256(raw).hexdigest()
-        cached_record = sheets.find_metadata_by_hash(fhash, q_label)
+        cached_record = await audit_data.find_metadata_by_hash(fhash, q_label)
         if cached_record:
             try:
                 metadata_dict = json.loads(cached_record["gemini_extracted_metadata"])
@@ -92,9 +90,7 @@ async def _process_uploaded_files(
         else:
             task = asyncio.to_thread(gemini.extract_certificate_data, raw, content_type, q_label)
 
-        file_url = None
-        if settings.supabase_url and settings.supabase_key:
-            file_url = sheets.upload_file_to_supabase_storage(raw, safe_supplier_name, orig_filename, content_type)
+        file_url = storage.get_storage().upload(raw, safe_supplier_name, orig_filename, content_type)
 
         file_contexts.append({
             "filename": orig_filename, "content_type": content_type,
@@ -133,37 +129,36 @@ async def _process_uploaded_files(
 
 
 @app.get("/api/logs", response_model=List[AuditLogEntry])
-def get_logs():
+async def get_logs():
     """
-    Fetches all historical audit logs from Google Sheets.
+    Fetches all historical audit logs from Neon.
     """
-    logs = sheets.get_audit_logs()
+    logs = await audit_data.get_audit_logs()
     return logs
 
 @app.get("/api/audit-registry", response_model=List[AuditRegistryEntry])
-def get_audit_registry():
+async def get_audit_registry():
     """
     Consolidated audit registry with supplier info, result, and document counts.
     """
-    return sheets.get_audit_registry()
+    return await audit_data.get_audit_registry()
 
 @app.get("/api/evidence", response_model=List[DocumentEvidence])
-def get_evidence():
+async def get_evidence():
     """
-    Fetches all historical document evidence logs (extracted file details) from Google Sheets.
-    Useful for populating supplier selection dropdowns and performing cost calculations.
+    Fetches all historical document evidence logs (extracted file details) from Neon.
     """
-    evidence = sheets.get_document_evidence_logs()
+    evidence = await audit_data.get_document_evidence_logs()
     return evidence
 
 @app.put("/api/evidence")
-def update_evidence(payload: UpdateEvidenceRequest):
+async def update_evidence(payload: UpdateEvidenceRequest):
     """
     Updates the extracted certificate details (JSON metadata) for a specific document evidence
     record identified by its Audit ID and Filename, and re-runs the comparison table audit.
     Computation happens BEFORE any DB mutation — returns 500 if verdict cannot be computed.
     """
-    matching_docs = sheets.get_document_evidence_logs(audit_id=payload.audit_id)
+    matching_docs = await audit_data.get_document_evidence_logs(audit_id=payload.audit_id)
     if not matching_docs:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -208,7 +203,7 @@ def update_evidence(payload: UpdateEvidenceRequest):
             detail=f"Verdict recalculation failed — no data was saved: {e}"
         )
 
-    success = sheets.update_document_evidence(
+    success = await audit_data.update_document_evidence(
         audit_id=payload.audit_id,
         filename=payload.filename,
         updated_metadata=payload.updated_metadata,
@@ -219,7 +214,7 @@ def update_evidence(payload: UpdateEvidenceRequest):
             detail="Failed to save updated metadata."
         )
 
-    sheets.update_audit_result(
+    await audit_data.update_audit_result(
         audit_id=payload.audit_id,
         result=audit_result,
         suggested_comment=suggested_comment,
@@ -274,10 +269,9 @@ async def extract_documents(
         screenshot_filename = f"screenshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
         screenshot_bytes = screenshot.file.read()
         screenshot.file.seek(0)
-        if settings.supabase_url and settings.supabase_key:
-            screenshot_url = sheets.upload_file_to_supabase_storage(
-                screenshot_bytes, safe_supplier_name, screenshot_filename, "image/png"
-            )
+        screenshot_url = storage.get_storage().upload(
+            screenshot_bytes, safe_supplier_name, screenshot_filename, "image/png"
+        )
 
     temp_audit_id = f"TEMP_{uuid.uuid4()}"
     timestamp = datetime.now().strftime("%d/%m/%Y, %H:%M:%S")
@@ -295,7 +289,7 @@ async def extract_documents(
         supplier_name, safe_supplier_name, files, qa_list, temp_audit_id, timestamp,
     )
 
-    resolved_audit_id = sheets.log_audit_run(supplier_name, doc_evidences, None)
+    resolved_audit_id = await audit_data.log_audit_run(supplier_name, doc_evidences, None)
     if not resolved_audit_id:
         resolved_audit_id = temp_audit_id
 
@@ -327,8 +321,7 @@ async def run_audit_comparison(
     Loads document evidence from DB by audit_id, runs the code-based auditor comparison,
     saves the full audit log including results, and returns the verdict.
     """
-    # Load existing DocumentEvidence records from DB
-    matching_docs = sheets.get_document_evidence_logs(audit_id=audit_id)
+    matching_docs = await audit_data.get_document_evidence_logs(audit_id=audit_id)
 
     file_contexts = []
     extracted_results = []
@@ -345,7 +338,6 @@ async def run_audit_comparison(
             meta = {}
         extracted_results.append(meta)
 
-    # Run code-based auditor comparison
     expiration_date = "N/A"
     if extracted_results:
         expiration_date = extracted_results[0].get("expirationDate", "N/A")
@@ -358,7 +350,6 @@ async def run_audit_comparison(
         qa_data_title=qa_data_title,
     )
 
-    # Build the full AuditLogEntry and save to DB
     total_run_cost = sum(
         doc.input_tokens * 0.10 / 1_000_000 + doc.output_tokens * 0.40 / 1_000_000
         for doc in matching_docs
@@ -388,7 +379,7 @@ async def run_audit_comparison(
         comparison_table=comparison_table_dict
     )
 
-    resolved_audit_id = sheets.log_audit_run(supplier_name, [], audit_log)
+    resolved_audit_id = await audit_data.log_audit_run(supplier_name, [], audit_log)
     if not resolved_audit_id:
         resolved_audit_id = audit_id
 
@@ -426,7 +417,7 @@ async def run_audit(
     """
     Main endpoint called by the Chrome Extension.
     Runs single-pass file processing, then runs the code-based auditor comparison
-    and records results in Google Sheets.
+    and records results in Neon PostgreSQL.
     """
     safe_supplier_name = supplier_folder or "".join(c for c in supplier_name if c.isalnum() or c in (" ", "_", "-")).strip()
 
@@ -435,10 +426,9 @@ async def run_audit(
         screenshot_filename = f"screenshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
         screenshot_bytes = screenshot.file.read()
         screenshot.file.seek(0)
-        if settings.supabase_url and settings.supabase_key:
-            screenshot_url = sheets.upload_file_to_supabase_storage(
-                screenshot_bytes, safe_supplier_name, screenshot_filename, "image/png"
-            )
+        screenshot_url = storage.get_storage().upload(
+            screenshot_bytes, safe_supplier_name, screenshot_filename, "image/png"
+        )
 
     temp_audit_id = f"TEMP_{uuid.uuid4()}"
     timestamp = datetime.now().strftime("%d/%m/%Y, %H:%M:%S")
@@ -496,12 +486,12 @@ async def run_audit(
         comparison_table=comparison_table_dict,
     )
 
-    resolved_audit_id = sheets.log_audit_run(supplier_name, doc_evidences, audit_log)
+    resolved_audit_id = await audit_data.log_audit_run(supplier_name, doc_evidences, audit_log)
     supplier_id = doc_evidences[0].supplier_id if doc_evidences else 0
 
     if not resolved_audit_id:
         resolved_audit_id = temp_audit_id
-        suggested_comment += " (Warning: Google Sheets database log failed)"
+        suggested_comment += " (Warning: Neon database log failed)"
 
     return AuditResultResponse(
         audit_id=resolved_audit_id,
@@ -522,16 +512,16 @@ async def run_audit(
     )
 
 @app.get("/api/costs")
-def get_cost_analytics():
-    return sheets.get_cost_analytics()
+async def get_cost_analytics():
+    return await audit_data.get_cost_analytics()
 
 @app.get("/api/logs/{supplier_id}/assets")
-def get_supplier_assets(supplier_id: int):
+async def get_supplier_assets(supplier_id: int):
     """
-    Returns documents and screenshots for a supplier from Supabase Storage via file_urls in the DB.
+    Returns documents and screenshots for a supplier via file_urls in the DB.
     """
-    screenshots = sheets.get_screenshot_urls_by_supplier_id(supplier_id)
-    documents = sheets.get_evidence_urls_by_supplier_id(supplier_id)
+    screenshots = await audit_data.get_screenshot_urls_by_supplier_id(supplier_id)
+    documents = await audit_data.get_evidence_urls_by_supplier_id(supplier_id)
     return {"screenshots": screenshots, "documents": documents}
 
 
@@ -547,9 +537,9 @@ def _build_proxy_url(raw_url: str) -> str:
 @app.get("/api/files/{encoded_url:path}")
 def proxy_supabase_file(encoded_url: str):
     """
-    Proxies a file from Supabase Storage through the backend.
+    Legacy: proxies a file from Supabase Storage through the backend for
+    historical records. New uploads use /api/files/local/* instead.
     Only allows URLs matching the configured SUPABASE_URL storage prefix.
-    The frontend passes the Supabase Storage URL base64-encoded (url-safe, no padding).
     """
     try:
         url = _build_proxy_url(encoded_url)
@@ -583,7 +573,6 @@ def proxy_supabase_file(encoded_url: str):
         from urllib.parse import unquote
         filename = unquote(filename)
         content_type = resp.headers.get("content-type", "application/octet-stream")
-        from fastapi.responses import Response
         return Response(content=body, media_type=content_type,
                         headers={
                             "Content-Disposition": f'inline; filename="{filename}"',
@@ -595,5 +584,36 @@ def proxy_supabase_file(encoded_url: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Failed to fetch file: {e}")
+
+
+@app.get("/api/files/local/{folder}/{filename}")
+def serve_local_file(folder: str, filename: str):
+    """
+    Serves files uploaded to the local disk storage provider (dev).
+    Path traversal is prevented by resolving inside UPLOAD_DIR.
+    """
+    from urllib.parse import unquote
+    safe_folder = unquote(folder)
+    safe_name = unquote(filename)
+
+    import os
+    root = os.path.abspath(settings.upload_dir)
+    file_path = os.path.realpath(os.path.join(root, safe_folder, safe_name))
+    if not file_path.startswith(root + os.sep) or not os.path.isfile(file_path):
+        raise HTTPException(status_code=404, detail="Not found.")
+
+    stat = os.stat(file_path)
+    if stat.st_size > MAX_PROXY_FILE_SIZE:
+        raise HTTPException(status_code=413, detail="File too large.")
+
+    import mimetypes
+    content_type = mimetypes.guess_type(safe_name)[0] or "application/octet-stream"
+    with open(file_path, "rb") as f:
+        body = f.read()
+    return Response(content=body, media_type=content_type,
+                    headers={
+                        "Content-Disposition": f'inline; filename="{safe_name}"',
+                        "Access-Control-Allow-Origin": "*",
+                    })
 
 

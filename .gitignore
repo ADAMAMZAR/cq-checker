@@ -12,6 +12,7 @@ htmlcov/
 
 # Local uploads and artifacts
 backend/uploads/
+backend/scripts/backups/
 
 # Environment files
 .env

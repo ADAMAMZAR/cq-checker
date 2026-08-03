@@ -19,7 +19,7 @@ def test_read_root():
     assert response.status_code == 200
     assert response.json()["status"] == "healthy"
 
-@patch("app.services.sheets.get_audit_logs")
+@patch("app.services.audit_data.get_audit_logs")
 def test_get_logs(mock_get_logs):
     mock_get_logs.return_value = []
     response = client.get("/api/logs")
@@ -27,10 +27,10 @@ def test_get_logs(mock_get_logs):
     assert response.json() == []
     mock_get_logs.assert_called_once()
 
-@patch("app.services.sheets.upload_file_to_supabase_storage")
-@patch("app.services.sheets.find_metadata_by_hash")
+@patch("app.services.storage.LocalDiskStorage.upload")
+@patch("app.services.audit_data.find_metadata_by_hash")
 @patch("app.services.gemini.extract_certificate_data")
-@patch("app.services.sheets.log_audit_run")
+@patch("app.services.audit_data.log_audit_run")
 def test_run_audit(mock_log_audit, mock_extract, mock_find_hash, mock_upload):
     mock_upload.return_value = "http://127.0.0.1:8000/mock/test_cert.pdf"
     mock_find_hash.return_value = None
@@ -69,10 +69,10 @@ def test_run_audit(mock_log_audit, mock_extract, mock_find_hash, mock_upload):
     mock_log_audit.assert_called_once()
     mock_extract.assert_called_once()
 
-@patch("app.services.sheets.upload_file_to_supabase_storage")
-@patch("app.services.sheets.find_metadata_by_hash")
+@patch("app.services.storage.LocalDiskStorage.upload")
+@patch("app.services.audit_data.find_metadata_by_hash")
 @patch("app.services.gemini.extract_certificate_data")
-@patch("app.services.sheets.log_audit_run")
+@patch("app.services.audit_data.log_audit_run")
 def test_run_audit_cache_hit(mock_log_audit, mock_extract, mock_find_hash, mock_upload):
     mock_upload.return_value = "http://127.0.0.1:8000/mock/test_cert.pdf"
     mock_find_hash.return_value = {
@@ -106,10 +106,10 @@ def test_run_audit_cache_hit(mock_log_audit, mock_extract, mock_find_hash, mock_
     # extract_certificate_data should NOT be called due to cache hit
     mock_extract.assert_not_called()
 
-@patch("app.services.sheets.upload_file_to_supabase_storage")
-@patch("app.services.sheets.find_metadata_by_hash")
+@patch("app.services.storage.LocalDiskStorage.upload")
+@patch("app.services.audit_data.find_metadata_by_hash")
 @patch("app.services.gemini.extract_certificate_data")
-@patch("app.services.sheets.log_audit_run")
+@patch("app.services.audit_data.log_audit_run")
 def test_run_audit_duplicate_file_different_questions(mock_log_audit, mock_extract, mock_find_hash, mock_upload):
     import json
     mock_upload.return_value = "http://127.0.0.1:8000/mock/test_cert.pdf"
@@ -188,7 +188,7 @@ def test_extract_endpoint(mock_extract):
     assert json_data["usage"]["input_tokens"] == 150
     mock_extract.assert_called_once()
 
-@patch("app.services.sheets.get_document_evidence_logs")
+@patch("app.services.audit_data.get_document_evidence_logs")
 def test_get_evidence_endpoint(mock_get_evidence):
     mock_get_evidence.return_value = [
         DocumentEvidence(
@@ -216,8 +216,8 @@ def test_get_evidence_endpoint(mock_get_evidence):
     mock_get_evidence.assert_called_once()
 
 @patch("app.services.auditor.run_full_audit")
-@patch("app.services.sheets.update_document_evidence")
-@patch("app.services.sheets.get_document_evidence_logs")
+@patch("app.services.audit_data.update_document_evidence")
+@patch("app.services.audit_data.get_document_evidence_logs")
 def test_update_evidence_endpoint_success(mock_get_logs, mock_update, mock_audit):
     mock_get_logs.return_value = [
         DocumentEvidence(
@@ -248,8 +248,9 @@ def test_update_evidence_endpoint_success(mock_get_logs, mock_update, mock_audit
     )
 
 
-@patch("app.services.sheets.get_document_evidence_logs")
-def test_update_evidence_endpoint_failure(mock_get_logs):
+@patch("app.services.audit_data.update_document_evidence")
+@patch("app.services.audit_data.get_document_evidence_logs")
+def test_update_evidence_endpoint_failure(mock_get_logs, mock_update):
     mock_get_logs.return_value = [
         DocumentEvidence(
             audit_id="audit-123", supplier_id=1, timestamp="now",
@@ -261,6 +262,7 @@ def test_update_evidence_endpoint_failure(mock_get_logs):
             input_tokens=100, output_tokens=20, cost_usd=0.000018,
         )
     ]
+    mock_update.return_value = False
     payload = {
         "audit_id": "audit-123",
         "filename": "cert.pdf",
