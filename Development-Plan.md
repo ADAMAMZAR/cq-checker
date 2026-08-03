@@ -173,27 +173,33 @@
 ## Phase 5 — Document Ingestion & RAG Pipeline
 
 ### Tasks
-- [ ] `/api/documents/upload` → upload PDF via `StorageProvider` (local disk for now, GCS in Phase 8), insert `documents` row, return `document_id`
-- [ ] **MiniMax M3 parser** (`backend/app/services/parser.py`) → structured Markdown (text, tables, layouts), track `page_number`
-- [ ] **Parent–child chunking** (`backend/app/services/chunker.py`):
+- [x] `/api/documents/upload` → upload PDF via `StorageProvider` (local disk for now, GCS in Phase 8), insert `documents` row, return `document_id`
+- [x] **MiniMax M3 parser** (`backend/app/services/parser.py`) → structured Markdown (text, tables, layouts), track `page_number`; **PyMuPDF local fallback** when no MiniMax key
+- [x] **Parent–child chunking** (`backend/app/services/chunker.py`):
   - Parent chunk ≈ 800–1,000 tokens (full paragraph/table context)
   - Child chunk ≈ 200 tokens (vectorized)
   - Link children → parent via FK
-- [ ] **Gemini Embedding 2** (`backend/app/services/embeddings.py`):
-  - `gemini-embedding-2` with Matryoshka output dimension **1536**
-- [ ] Batch insert child rows (content + embedding) into `child_chunks`
-- [ ] Idempotency: skip re-processing when `documents.file_url` / hash already ingested
-- [ ] Tests: `backend/tests/test_ingestion.py` (end-to-end parse → chunk → embed → insert)
+- [x] **Gemini Embedding 2** (`backend/app/services/embeddings.py`):
+  - `gemini-embedding-2` via **REST** (bypasses broken SDK) with Matryoshka output dimension **1536**
+  - Seeded pseudo-embedding fallback for dev/test (no key)
+- [x] Batch insert child rows (content + embedding) into `child_chunks`
+- [x] Idempotency: **SHA-256 `file_hash` column** on `documents` (unique index) — same file skips re-ingestion
+- [x] `backend/app/services/ingest.py` orchestrator (hash → upload → parse → chunk → embed → insert)
+- [x] Tests: `test_parser.py`, `test_chunker.py`, `test_embeddings.py`, `test_ingest.py` + endpoints — **136 non-DB tests passing**
+- [x] Live Neon smoke test: 3-page manual → 3 parents + 3 children stored; re-upload skipped (idempotent)
 
 ### Affected files
 - `backend/app/services/parser.py` (new)
 - `backend/app/services/chunker.py` (new)
 - `backend/app/services/embeddings.py` (new)
-- `backend/app/repositories/documents.py`, `chunks.py`
+- `backend/app/services/ingest.py` (new)
+- `backend/app/repositories/documents.py`
+- `backend/app/models/tables.py` (+ migration `a1b2c3d4e5f6`)
 - `backend/app/main.py`
+- `backend/tests/test_parser.py`, `test_chunker.py`, `test_embeddings.py`, `test_ingest.py` (new)
 
 ### Exit criteria
-- A ~50-page test manual is fully ingested; parent/child rows + embeddings present in Neon; hybrid-search index usable.
+- A ~50-page test manual is fully ingested; parent/child rows + embeddings present in Neon; hybrid-search index usable; re-upload idempotent.
 
 ---
 

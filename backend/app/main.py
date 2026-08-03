@@ -21,6 +21,7 @@ from app.config import settings
 from app.schemas import (
     AuditLogEntry, AuditResultResponse, DocumentEvidence, UpdateEvidenceRequest,
     AuditRegistryEntry, CertificateVerificationResponse, CertificateVerifyResult,
+    DocumentIngestResult, DocumentSummary,
 )
 from app.services import audit_data, gemini, storage
 from app.services import auditor
@@ -609,6 +610,56 @@ async def list_certificates(limit: int = 50, offset: int = 0):
             created_at=r.created_at.isoformat() if r.created_at else None,
         ))
     return results
+
+
+@app.post("/api/documents/upload", response_model=DocumentIngestResult)
+async def upload_document(
+    file: UploadFile = File(...),
+    title: Optional[str] = Form(None),
+):
+    """
+    Phase 5: upload a manual PDF -> parse -> chunk -> embed -> store in Neon.
+    Returns document_id + parent/child counts. Idempotent by file hash.
+    """
+    from app.services.ingest import ingest_document
+
+    file_bytes = await file.read()
+    filename = file.filename or "manual.pdf"
+    content_type = file.content_type or "application/pdf"
+    doc_title = title or filename
+
+    result = await ingest_document(file_bytes, doc_title, filename, content_type)
+    if result.status == "failed":
+        raise HTTPException(status_code=502, detail=result.message)
+    return DocumentIngestResult(**result.to_dict())
+
+
+@app.get("/api/documents", response_model=List[DocumentSummary])
+async def list_documents(limit: int = 50, offset: int = 0):
+    """
+    List ingested documents with parent/child chunk counts.
+    """
+    from app.db.session import get_session_factory
+    from app.repositories.documents import DocumentRepository, ChunkRepository
+
+    factory = get_session_factory()
+    async with factory() as session:
+        doc_repo = DocumentRepository(session)
+        chunk_repo = ChunkRepository(session)
+        docs = await doc_repo.list_all(limit=limit, offset=offset)
+
+        summaries = []
+        for doc in docs:
+            counts = await chunk_repo.count_by_document(doc.id)
+            summaries.append(DocumentSummary(
+                id=str(doc.id),
+                title=doc.title,
+                file_url=doc.file_url,
+                parent_count=counts["parent_chunks"],
+                child_count=counts["child_chunks"],
+                created_at=doc.created_at.isoformat() if doc.created_at else None,
+            ))
+    return summaries
 
 
 @app.get("/api/logs/{supplier_id}/assets")

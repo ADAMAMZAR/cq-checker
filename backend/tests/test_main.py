@@ -346,4 +346,66 @@ def test_list_certificates_endpoint(mock_repo):
     assert body[0]["status"] == "PASS"
 
 
+@patch("app.services.ingest.ingest_document")
+def test_upload_document_endpoint(mock_ingest):
+    result = MagicMock()
+    result.status = "created"
+    result.to_dict.return_value = {
+        "document_id": "doc-123",
+        "title": "manual.pdf",
+        "status": "created",
+        "parent_count": 10,
+        "child_count": 40,
+        "cost_usd": 0.0,
+        "message": "",
+    }
+    mock_ingest.return_value = result
+
+    files = {"file": ("manual.pdf", b"%PDF-1.4 fake", "application/pdf")}
+    response = client.post("/api/documents/upload", files=files)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "created"
+    assert body["parent_count"] == 10
+    assert body["child_count"] == 40
+
+
+@patch("app.services.ingest.ingest_document")
+def test_upload_document_endpoint_failure(mock_ingest):
+    result = MagicMock()
+    result.status = "failed"
+    result.message = "No parseable text found."
+    mock_ingest.return_value = result
+
+    files = {"file": ("manual.pdf", b"%PDF-1.4 fake", "application/pdf")}
+    response = client.post("/api/documents/upload", files=files)
+    assert response.status_code == 502
+
+
+@patch("app.repositories.documents.DocumentRepository")
+@patch("app.repositories.documents.ChunkRepository")
+def test_list_documents_endpoint(mock_chunk_repo, mock_doc_repo):
+    doc = MagicMock()
+    doc.id = "doc-123"
+    doc.title = "Manual"
+    doc.file_url = "/api/files/local/manual.pdf"
+    doc.created_at = None
+    mock_doc_repo.return_value.list_all = AsyncMock(return_value=[doc])
+    mock_chunk_repo.return_value.count_by_document = AsyncMock(
+        return_value={"parent_chunks": 2, "child_chunks": 5}
+    )
+
+    with patch("app.db.session.get_session_factory") as mock_factory:
+        mock_session = MagicMock()
+        mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_factory.return_value.__aexit__ = AsyncMock(return_value=None)
+        response = client.get("/api/documents")
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["title"] == "Manual"
+    assert body[0]["parent_count"] == 2
+    assert body[0]["child_count"] == 5
+
+
 

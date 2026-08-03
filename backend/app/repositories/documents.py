@@ -14,8 +14,8 @@ class DocumentRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def create(self, title: str, file_url: str) -> Document:
-        doc = Document(title=title, file_url=file_url)
+    async def create(self, title: str, file_url: str, file_hash: Optional[str] = None) -> Document:
+        doc = Document(title=title, file_url=file_url, file_hash=file_hash)
         self.session.add(doc)
         await self.session.commit()
         await self.session.refresh(doc)
@@ -24,6 +24,12 @@ class DocumentRepository:
     async def get_by_id(self, doc_id: UUID) -> Optional[Document]:
         result = await self.session.execute(
             select(Document).where(Document.id == doc_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_hash(self, file_hash: str) -> Optional[Document]:
+        result = await self.session.execute(
+            select(Document).where(Document.file_hash == file_hash)
         )
         return result.scalar_one_or_none()
 

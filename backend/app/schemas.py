@@ -97,3 +97,22 @@ class CertificateVerifyResult(BaseModel):
     rule_result: Optional[dict] = None
     record_id: Optional[str] = None
 
+
+class DocumentIngestResult(BaseModel):
+    document_id: Optional[str] = None
+    title: str
+    status: str
+    parent_count: int = 0
+    child_count: int = 0
+    cost_usd: float = 0.0
+    message: str = ""
+
+
+class DocumentSummary(BaseModel):
+    id: str
+    title: str
+    file_url: str
+    parent_count: int = 0
+    child_count: int = 0
+    created_at: Optional[str] = None
+

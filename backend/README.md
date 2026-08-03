@@ -50,6 +50,10 @@ The API will be available at `http://localhost:8000`.
 | `DEEPSEEK_MODEL` | DeepSeek model name | `deepseek-v4-flash` |
 | `QWEN_BASE_URL` | Qwen (DashScope) OpenAI-compatible base URL | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
 | `QWEN_MODEL` | Qwen model name | `qwen-max` |
+| `MINIMAX_BASE_URL` | MiniMax M3 API base URL | `https://api.minimax.chat` |
+| `MINIMAX_MODEL` | MiniMax model name | `MiniMax-M3` |
+| `GEMINI_EMBEDDING_MODEL` | Gemini embedding model | `gemini-embedding-2` |
+| `GEMINI_EMBEDDING_DIM` | Embedding output dimension | `1536` |
 | `SUPABASE_URL` | ⚠️ Deprecated — read-only historical files | — |
 | `SUPABASE_KEY` | ⚠️ Deprecated — read-only historical files | — |
 | `VERTEX_PROJECT` | ⚠️ Deprecated — migration only | — |
@@ -113,7 +117,11 @@ backend/
 │       ├── pdf.py         # PDF -> image rendering (PyMuPDF)
 │       ├── rules.py       # Deterministic certificate rules (reuses auditor.py)
 │       ├── extractor.py   # DeepSeek V4 Flash extractor
-│       └── judge.py       # Qwen reasoning judge (with rules fallback)
+│       ├── judge.py       # Qwen reasoning judge (with rules fallback)
+│       ├── parser.py      # PDF -> Markdown (MiniMax M3 + PyMuPDF fallback)
+│       ├── chunker.py     # Parent-child chunking
+│       ├── embeddings.py  # Gemini Embedding 2 (REST, 1536-dim)
+│       └── ingest.py      # Document ingestion orchestrator
 ├── migrations/            # Alembic database migrations
 │   ├── env.py
 │   └── versions/

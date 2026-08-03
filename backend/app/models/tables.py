@@ -28,6 +28,7 @@ class Document(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     title = Column(String(255), nullable=False)
     file_url = Column(Text, nullable=False)
+    file_hash = Column(String(64), nullable=True, unique=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     parent_chunks = relationship("ParentChunk", back_populates="document", cascade="all, delete-orphan")

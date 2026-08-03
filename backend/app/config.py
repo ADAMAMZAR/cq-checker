@@ -20,6 +20,10 @@ class Settings(BaseSettings):
         env="QWEN_BASE_URL",
     )
     qwen_model: str = Field(default="qwen-max", env="QWEN_MODEL")
+    minimax_base_url: str = Field(default="https://api.minimax.chat", env="MINIMAX_BASE_URL")
+    minimax_model: str = Field(default="MiniMax-M3", env="MINIMAX_MODEL")
+    gemini_embedding_model: str = Field(default="gemini-embedding-2", env="GEMINI_EMBEDDING_MODEL")
+    gemini_embedding_dim: int = Field(default=1536, env="GEMINI_EMBEDDING_DIM")
 
     # ── Deprecated: Supabase (migration-only, remove after Phase 8) ─
     supabase_url: str = Field(default="", env="SUPABASE_URL")

@@ -17,7 +17,7 @@ from app.models.tables import (  # noqa: F401
     AuditLog,
     DocumentEvidence,
 )
-from app.db.session import Base
+from app.db.session import Base, normalize_database_url
 
 # this is the Alembic Config object
 config = context.config
@@ -30,11 +30,12 @@ target_metadata = Base.metadata
 
 
 def get_url():
-    """Get the database URL from env or alembic.ini."""
-    return os.getenv(
+    """Get the database URL from env or alembic.ini (libpq params normalized for asyncpg)."""
+    raw = os.getenv(
         "NEON_DATABASE_URL",
         config.get_main_option("sqlalchemy.url", "postgresql+asyncpg://postgres:postgres@localhost:5432/cq_checker"),
     )
+    return normalize_database_url(raw)
 
 
 def run_migrations_offline() -> None:
