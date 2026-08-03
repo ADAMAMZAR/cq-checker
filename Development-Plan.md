@@ -206,24 +206,30 @@
 ## Phase 6 — RAG Chatbot Query API
 
 ### Tasks
-- [ ] `/api/chat` endpoint (`backend/app/services/rag.py`):
+- [x] `/api/chat` endpoint (`backend/app/services/rag.py`):
   1. **Semantic cache**: embed query, search `query_cache` with cosine similarity > 0.93 → return cached response ($0 LLM cost)
-  2. **Hybrid retrieval** (single SQL): combine pgvector `<=>` with tsvector/BM25; retrieve top-3 child vectors (K=3)
+  2. **Hybrid retrieval** (single SQL): combine pgvector `<=>` with tsvector/BM25 (`ts_rank_cd`); retrieve top-3 child vectors (K=3)
   3. **Parent context fetch**: pull the 3 associated parent chunks (~1,000 tokens total)
   4. **Generation**: query + parent context → **DeepSeek V4 Flash**, static system prompt placed at head for prompt caching
   5. Write cache miss response back to `query_cache`
-- [ ] Add `/api/chat/history` (optional, simple session storage) and cache-clear admin endpoint
-- [ ] Cost instrumentation: log token usage + `cost_usd` per request for analytics
-- [ ] Tests: `backend/tests/test_rag.py` (cache hit, cache miss, retrieval quality on seeded manual)
+- [x] Multi-turn **history**: `chat_sessions` + `chat_messages` tables (session-scoped); last ~6 messages injected into context
+- [x] **Cost logging**: `chat_logs` table records query, tokens, cost_usd, cache_hit, latency per request
+- [x] Add `/api/chat/history`, `/api/chat/cache/clear` endpoints
+- [x] Tests: `test_retrieval.py`, `test_rag.py`, `test_chat_repos.py` + endpoint tests — **152 non-DB tests passing**
+- [x] Live Neon smoke test: query → retrieval → grounded answer + source; repeat → cache hit; history stored
 
 ### Affected files
 - `backend/app/services/rag.py` (new)
-- `backend/app/repositories/cache.py`
+- `backend/app/repositories/retrieval.py` (new)
+- `backend/app/repositories/chat.py` (new)
+- `backend/app/repositories/cache.py` (fix `List` import)
+- `backend/app/models/tables.py` (+ migration `b2c3d4e5f6a7`)
 - `backend/app/main.py`
 - `backend/app/schemas.py`
+- `backend/tests/test_retrieval.py`, `test_rag.py`, `test_chat_repos.py` (new)
 
 ### Exit criteria
-- Repeated query hits cache; new query performs hybrid retrieval and returns a grounded answer; cost per query logged.
+- Repeated query hits cache; new query performs hybrid retrieval and returns a grounded answer; multi-turn works; every request cost-logged.
 
 ---
 

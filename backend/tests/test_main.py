@@ -408,4 +408,39 @@ def test_list_documents_endpoint(mock_chunk_repo, mock_doc_repo):
     assert body[0]["child_count"] == 5
 
 
+@patch("app.services.rag.answer_query")
+def test_chat_endpoint(mock_answer):
+    mock_answer.return_value = {
+        "answer": "Cached answer",
+        "sources": [],
+        "cost_usd": 0.0,
+        "cache_hit": True,
+        "session_id": "sess-1",
+    }
+    response = client.post("/api/chat", json={"query": "hello", "session_id": "sess-1"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["answer"] == "Cached answer"
+    assert body["cache_hit"] is True
+    assert body["session_id"] == "sess-1"
+
+
+@patch("app.services.rag.clear_cache")
+def test_clear_chat_cache_endpoint(mock_clear):
+    mock_clear.return_value = 7
+    response = client.post("/api/chat/cache/clear")
+    assert response.status_code == 200
+    assert response.json()["cleared"] == 7
+
+
+@patch("app.services.rag.get_history")
+def test_chat_history_endpoint(mock_history):
+    mock_history.return_value = [{"role": "user", "content": "hi", "created_at": None}]
+    response = client.get("/api/chat/history?session_id=sess-1")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["session_id"] == "sess-1"
+    assert len(body["messages"]) == 1
+
+
 

@@ -121,7 +121,8 @@ backend/
 │       ├── parser.py      # PDF -> Markdown (MiniMax M3 + PyMuPDF fallback)
 │       ├── chunker.py     # Parent-child chunking
 │       ├── embeddings.py  # Gemini Embedding 2 (REST, 1536-dim)
-│       └── ingest.py      # Document ingestion orchestrator
+│       ├── ingest.py      # Document ingestion orchestrator
+│       └── rag.py         # RAG chatbot (cache + hybrid retrieval + DeepSeek)
 ├── migrations/            # Alembic database migrations
 │   ├── env.py
 │   └── versions/

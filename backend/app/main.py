@@ -21,7 +21,8 @@ from app.config import settings
 from app.schemas import (
     AuditLogEntry, AuditResultResponse, DocumentEvidence, UpdateEvidenceRequest,
     AuditRegistryEntry, CertificateVerificationResponse, CertificateVerifyResult,
-    DocumentIngestResult, DocumentSummary,
+    DocumentIngestResult, DocumentSummary, ChatRequest, ChatResponse, ChatSource,
+    ChatHistoryResponse,
 )
 from app.services import audit_data, gemini, storage
 from app.services import auditor
@@ -660,6 +661,46 @@ async def list_documents(limit: int = 50, offset: int = 0):
                 created_at=doc.created_at.isoformat() if doc.created_at else None,
             ))
     return summaries
+
+
+@app.post("/api/chat", response_model=ChatResponse)
+async def chat(payload: ChatRequest):
+    """
+    Phase 6: RAG chatbot query. Semantic cache -> hybrid retrieval -> DeepSeek
+    generation. Multi-turn aware via session_id.
+    """
+    from app.services import rag
+
+    result = await rag.answer_query(payload.query, session_id=payload.session_id)
+    return ChatResponse(
+        answer=result["answer"],
+        sources=[ChatSource(**s) for s in result["sources"]],
+        cost_usd=result["cost_usd"],
+        cache_hit=result["cache_hit"],
+        session_id=result["session_id"],
+    )
+
+
+@app.post("/api/chat/cache/clear")
+async def clear_chat_cache():
+    """
+    Admin: clear the semantic query cache. Returns count cleared.
+    """
+    from app.services import rag
+
+    count = await rag.clear_cache()
+    return {"status": "success", "cleared": count}
+
+
+@app.get("/api/chat/history", response_model=ChatHistoryResponse)
+async def chat_history(session_id: str):
+    """
+    Return conversation history for a session.
+    """
+    from app.services import rag
+
+    messages = await rag.get_history(session_id)
+    return ChatHistoryResponse(session_id=session_id, messages=messages)
 
 
 @app.get("/api/logs/{supplier_id}/assets")

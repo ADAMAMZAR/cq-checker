@@ -116,3 +116,27 @@ class DocumentSummary(BaseModel):
     child_count: int = 0
     created_at: Optional[str] = None
 
+
+class ChatRequest(BaseModel):
+    query: str
+    session_id: Optional[str] = None
+
+
+class ChatSource(BaseModel):
+    title: str
+    page_number: Optional[int] = None
+    snippet: Optional[str] = None
+
+
+class ChatResponse(BaseModel):
+    answer: str
+    sources: List[ChatSource] = []
+    cost_usd: float = 0.0
+    cache_hit: bool = False
+    session_id: Optional[str] = None
+
+
+class ChatHistoryResponse(BaseModel):
+    session_id: str
+    messages: List[dict] = []
+
