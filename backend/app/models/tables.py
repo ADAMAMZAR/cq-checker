@@ -8,9 +8,11 @@ from sqlalchemy import (
     String,
     Text,
     Integer,
+    Numeric,
     DateTime,
     ForeignKey,
     Computed,
+    CheckConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB, TSVECTOR
@@ -70,10 +72,18 @@ class CertificateVerification(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     file_url = Column(Text, nullable=False)
+    file_hash = Column(String(64), nullable=True, unique=True, index=True)
     extracted_data = Column(JSONB, nullable=False)
     status = Column(String(50), nullable=False)  # PASS, FAIL, REQUIRES_HUMAN_REVIEW
     judge_reasoning = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('PASS', 'FAIL', 'REQUIRES_HUMAN_REVIEW')",
+            name="chk_certificate_verifications_status",
+        ),
+    )
 
 
 # ── Semantic Query Cache ─────────────────────────────────────────────────────
@@ -85,27 +95,47 @@ class QueryCache(Base):
     query_text = Column(Text, nullable=False)
     query_embedding = Column(Vector(1536), nullable=True)
     cached_response = Column(Text, nullable=False)
+    hit_count = Column(Integer, nullable=False, default=0)
+    last_hit_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 # ── Chat: sessions, messages, cost logs ──────────────────────────────────────
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email = Column(String(255), nullable=False, unique=True, index=True)
+    display_name = Column(String(255), nullable=True)
+    role = Column(String(50), nullable=False, default="employee")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
 
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     session_id = Column(String(100), nullable=False, unique=True, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    user = relationship("User")
 
 
 class ChatMessage(Base):
     __tablename__ = "chat_messages"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    session_id = Column(String(100), nullable=False, index=True)
+    session_id = Column(String(100), ForeignKey("chat_sessions.session_id", ondelete="CASCADE"), nullable=False, index=True)
     role = Column(String(20), nullable=False)  # "user" | "assistant"
     content = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint("role IN ('user', 'assistant')", name="chk_chat_messages_role"),
+    )
 
 
 class ChatLog(Base):
@@ -115,9 +145,24 @@ class ChatLog(Base):
     query_text = Column(Text, nullable=False)
     input_tokens = Column(Integer, nullable=False, default=0)
     output_tokens = Column(Integer, nullable=False, default=0)
-    cost_usd = Column(Integer, nullable=False, default=0)
+    cost_usd = Column(Numeric(12, 6), nullable=False, default=0)
     cache_hit = Column(Integer, nullable=False, default=0)  # 0/1
     latency_ms = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# ── Object Storage Metadata (Phase 8 GCS migration readiness) ────────────────
+
+class ObjectStorage(Base):
+    __tablename__ = "object_storage"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    file_url = Column(Text, nullable=False, unique=True, index=True)
+    bucket = Column(String(255), nullable=True)
+    object_key = Column(Text, nullable=True)
+    content_type = Column(String(100), nullable=True)
+    size_bytes = Column(Integer, nullable=True)
+    checksum = Column(String(64), nullable=True)  # SHA-256
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -139,7 +184,7 @@ class AuditLog(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     audit_id = Column(String(100), nullable=False, unique=True, index=True)
     supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=False)
-    timestamp = Column(String(50), nullable=False)
+    timestamp = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     supplier_name = Column(String(255), nullable=False)
     workspace_title = Column(String(255), nullable=True, default="Ariba Workspace")
     cert_type = Column(String(100), nullable=True, default="Relational evidence")
@@ -151,21 +196,25 @@ class AuditLog(Base):
     screenshot_url = Column(Text, nullable=True)
     comparison_input_tokens = Column(Integer, nullable=False, default=0)
     comparison_output_tokens = Column(Integer, nullable=False, default=0)
-    comparison_cost_usd = Column(Integer, nullable=False, default=0)  # stored as scaled integer or float
-    total_run_cost_usd = Column(Integer, nullable=False, default=0)
+    comparison_cost_usd = Column(Numeric(12, 6), nullable=False, default=0)
+    total_run_cost_usd = Column(Numeric(12, 6), nullable=False, default=0)
     comparison_table = Column(JSONB, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     supplier = relationship("Supplier", back_populates="audit_logs")
+
+    __table_args__ = (
+        CheckConstraint("result IN ('Match', 'Mismatch')", name="chk_audit_logs_result"),
+    )
 
 
 class DocumentEvidence(Base):
     __tablename__ = "document_evidence"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    audit_id = Column(String(100), nullable=False, index=True)
+    audit_id = Column(String(100), ForeignKey("audit_logs.audit_id", ondelete="CASCADE"), nullable=False, index=True)
     supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=False)
-    timestamp = Column(String(50), nullable=False)
+    timestamp = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     supplier_name = Column(String(255), nullable=False)
     filename = Column(String(500), nullable=False)
     ariba_question_label = Column(String(500), nullable=False)
@@ -175,6 +224,6 @@ class DocumentEvidence(Base):
     file_content_type = Column(String(100), nullable=False)
     input_tokens = Column(Integer, nullable=False, default=0)
     output_tokens = Column(Integer, nullable=False, default=0)
-    cost_usd = Column(Integer, nullable=False, default=0)
+    cost_usd = Column(Numeric(12, 6), nullable=False, default=0)
     file_hash = Column(String(64), nullable=True)
     file_url = Column(Text, nullable=True)

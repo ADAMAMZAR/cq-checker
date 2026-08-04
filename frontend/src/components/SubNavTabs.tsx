@@ -1,8 +1,8 @@
 "use client";
 
-import { IconHome, IconFiles, IconEdit, IconCoin, IconPlaylist, IconSearch, IconRobot, IconUpload, IconCertificate } from "@tabler/icons-react";
+import { IconHome, IconFiles, IconEdit, IconCoin, IconPlaylist, IconSearch, IconRobot, IconCertificate, IconDatabase } from "@tabler/icons-react";
 
-export type MainTab = "home" | "registry" | "editor" | "costs" | "playground" | "audit" | "assistant" | "chat" | "ingest" | "verify";
+export type MainTab = "home" | "registry" | "editor" | "costs" | "playground" | "audit" | "assistant" | "chat" | "ingest" | "verify" | "database";
 
 interface SubNavTabsProps {
   active: MainTab;
@@ -11,12 +11,11 @@ interface SubNavTabsProps {
 }
 
 const tabs: { key: MainTab; label: string; icon: typeof IconFiles }[] = [
-  { key: "chat", label: "RAG Chatbot", icon: IconRobot },
-  { key: "ingest", label: "Document Ingest", icon: IconUpload },
-  { key: "verify", label: "Certificate Verify", icon: IconCertificate },
+  { key: "verify", label: "CQ Check", icon: IconCertificate },
   { key: "registry", label: "Audit Registry", icon: IconFiles },
   { key: "editor", label: "Supplier Data Editor", icon: IconEdit },
   { key: "costs", label: "Cost Analytics", icon: IconCoin },
+  { key: "database", label: "Database", icon: IconDatabase },
   { key: "playground", label: "Playground", icon: IconPlaylist },
   { key: "audit", label: "Audit", icon: IconSearch },
 ];
@@ -29,11 +28,10 @@ export default function SubNavTabs({ active, onChange, onGoHome }: SubNavTabsPro
           <button
             key={key}
             onClick={() => onChange(key)}
-            className={`pb-3 px-1 text-sm font-medium tracking-tight border-b-2 transition-all duration-300 ease-out cursor-pointer flex items-center gap-2 hover:text-[var(--heading-color)] active:scale-[0.97] ${
-              active === key
+            className={`pb-3 px-1 text-sm font-medium tracking-tight border-b-2 transition-all duration-300 ease-out cursor-pointer flex items-center gap-2 hover:text-[var(--heading-color)] active:scale-[0.97] ${active === key
                 ? "border-[var(--accent-success)] text-[var(--heading-color)] font-semibold"
                 : "border-transparent text-[var(--text-tertiary)]"
-            }`}
+              }`}
           >
             <Icon className="h-4 w-4" />
             {label}

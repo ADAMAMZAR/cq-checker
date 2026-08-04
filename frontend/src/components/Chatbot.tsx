@@ -144,13 +144,13 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
           prev.map((m) =>
             m.id === aiMsgId
               ? {
-                  ...m,
-                  text: result.answer,
-                  sources: result.sources ?? [],
-                  cacheHit: result.cache_hit,
-                  costUsd: result.cost_usd,
-                  isStreaming: false,
-                }
+                ...m,
+                text: result.answer,
+                sources: result.sources ?? [],
+                cacheHit: result.cache_hit,
+                costUsd: result.cost_usd,
+                isStreaming: false,
+              }
               : m
           )
         );
@@ -210,25 +210,12 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
               </div>
               <div>
                 <h2 className="font-sans text-base sm:text-lg font-bold text-[var(--heading-color)] leading-snug">
-                  RAG Compliance Assistant
+                  Autonomous Procurement Assistant
                 </h2>
-                <p className="text-[10px] text-[var(--text-tertiary)]">
-                  Grounded on ingested manuals · semantic cache on
-                </p>
               </div>
             </div>
 
             <div className="flex items-center gap-2">
-              {onGoHome && (
-                <button
-                  onClick={onGoHome}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[var(--accent-primary-soft)] border border-[var(--accent-primary-border)] text-[var(--accent-primary-text)] hover:bg-[var(--accent-primary-soft-strong)] text-xs font-semibold transition-all cursor-pointer"
-                  title="Return to Main Portal"
-                >
-                  <IconArrowLeft className="w-3.5 h-3.5" />
-                  <span>Back to Portal</span>
-                </button>
-              )}
               <button
                 onClick={handleClear}
                 className="icon-action p-2 rounded-xl bg-[var(--bg-card)] border border-[var(--border-subtle)] hover:border-[var(--accent-danger-border)] text-[var(--text-secondary)] hover:text-[var(--accent-danger-text)] transition-all cursor-pointer"
@@ -251,11 +238,10 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
                 <div key={msg.id} className={`flex items-start gap-3 max-w-3xl ${msg.sender === "user" ? "self-end flex-row-reverse" : "self-start"}`}>
                   {/* Avatar */}
                   <div
-                    className={`p-2 rounded-xl shrink-0 border ${
-                      msg.sender === "user"
-                        ? "bg-[var(--accent-primary)] border-[var(--accent-primary-border-strong)] text-white"
-                        : "bg-[var(--accent-primary-soft)] border-[var(--accent-primary-border)] text-[var(--accent-primary-text)]"
-                    }`}
+                    className={`p-2 rounded-xl shrink-0 border ${msg.sender === "user"
+                      ? "bg-[var(--accent-primary)] border-[var(--accent-primary-border-strong)] text-white"
+                      : "bg-[var(--accent-primary-soft)] border-[var(--accent-primary-border)] text-[var(--accent-primary-text)]"
+                      }`}
                   >
                     {msg.sender === "user" ? <IconUser className="w-5 h-5" /> : <IconRobot className="w-5 h-5" />}
                   </div>
@@ -277,11 +263,10 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
                     </div>
 
                     <div
-                      className={`p-4 rounded-2xl text-sm leading-relaxed ${
-                        msg.sender === "user"
-                          ? "bg-[var(--accent-primary)] text-white rounded-tr-none shadow-lg"
-                          : "bg-[var(--bg-surface)] border border-[var(--border-visible)] text-[var(--heading-color)] rounded-tl-none shadow-md"
-                      }`}
+                      className={`p-4 rounded-2xl text-sm leading-relaxed ${msg.sender === "user"
+                        ? "bg-[var(--accent-primary)] text-white rounded-tr-none shadow-lg"
+                        : "bg-[var(--bg-surface)] border border-[var(--border-visible)] text-[var(--heading-color)] rounded-tl-none shadow-md"
+                        }`}
                     >
                       {msg.sender === "user" ? (
                         <p className="whitespace-pre-wrap break-words">{msg.text}</p>
@@ -364,11 +349,10 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
               <button
                 type="submit"
                 disabled={!input.trim() || isTyping}
-                className={`icon-action p-2.5 rounded-xl font-bold text-white transition-all flex items-center justify-center shrink-0 cursor-pointer ${
-                  input.trim() && !isTyping
-                    ? "bg-[var(--accent-primary)] hover:bg-[var(--accent-primary-hover)] shadow-md shadow-[var(--accent-primary-shadow)] active:scale-95"
-                    : "bg-[var(--accent-neutral-bg)] text-[var(--accent-neutral-text)] cursor-not-allowed"
-                }`}
+                className={`icon-action p-2.5 rounded-xl font-bold text-white transition-all flex items-center justify-center shrink-0 cursor-pointer ${input.trim() && !isTyping
+                  ? "bg-[var(--accent-primary)] hover:bg-[var(--accent-primary-hover)] shadow-md shadow-[var(--accent-primary-shadow)] active:scale-95"
+                  : "bg-[var(--accent-neutral-bg)] text-[var(--accent-neutral-text)] cursor-not-allowed"
+                  }`}
                 title="Send message"
                 aria-label="Send message"
               >

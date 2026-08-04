@@ -16,9 +16,10 @@ interface AuditRegistryProps {
   evidenceLogs: DocumentEvidence[];
   isEvidenceLoading: boolean;
   onRefreshEvidence: () => void;
+  initialSupplier?: string | null;
 }
 
-export default function AuditRegistry({ evidenceLogs, isEvidenceLoading, onRefreshEvidence }: AuditRegistryProps) {
+export default function AuditRegistry({ evidenceLogs, isEvidenceLoading, onRefreshEvidence, initialSupplier }: AuditRegistryProps) {
   const [logs, setLogs] = useState<AuditRegistryEntry[]>([]);
   const [selectedLog, setSelectedLog] = useState<AuditRegistryEntry | null>(null);
   const [assets, setAssets] = useState<SupplierAssets>({ screenshots: [], documents: [] });
@@ -36,6 +37,7 @@ export default function AuditRegistry({ evidenceLogs, isEvidenceLoading, onRefre
   const [isSavingTableEdits, setIsSavingTableEdits] = useState(false);
   const [tableEditMsg, setTableEditMsg] = useState<string | null>(null);
   const auditLogsFetched = useRef(false);
+  const autoSelectedSupplier = useRef<string | null>(null);
 
   const loadLogs = useCallback(async () => {
     setIsLoading(true);
@@ -56,6 +58,32 @@ export default function AuditRegistry({ evidenceLogs, isEvidenceLoading, onRefre
       loadLogs();
     }
   }, [loadLogs]);
+
+  // Auto-open the registry log for a supplier when arriving from CQ Check.
+  const autoSelectSupplierLog = useCallback(
+    async (supplierName: string) => {
+      const match = logs.find(
+        (log) => log.supplier_name.toLowerCase() === supplierName.toLowerCase()
+      );
+      if (!match) return;
+      autoSelectedSupplier.current = supplierName.toLowerCase();
+      setSelectedLog(match);
+      setActiveTableIdx(null);
+      setAssets({ screenshots: [], documents: [] });
+      setAssetsLoading(true);
+      setActiveTab("comparison");
+      const data = await fetchSupplierAssets(match.supplier_id);
+      setAssets(data);
+      setAssetsLoading(false);
+    },
+    [logs]
+  );
+
+  useEffect(() => {
+    if (!initialSupplier || logs.length === 0) return;
+    if (autoSelectedSupplier.current === initialSupplier.toLowerCase()) return;
+    autoSelectSupplierLog(initialSupplier);
+  }, [initialSupplier, logs, autoSelectSupplierLog]);
 
   const handleSelectLog = async (log: AuditRegistryEntry) => {
     setSelectedLog(log);

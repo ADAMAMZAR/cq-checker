@@ -60,6 +60,89 @@ The API will be available at `http://localhost:8000`.
 | `VERTEX_LOCATION` | ⚠️ Deprecated — migration only | `us-central1` |
 | `UPLOAD_DIR` | Local file upload directory (dev) | `uploads` |
 
+## API Endpoints
+
+Grouped by function. Full reference: [`API-Endpoints.md`](../API-Endpoints.md). Interactive docs at `http://localhost:8000/docs` (Swagger).
+
+### Summary
+
+| Method | Path | Group |
+|---|---|---|
+| `GET` | `/` | System / Health |
+| `POST` | `/api/extract` | Supplier Audit — Extraction |
+| `POST` | `/api/test/extract` | Supplier Audit — Extraction |
+| `POST` | `/api/audit` | Supplier Audit — Full Run |
+| `POST` | `/api/audit/comparison` | Supplier Audit — Comparison |
+| `GET` | `/api/logs` | Supplier Audit — Read |
+| `GET` | `/api/audit-registry` | Supplier Audit — Read |
+| `GET` | `/api/evidence` | Supplier Audit — Read |
+| `PUT` | `/api/evidence` | Supplier Audit — Update |
+| `GET` | `/api/logs/{supplier_id}/assets` | Supplier Audit — Read |
+| `GET` | `/api/costs` | Cost Analytics |
+| `POST` | `/api/certificates/verify` | Certificate Verification |
+| `GET` | `/api/certificates` | Certificate Verification |
+| `POST` | `/api/documents/upload` | Document Ingestion / RAG |
+| `GET` | `/api/documents` | Document Ingestion / RAG |
+| `POST` | `/api/chat` | RAG Chatbot |
+| `GET` | `/api/chat/history` | RAG Chatbot |
+| `POST` | `/api/chat/cache/clear` | RAG Chatbot |
+| `GET` | `/api/files/{encoded_url:path}` | File Serving — Legacy |
+| `GET` | `/api/files/local/{folder}/{filename}` | File Serving — Local |
+
+### 🏷️ System / Health
+
+- **`GET /`** — Health check. Returns `{"status": "healthy", "service": "..."}`.
+
+### 📄 Supplier Audit — Extraction (legacy Gemini flow)
+
+- **`POST /api/extract`** — Phase 1 (Chrome Extension). Single-pass file processing (read → match QA label → hash → upload → Gemini extraction), saves `document_evidence`, returns `audit_id`. Form: `supplier_name`, `supplier_folder?`, `workspace_title`, `cert_type`, `qa_data` (JSON), `files[]`, `screenshot?`.
+- **`POST /api/test/extract`** — Dev helper. Upload one file, return raw Gemini OCR extraction JSON without persisting. Form: `file`.
+
+### 📄 Supplier Audit — Full Run & Comparison
+
+- **`POST /api/audit`** — Main audit (Chrome Extension). Extraction + code-based `auditor.run_full_audit`, persists `audit_logs` + `document_evidence`. Form: same as `/api/extract`. Returns `AuditResultResponse`.
+- **`POST /api/audit/comparison`** — Phase 2. Runs comparison only from existing evidence by `audit_id`, saves audit log, returns verdict. Form: `audit_id`, `supplier_name`, `workspace_title`, `cert_type`, `qa_data`, `screenshot_url?`, `timestamp`.
+
+### 📄 Supplier Audit — Read / Update
+
+- **`GET /api/logs`** — All historical audit logs → `List[AuditLogEntry]`.
+- **`GET /api/audit-registry`** — Consolidated registry (supplier, result, document counts) for the AuditRegistry screen.
+- **`GET /api/evidence`** — All document-evidence records → `List[DocumentEvidence]`.
+- **`PUT /api/evidence`** — Update extracted metadata for one evidence record (by `audit_id` + `filename`), recompute verdict before saving. Body: `UpdateEvidenceRequest`. 404 if not found; 500 if recompute fails (nothing saved).
+- **`GET /api/logs/{supplier_id}/assets`** — Supplier's screenshots + documents via stored `file_url`s.
+
+### 💰 Cost Analytics
+
+- **`GET /api/costs`** — Aggregated cost/usage analytics across audits.
+
+### 📜 Certificate Verification (Phase 4)
+
+- **`POST /api/certificates/verify`** — Upload cert → DeepSeek extraction → Qwen judge → persist to `certificate_verifications` → verdict + reasoning. Form: `file`, `supplier_name`, `question_label?`, `qa_answers?`, `qa_data_title?`. Returns `CertificateVerifyResult`. 502 if extraction fails.
+- **`GET /api/certificates`** — List past verifications. Query: `limit` (50), `offset` (0).
+
+### 📚 Document Ingestion / RAG (Phase 5)
+
+- **`POST /api/documents/upload`** — Upload manual PDF → parse → parent-child chunking → embed → store in Neon. Idempotent via SHA-256 `file_hash`. Form: `file`, `title?`. Returns `DocumentIngestResult`. 502 if ingestion fails.
+- **`GET /api/documents`** — List ingested documents with parent/child counts. Query: `limit` (50), `offset` (0).
+
+### 💬 RAG Chatbot (Phase 6)
+
+- **`POST /api/chat`** — RAG query: semantic cache (cosine > 0.93) → hybrid retrieval (pgvector + tsvector) → DeepSeek. Multi-turn via `session_id`. `stream: true` returns SSE. Body: `ChatRequest`.
+- **`GET /api/chat/history`** — Conversation history for a session. Query: `session_id`.
+- **`POST /api/chat/cache/clear`** — Admin: clear semantic cache. Returns `{"cleared": N}`.
+
+### 🗂️ File Serving
+
+- **`GET /api/files/{encoded_url:path}`** — **Legacy**: proxy a Supabase Storage file (historical records only, restricted to configured bucket, 50 MB cap).
+- **`GET /api/files/local/{folder}/{filename}`** — Serve local-disk uploads (dev). Path traversal blocked; 50 MB cap.
+
+### 🧭 Workflow Map
+
+- **Supplier Audit (Chrome Extension):** `POST /api/audit` (or `/api/extract` → `/api/audit/comparison`) → read via `/api/audit-registry` / `/api/logs` / `/api/evidence` / `/api/costs` / `/api/logs/{id}/assets`.
+- **Certificate Verification:** `POST /api/certificates/verify` → `GET /api/certificates`.
+- **Document RAG:** `POST /api/documents/upload` → `GET /api/documents` → `POST /api/chat` (+ `/api/chat/history`, `/api/chat/cache/clear`).
+- **File rendering:** `GET /api/files/local/*` (new) or `GET /api/files/{b64}` (legacy).
+
 ## Running Tests
 
 ```bash

@@ -17,6 +17,7 @@ from app.repositories.documents import DocumentRepository, ChunkRepository
 from app.repositories.certificates import CertificateRepository
 from app.repositories.cache import CacheRepository
 from app.repositories.audit import SupplierRepository, AuditLogRepository, DocumentEvidenceRepository
+from app.repositories.object_storage import ObjectStorageRepository
 
 
 # ── Test database fixture ────────────────────────────────────────────────
@@ -175,6 +176,33 @@ class TestCacheRepository:
         # Full vector similarity test requires a running pgvector database.
 
 
+# ── Object Storage Repository Tests ──────────────────────────────────────
+
+class TestObjectStorageRepository:
+    @pytest.mark.asyncio
+    async def test_create_and_get_by_url(self, db_session):
+        repo = ObjectStorageRepository(db_session)
+        rec = await repo.create(
+            file_url="/api/files/local/acme/cert.pdf",
+            bucket=None,
+            object_key="/api/files/local/acme/cert.pdf",
+            content_type="application/pdf",
+            size_bytes=1024,
+            checksum="a" * 64,
+        )
+        assert rec.file_url == "/api/files/local/acme/cert.pdf"
+        assert rec.checksum == "a" * 64
+
+        found = await repo.get_by_url("/api/files/local/acme/cert.pdf")
+        assert found is not None
+        assert found.id == rec.id
+
+    @pytest.mark.asyncio
+    async def test_get_by_url_missing(self, db_session):
+        repo = ObjectStorageRepository(db_session)
+        assert await repo.get_by_url("http://nope/x.pdf") is None
+
+
 # ── Audit Repository Tests ───────────────────────────────────────────────
 
 class TestSupplierRepository:
@@ -222,10 +250,24 @@ class TestAuditLogRepository:
 
 
 class TestDocumentEvidenceRepository:
+    async def _seed_audit_log(self, db_session, supplier_id: int, audit_id: str):
+        """Create a parent audit_logs row so the document_evidence FK holds."""
+        from app.repositories.audit import AuditLogRepository
+        repo = AuditLogRepository(db_session)
+        return await repo.create(AuditLog(
+            audit_id=audit_id,
+            supplier_id=supplier_id,
+            timestamp="31/07/2026, 10:00:00",
+            supplier_name="Evidence Test Supplier",
+            compiled_extracted_data="[]",
+            suggested_comment="Test audit",
+        ))
+
     @pytest.mark.asyncio
     async def test_create_evidence(self, db_session):
         supplier_repo = SupplierRepository(db_session)
         supplier = await supplier_repo.get_or_create("Evidence Test Supplier")
+        await self._seed_audit_log(db_session, supplier.id, "test-audit-001")
 
         repo = DocumentEvidenceRepository(db_session)
         evidence = DocumentEvidence(
@@ -248,6 +290,7 @@ class TestDocumentEvidenceRepository:
     async def test_get_by_audit_id(self, db_session):
         supplier_repo = SupplierRepository(db_session)
         supplier = await supplier_repo.get_or_create("Multi-Evidence Supplier")
+        await self._seed_audit_log(db_session, supplier.id, "multi-evidence-001")
 
         repo = DocumentEvidenceRepository(db_session)
         for i in range(3):

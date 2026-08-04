@@ -1,5 +1,6 @@
 """Repository for legacy audit logs, suppliers, and document evidence."""
 
+from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
 
@@ -7,6 +8,18 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.tables import Supplier, AuditLog, DocumentEvidence
+
+
+def _to_timestamp(value) -> object:
+    """Coerce legacy string timestamps to datetimes for timestamptz columns."""
+    from app.services.audit_data import _to_db_timestamp
+    return _to_db_timestamp(value)
+
+
+def _coerce_ts(value):
+    if not isinstance(value, datetime):
+        return _to_timestamp(value)
+    return value
 
 
 class SupplierRepository:
@@ -36,6 +49,7 @@ class AuditLogRepository:
         self.session = session
 
     async def create(self, log: AuditLog) -> AuditLog:
+        log.timestamp = _coerce_ts(log.timestamp)
         self.session.add(log)
         await self.session.commit()
         await self.session.refresh(log)
@@ -65,6 +79,7 @@ class DocumentEvidenceRepository:
         self.session = session
 
     async def create(self, evidence: DocumentEvidence) -> DocumentEvidence:
+        evidence.timestamp = _coerce_ts(evidence.timestamp)
         self.session.add(evidence)
         await self.session.commit()
         await self.session.refresh(evidence)

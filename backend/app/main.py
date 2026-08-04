@@ -28,10 +28,23 @@ from app.services import audit_data, gemini, storage
 from app.services import auditor
 from app.services.gemini import clean_question_label
 
+API_TAGS = [
+    {"name": "System / Health", "description": "Service health check."},
+    {"name": "Supplier Audit — Extraction", "description": "Legacy Gemini flow — Phase 1 file extraction (Chrome Extension)."},
+    {"name": "Supplier Audit — Full Run & Comparison", "description": "Legacy Gemini flow — full audit run and comparison phase."},
+    {"name": "Supplier Audit — Read / Update", "description": "Legacy audit logs, registry, evidence, and supplier assets."},
+    {"name": "Cost Analytics", "description": "Aggregated cost/usage analytics across audits."},
+    {"name": "Certificate Verification", "description": "Phase 4 — DeepSeek extraction + Qwen judge pipeline."},
+    {"name": "Document Ingestion / RAG", "description": "Phase 5 — manual ingestion: parse, chunk, embed, store."},
+    {"name": "RAG Chatbot", "description": "Phase 6 — semantic cache + hybrid retrieval + DeepSeek generation."},
+    {"name": "File Serving", "description": "Serve uploaded files (local disk and legacy Supabase proxy)."},
+]
+
 app = FastAPI(
     title="GPO Automatic Certificate Auditor API",
     description="Backend API for auditing certificates and logging results to Neon PostgreSQL",
-    version="1.0.0"
+    version="1.0.0",
+    openapi_tags=API_TAGS,
 )
 
 # Configure CORS so the Chrome Extension and Next.js can connect
@@ -43,7 +56,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.get("/")
+@app.get("/", tags=["System / Health"])
 def read_root():
     return {"status": "healthy", "service": "GPO Automatic Certificate Auditor API"}
 
@@ -95,7 +108,7 @@ async def _process_uploaded_files(
         else:
             task = asyncio.to_thread(gemini.extract_certificate_data, raw, content_type, q_label)
 
-        file_url = storage.get_storage().upload(raw, safe_supplier_name, orig_filename, content_type)
+        file_url = await storage.store_and_record(raw, safe_supplier_name, orig_filename, content_type)
 
         file_contexts.append({
             "filename": orig_filename, "content_type": content_type,
@@ -133,7 +146,7 @@ async def _process_uploaded_files(
     return doc_evidences, file_contexts, extracted_docs, total_cost
 
 
-@app.get("/api/logs", response_model=List[AuditLogEntry])
+@app.get("/api/logs", response_model=List[AuditLogEntry], tags=["Supplier Audit — Read / Update"])
 async def get_logs():
     """
     Fetches all historical audit logs from Neon.
@@ -141,14 +154,14 @@ async def get_logs():
     logs = await audit_data.get_audit_logs()
     return logs
 
-@app.get("/api/audit-registry", response_model=List[AuditRegistryEntry])
+@app.get("/api/audit-registry", response_model=List[AuditRegistryEntry], tags=["Supplier Audit — Read / Update"])
 async def get_audit_registry():
     """
     Consolidated audit registry with supplier info, result, and document counts.
     """
     return await audit_data.get_audit_registry()
 
-@app.get("/api/evidence", response_model=List[DocumentEvidence])
+@app.get("/api/evidence", response_model=List[DocumentEvidence], tags=["Supplier Audit — Read / Update"])
 async def get_evidence():
     """
     Fetches all historical document evidence logs (extracted file details) from Neon.
@@ -156,7 +169,7 @@ async def get_evidence():
     evidence = await audit_data.get_document_evidence_logs()
     return evidence
 
-@app.put("/api/evidence")
+@app.put("/api/evidence", tags=["Supplier Audit — Read / Update"])
 async def update_evidence(payload: UpdateEvidenceRequest):
     """
     Updates the extracted certificate details (JSON metadata) for a specific document evidence
@@ -234,7 +247,7 @@ async def update_evidence(payload: UpdateEvidenceRequest):
         "comparison_table": comparison_table,
     }
 
-@app.post("/api/test/extract")
+@app.post("/api/test/extract", tags=["Supplier Audit — Extraction"])
 async def test_extract_file(file: UploadFile = File(...)):
     """
     Test endpoint to upload a file and return raw Gemini OCR extraction data (JSON).
@@ -252,7 +265,7 @@ async def test_extract_file(file: UploadFile = File(...)):
         }
     }
 
-@app.post("/api/extract")
+@app.post("/api/extract", tags=["Supplier Audit — Extraction"])
 async def extract_documents(
     supplier_name: str = Form(...),
     supplier_folder: Optional[str] = Form(None),
@@ -274,7 +287,7 @@ async def extract_documents(
         screenshot_filename = f"screenshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
         screenshot_bytes = screenshot.file.read()
         screenshot.file.seek(0)
-        screenshot_url = storage.get_storage().upload(
+        screenshot_url = await storage.store_and_record(
             screenshot_bytes, safe_supplier_name, screenshot_filename, "image/png"
         )
 
@@ -311,7 +324,7 @@ async def extract_documents(
     }
 
 
-@app.post("/api/audit/comparison", response_model=AuditResultResponse)
+@app.post("/api/audit/comparison", response_model=AuditResultResponse, tags=["Supplier Audit — Full Run & Comparison"])
 async def run_audit_comparison(
     audit_id: str = Form(...),
     supplier_name: str = Form(...),
@@ -409,7 +422,7 @@ async def run_audit_comparison(
     )
 
 
-@app.post("/api/audit", response_model=AuditResultResponse)
+@app.post("/api/audit", response_model=AuditResultResponse, tags=["Supplier Audit — Full Run & Comparison"])
 async def run_audit(
     supplier_name: str = Form(...),
     supplier_folder: Optional[str] = Form(None),
@@ -431,7 +444,7 @@ async def run_audit(
         screenshot_filename = f"screenshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
         screenshot_bytes = screenshot.file.read()
         screenshot.file.seek(0)
-        screenshot_url = storage.get_storage().upload(
+        screenshot_url = await storage.store_and_record(
             screenshot_bytes, safe_supplier_name, screenshot_filename, "image/png"
         )
 
@@ -516,12 +529,12 @@ async def run_audit(
         comparison_table=comparison_table_dict,
     )
 
-@app.get("/api/costs")
+@app.get("/api/costs", tags=["Cost Analytics"])
 async def get_cost_analytics():
     return await audit_data.get_cost_analytics()
 
 
-@app.post("/api/certificates/verify", response_model=CertificateVerifyResult)
+@app.post("/api/certificates/verify", response_model=CertificateVerifyResult, tags=["Certificate Verification"])
 async def verify_certificate(
     file: UploadFile = File(...),
     supplier_name: str = Form(...),
@@ -532,6 +545,8 @@ async def verify_certificate(
     """
     Phase 4 pipeline: upload a certificate PDF/image -> DeepSeek extraction ->
     Qwen judge -> save to certificate_verifications -> return verdict + reasoning.
+    Idempotent by file SHA-256: re-uploading the same file returns the prior
+    verdict with zero LLM cost.
     """
     from app.services import extractor, judge
     from app.db.session import get_session_factory
@@ -540,8 +555,27 @@ async def verify_certificate(
     file_bytes = await file.read()
     mime_type = file.content_type or "application/pdf"
     filename = file.filename or "certificate"
+    file_hash = hashlib.sha256(file_bytes).hexdigest()
 
-    file_url = storage.get_storage().upload(file_bytes, supplier_name, filename, mime_type)
+    file_url = await storage.store_and_record(file_bytes, supplier_name, filename, mime_type)
+
+    # Dedup: if the exact same bytes were verified before, return the prior verdict.
+    factory = get_session_factory()
+    async with factory() as session:
+        repo = CertificateRepository(session)
+        existing = await repo.get_by_hash(file_hash)
+        if existing:
+            confidence = None
+            if isinstance(existing.extracted_data, dict):
+                confidence = existing.extracted_data.get("confidence")
+            return CertificateVerifyResult(
+                status=existing.status,
+                extracted_data=existing.extracted_data,
+                reasoning_trace=existing.judge_reasoning or "",
+                confidence=float(confidence) if confidence is not None else None,
+                judge_source="cache",
+                record_id=str(existing.id),
+            )
 
     # 1. Extract
     extracted_data, in_t, out_t, cost = extractor.extract_certificate_data(
@@ -560,12 +594,12 @@ async def verify_certificate(
     )
 
     # 3. Persist
-    factory = get_session_factory()
     record_id = None
     async with factory() as session:
         repo = CertificateRepository(session)
         record = await repo.create(
             file_url=file_url or "",
+            file_hash=file_hash,
             extracted_data={**extracted_data, "confidence": verdict["confidence"]},
             status=verdict["status"],
             judge_reasoning=verdict["reasoning_trace"],
@@ -583,7 +617,7 @@ async def verify_certificate(
     )
 
 
-@app.get("/api/certificates", response_model=List[CertificateVerificationResponse])
+@app.get("/api/certificates", response_model=List[CertificateVerificationResponse], tags=["Certificate Verification"])
 async def list_certificates(limit: int = 50, offset: int = 0):
     """
     List past certificate verifications from certificate_verifications.
@@ -613,7 +647,7 @@ async def list_certificates(limit: int = 50, offset: int = 0):
     return results
 
 
-@app.post("/api/documents/upload", response_model=DocumentIngestResult)
+@app.post("/api/documents/upload", response_model=DocumentIngestResult, tags=["Document Ingestion / RAG"])
 async def upload_document(
     file: UploadFile = File(...),
     title: Optional[str] = Form(None),
@@ -635,7 +669,7 @@ async def upload_document(
     return DocumentIngestResult(**result.to_dict())
 
 
-@app.get("/api/documents", response_model=List[DocumentSummary])
+@app.get("/api/documents", response_model=List[DocumentSummary], tags=["Document Ingestion / RAG"])
 async def list_documents(limit: int = 50, offset: int = 0):
     """
     List ingested documents with parent/child chunk counts.
@@ -663,7 +697,7 @@ async def list_documents(limit: int = 50, offset: int = 0):
     return summaries
 
 
-@app.post("/api/chat", response_model=ChatResponse)
+@app.post("/api/chat", response_model=ChatResponse, tags=["RAG Chatbot"])
 async def chat(payload: ChatRequest):
     """
     Phase 6: RAG chatbot query. Semantic cache -> hybrid retrieval -> DeepSeek
@@ -703,7 +737,7 @@ async def chat(payload: ChatRequest):
     )
 
 
-@app.post("/api/chat/cache/clear")
+@app.post("/api/chat/cache/clear", tags=["RAG Chatbot"])
 async def clear_chat_cache():
     """
     Admin: clear the semantic query cache. Returns count cleared.
@@ -714,7 +748,7 @@ async def clear_chat_cache():
     return {"status": "success", "cleared": count}
 
 
-@app.get("/api/chat/history", response_model=ChatHistoryResponse)
+@app.get("/api/chat/history", response_model=ChatHistoryResponse, tags=["RAG Chatbot"])
 async def chat_history(session_id: str):
     """
     Return conversation history for a session.
@@ -725,7 +759,7 @@ async def chat_history(session_id: str):
     return ChatHistoryResponse(session_id=session_id, messages=messages)
 
 
-@app.get("/api/logs/{supplier_id}/assets")
+@app.get("/api/logs/{supplier_id}/assets", tags=["Supplier Audit — Read / Update"])
 async def get_supplier_assets(supplier_id: int):
     """
     Returns documents and screenshots for a supplier via file_urls in the DB.
@@ -744,7 +778,7 @@ def _build_proxy_url(raw_url: str) -> str:
     return base64.urlsafe_b64decode(padded).decode("utf-8")
 
 
-@app.get("/api/files/{encoded_url:path}")
+@app.get("/api/files/{encoded_url:path}", tags=["File Serving"])
 def proxy_supabase_file(encoded_url: str):
     """
     Legacy: proxies a file from Supabase Storage through the backend for
@@ -796,7 +830,7 @@ def proxy_supabase_file(encoded_url: str):
         raise HTTPException(status_code=502, detail=f"Failed to fetch file: {e}")
 
 
-@app.get("/api/files/local/{folder}/{filename}")
+@app.get("/api/files/local/{folder}/{filename}", tags=["File Serving"])
 def serve_local_file(folder: str, filename: str):
     """
     Serves files uploaded to the local disk storage provider (dev).
@@ -825,5 +859,31 @@ def serve_local_file(folder: str, filename: str):
                         "Content-Disposition": f'inline; filename="{safe_name}"',
                         "Access-Control-Allow-Origin": "*",
                     })
+
+
+# ── Read-only Database Browser (preview) ──────────────────────────────────────
+
+@app.get("/api/db/tables", tags=["Database Browser"])
+async def db_list_tables():
+    """
+    Read-only: list all public tables with row counts. No writes exposed.
+    """
+    from app.services import db_browser
+    return await db_browser.list_tables()
+
+
+@app.get("/api/db/tables/{table_name}", tags=["Database Browser"])
+async def db_get_table(table_name: str, limit: int = 100, offset: int = 0):
+    """
+    Read-only: return a page of rows for a table (validated against the
+    whitelist from information_schema). `limit` is clamped to 500.
+    """
+    from app.services import db_browser
+
+    valid = await db_browser.list_tables()
+    names = {t["name"] for t in valid}
+    if table_name not in names:
+        raise HTTPException(status_code=404, detail=f"Table '{table_name}' not found.")
+    return await db_browser.get_table_data(table_name, limit=limit, offset=offset)
 
 

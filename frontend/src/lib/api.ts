@@ -12,6 +12,8 @@ import type {
   DocumentSummary,
   CertificateVerifyResult,
   CertificateVerificationResponse,
+  DbTableMeta,
+  DbTableData,
 } from "@/types";
 
 // Single seam for backend routing.
@@ -242,6 +244,26 @@ export async function verifyCertificate(
 
 export async function fetchCertificates(): Promise<CertificateVerificationResponse[]> {
   const res = await fetch(`${API_BASE}/certificates`);
+  if (!res.ok) throw new Error(await errorDetail(res));
+  return res.json();
+}
+
+// ── Database Browser (read-only preview) ─────────────────────────────────────
+
+export async function fetchDbTables(): Promise<DbTableMeta[]> {
+  const res = await fetch(`${API_BASE}/db/tables`);
+  if (!res.ok) throw new Error(await errorDetail(res));
+  return res.json();
+}
+
+export async function fetchDbTable(
+  table: string,
+  limit: number = 100,
+  offset: number = 0
+): Promise<DbTableData> {
+  const res = await fetch(
+    `${API_BASE}/db/tables/${encodeURIComponent(table)}?limit=${limit}&offset=${offset}`
+  );
   if (!res.ok) throw new Error(await errorDetail(res));
   return res.json();
 }

@@ -1,205 +1,213 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   IconCertificate,
-  IconUpload,
-  IconCheck,
-  IconX,
-  IconAlertTriangle,
+  IconSearch,
   IconChevronDown,
-  IconChevronUp,
+  IconLoader2,
+  IconCheck,
+  IconBuildingStore,
 } from "@tabler/icons-react";
-import { verifyCertificate, fetchCertificates, buildFileUrl } from "@/lib/api";
-import type {
-  CertificateStatus,
-  CertificateVerifyResult,
-  CertificateVerificationResponse,
-} from "@/types";
+import { fetchAuditRegistry } from "@/lib/api";
 
-const FIELD_LABELS: Record<string, string> = {
-  certificateOwnerName: "Supplier Name",
-  issuerName: "Issuing Authority",
-  certificateType: "Certificate Type",
-  certificateNumber: "Certificate Number",
-  expirationDate: "Expiry Date",
-  effectiveDate: "Effective Date",
-  yearOfPublication: "Year of Publication",
-  certificateLocation: "Certificate Location",
-};
+interface CertificateVerificationProps {
+  onNavigateToRegistry?: (supplierName: string) => void;
+}
 
-export default function CertificateVerification() {
-  const [file, setFile] = useState<File | null>(null);
-  const [supplierName, setSupplierName] = useState("");
-  const [questionLabel, setQuestionLabel] = useState("");
-  const [qaAnswers, setQaAnswers] = useState("");
-  const [isVerifying, setIsVerifying] = useState(false);
-  const [result, setResult] = useState<CertificateVerifyResult | null>(null);
+const STAGES = [
+  "Extracting user input",
+  "Extracting document evidence",
+  "Auditing the supplier",
+];
+
+export default function CertificateVerification({ onNavigateToRegistry }: CertificateVerificationProps = {}) {
+  const [suppliers, setSuppliers] = useState<string[]>([]);
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const [highlighted, setHighlighted] = useState(0);
+  const [running, setRunning] = useState(false);
+  const [stage, setStage] = useState(-1);
   const [error, setError] = useState<string | null>(null);
-  const [history, setHistory] = useState<CertificateVerificationResponse[]>([]);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const historyFetched = useRef(false);
+  const fetched = useRef(false);
+  const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
-  const loadHistory = useCallback(async () => {
+  const loadSuppliers = useCallback(async () => {
     try {
-      setHistory(await fetchCertificates());
+      const registry = await fetchAuditRegistry();
+      const names = Array.from(new Set(registry.map((r) => r.supplier_name).filter(Boolean)));
+      names.sort((a, b) => a.localeCompare(b));
+      setSuppliers(names);
     } catch {
-      setHistory([]);
+      setError("Could not load supplier list. Make sure the backend is running.");
     }
   }, []);
 
   useEffect(() => {
-    if (!historyFetched.current) {
-      historyFetched.current = true;
-      loadHistory();
+    if (!fetched.current) {
+      fetched.current = true;
+      loadSuppliers();
     }
-  }, [loadHistory]);
+  }, [loadSuppliers]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!file || !supplierName.trim()) return;
-    setIsVerifying(true);
-    setError(null);
-    setResult(null);
-    try {
-      const res = await verifyCertificate(file, {
-        supplierName: supplierName.trim(),
-        questionLabel: questionLabel.trim() || undefined,
-        qaAnswers: qaAnswers.trim() || undefined,
-      });
-      setResult(res);
-      await loadHistory();
-      if (file) {
-        const input = document.getElementById("verify-file-input") as HTMLInputElement | null;
-        if (input) input.value = "";
+  useEffect(
+    () => () => {
+      timersRef.current.forEach(clearTimeout);
+    },
+    []
+  );
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return suppliers;
+    return suppliers.filter((s) => s.toLowerCase().includes(q));
+  }, [suppliers, query]);
+
+  const selectSupplier = (name: string) => {
+    setSelected(name);
+    setQuery(name);
+    setOpen(false);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!open) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setOpen(true);
       }
-      setFile(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Verification failed.");
-    } finally {
-      setIsVerifying(false);
+      return;
+    }
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHighlighted((i) => Math.min(i + 1, filtered.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHighlighted((i) => Math.max(i - 1, 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (filtered[highlighted]) selectSupplier(filtered[highlighted]);
+    } else if (e.key === "Escape") {
+      setOpen(false);
     }
   };
 
-  const statusConfig: Record<CertificateStatus, { label: string; className: string; Icon: typeof IconCheck }> = {
-    PASS: {
-      label: "PASS",
-      className: "bg-[var(--accent-success-soft)] text-[var(--accent-success-text)] border-[var(--accent-success-border)]",
-      Icon: IconCheck,
-    },
-    FAIL: {
-      label: "FAIL",
-      className: "bg-[var(--accent-danger-soft)] text-[var(--accent-danger-text)] border-[var(--accent-danger-border)]",
-      Icon: IconX,
-    },
-    REQUIRES_HUMAN_REVIEW: {
-      label: "REQUIRES HUMAN REVIEW",
-      className: "bg-[var(--accent-warning-soft)] text-[var(--accent-warning-text)] border-[var(--accent-warning-border)]",
-      Icon: IconAlertTriangle,
-    },
-  };
-
-  const badgeFor = (status: CertificateStatus) => {
-    const cfg = statusConfig[status];
-    const Icon = cfg.Icon;
-    return (
-      <span className={`px-3 py-1.5 rounded-full text-[11px] font-bold border inline-flex items-center gap-1.5 ${cfg.className}`}>
-        <Icon className="w-3.5 h-3.5" />
-        {cfg.label}
-      </span>
+  const runVerification = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selected || running) return;
+    setError(null);
+    setRunning(true);
+    setStage(0);
+    timersRef.current.forEach(clearTimeout);
+    timersRef.current = [];
+    STAGES.forEach((_, i) => {
+      timersRef.current.push(setTimeout(() => setStage(i), i * 1800));
+    });
+    timersRef.current.push(
+      setTimeout(() => {
+        setRunning(false);
+        onNavigateToRegistry?.(selected);
+      }, STAGES.length * 1800 + 600)
     );
   };
 
+  const isStageActive = (i: number) => i === stage;
+  const isStageDone = (i: number) => i < stage;
+
   return (
     <div className="flex flex-col gap-8 max-w-4xl mx-auto w-full py-2 animate-fade-in">
-      {/* Verify form */}
+      {/* CQ Check form */}
       <section className="rounded-2xl border border-[var(--border-visible)] bg-[var(--bg-card)] p-6 shadow-xl backdrop-blur-2xl">
         <div className="flex items-center gap-3 mb-5">
           <div className="p-2.5 rounded-xl bg-[var(--accent-success-soft)] border border-[var(--accent-success-border)] text-[var(--accent-success-text)]">
             <IconCertificate className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-lg font-bold text-[var(--heading-color)] tracking-tight">Verify a Certificate</h2>
-            <p className="text-xs text-[var(--text-tertiary)]">DeepSeek extraction + Qwen reasoning judge with code-backed rules.</p>
+            <h2 className="text-lg font-bold text-[var(--heading-color)] tracking-tight">CQ Check</h2>
+            <p className="text-xs text-[var(--text-tertiary)]">
+              Pick a supplier from the database and run a demo verification flow.
+            </p>
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <label
-              htmlFor="verify-file-input"
-              className={`flex flex-col items-center justify-center gap-2 p-6 rounded-xl border-2 border-dashed transition-all cursor-pointer md:row-span-3 ${
-                file ? "border-[var(--accent-success-border)] bg-[var(--accent-success-soft)]" : "border-[var(--border-visible)] bg-[var(--bg-surface)] hover:border-[var(--accent-primary-border-focus)]"
-              }`}
-            >
-              <IconUpload className={`w-6 h-6 ${file ? "text-[var(--accent-success-text)]" : "text-[var(--text-tertiary)]"}`} />
-              {file ? (
-                <span className="text-xs font-semibold text-[var(--heading-color)] text-center break-all">{file.name}</span>
-              ) : (
-                <span className="text-xs text-[var(--text-secondary)] text-center">Upload certificate PDF or image</span>
-              )}
-              <input
-                id="verify-file-input"
-                type="file"
-                accept="application/pdf,image/*"
-                className="hidden"
-                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-              />
+        <form onSubmit={runVerification} className="space-y-4">
+          <div>
+            <label htmlFor="cq-supplier" className="block mb-1.5 text-[10px] uppercase tracking-wider font-bold text-[var(--text-tertiary)]">
+              Supplier Name *
             </label>
+            <div className="relative">
+              <IconSearch className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] h-4 w-4" />
+              <input
+                id="cq-supplier"
+                type="text"
+                value={query}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  setOpen(true);
+                  setHighlighted(0);
+                  if (selected && e.target.value !== selected) setSelected(null);
+                }}
+                onFocus={() => setOpen(true)}
+                onBlur={() => setTimeout(() => setOpen(false), 150)}
+                onKeyDown={handleKeyDown}
+                placeholder="Search and select a supplier…"
+                aria-label="Supplier Name"
+                role="combobox"
+                aria-expanded={open}
+                aria-controls="cq-supplier-listbox"
+                aria-autocomplete="list"
+                autoComplete="off"
+                className="w-full pl-11 pr-10 py-2.5 rounded-xl bg-[var(--bg-input)] border border-[var(--border-subtle)] text-sm text-[var(--heading-color)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[var(--accent-primary-border-focus)]"
+              />
+              <IconChevronDown className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] h-4 w-4 pointer-events-none" />
 
-            <div className="space-y-4 md:col-start-2">
-              <div>
-                <label htmlFor="verify-supplier" className="block mb-1.5 text-[10px] uppercase tracking-wider font-bold text-[var(--text-tertiary)]">
-                  Supplier Name *
-                </label>
-                <input
-                  id="verify-supplier"
-                  type="text"
-                  value={supplierName}
-                  onChange={(e) => setSupplierName(e.target.value)}
-                  placeholder="e.g. ACME Construction Sdn Bhd"
-                  required
-                  className="w-full px-4 py-2.5 rounded-xl bg-[var(--bg-input)] border border-[var(--border-subtle)] text-sm text-[var(--heading-color)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[var(--accent-primary-border-focus)]"
-                />
-              </div>
-              <div>
-                <label htmlFor="verify-qlabel" className="block mb-1.5 text-[10px] uppercase tracking-wider font-bold text-[var(--text-tertiary)]">
-                  Ariba Question Label <span className="normal-case font-normal">(optional)</span>
-                </label>
-                <input
-                  id="verify-qlabel"
-                  type="text"
-                  value={questionLabel}
-                  onChange={(e) => setQuestionLabel(e.target.value)}
-                  placeholder="e.g. 1.1 CIDB Grade"
-                  className="w-full px-4 py-2.5 rounded-xl bg-[var(--bg-input)] border border-[var(--border-subtle)] text-sm text-[var(--heading-color)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[var(--accent-primary-border-focus)]"
-                />
-              </div>
-              <div>
-                <label htmlFor="verify-qa" className="block mb-1.5 text-[10px] uppercase tracking-wider font-bold text-[var(--text-tertiary)]">
-                  QA Answers JSON <span className="normal-case font-normal">(optional)</span>
-                </label>
-                <input
-                  id="verify-qa"
-                  type="text"
-                  value={qaAnswers}
-                  onChange={(e) => setQaAnswers(e.target.value)}
-                  placeholder='[{"label":"type","value":"CIDB"}]'
-                  className="w-full px-4 py-2.5 rounded-xl bg-[var(--bg-input)] border border-[var(--border-subtle)] text-sm text-[var(--heading-color)] placeholder-[var(--text-tertiary)] font-mono focus:outline-none focus:border-[var(--accent-primary-border-focus)]"
-                />
-              </div>
+              {open && (
+                <ul
+                  id="cq-supplier-listbox"
+                  className="absolute z-20 mt-2 w-full max-h-72 overflow-y-auto rounded-xl border border-[var(--border-visible)] bg-[var(--bg-card)] shadow-xl py-1.5"
+                  role="listbox"
+                >
+                  {filtered.length === 0 ? (
+                    <li className="px-4 py-3 text-sm text-[var(--text-tertiary)] italic">No suppliers found.</li>
+                  ) : (
+                    filtered.map((name, idx) => (
+                      <li key={name}>
+                        <button
+                          type="button"
+                          role="option"
+                          aria-selected={selected === name}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            selectSupplier(name);
+                          }}
+                          onMouseEnter={() => setHighlighted(idx)}
+                          className={`w-full flex items-center gap-2.5 px-4 py-2.5 text-left text-sm transition-colors cursor-pointer ${
+                            highlighted === idx
+                              ? "bg-[var(--accent-success-soft)] text-[var(--heading-color)]"
+                              : "text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)]"
+                          }`}
+                        >
+                          <IconBuildingStore className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
+                          <span className="truncate">{name}</span>
+                          {selected === name && (
+                            <IconCheck className="ml-auto h-4 w-4 shrink-0 text-[var(--match-text)]" />
+                          )}
+                        </button>
+                      </li>
+                    ))
+                  )}
+                </ul>
+              )}
             </div>
           </div>
 
           <button
             type="submit"
-            disabled={!file || !supplierName.trim() || isVerifying}
+            disabled={!selected || running}
             className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-[var(--accent-success)] hover:bg-[var(--accent-success-hover)] text-white font-bold text-sm transition-all shadow-md shadow-[var(--accent-success-shadow)] active:scale-[0.98] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <IconCertificate className="w-4 h-4" />
-            {isVerifying ? "Verifying…" : "Run Verification"}
+            {running ? "Verifying…" : "Run CQ Check"}
           </button>
         </form>
 
@@ -209,118 +217,49 @@ export default function CertificateVerification() {
           </div>
         )}
 
-        {/* Result */}
-        {result && (
+        {/* Demo loading animation */}
+        {running && selected && (
           <div className="mt-6 rounded-xl border border-[var(--border-visible)] bg-[var(--bg-surface)] p-5 space-y-4">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              {badgeFor(result.status)}
-              <div className="flex items-center gap-3 text-[10px] text-[var(--text-tertiary)]">
-                <span>
-                  Confidence <span className="font-mono font-bold text-[var(--heading-color)]">{(result.confidence * 100).toFixed(1)}%</span>
-                </span>
-                <span className="px-2 py-0.5 rounded-full border border-[var(--border-subtle)]">
-                  judge: {result.judge_source}
-                </span>
+            <div className="flex items-center gap-3">
+              <IconLoader2 className="h-5 w-5 animate-spin text-[var(--accent-success-text)]" />
+              <div>
+                <p className="text-sm font-bold text-[var(--heading-color)]">Running CQ Check</p>
+                <p className="text-xs text-[var(--text-tertiary)] truncate">Supplier: {selected}</p>
               </div>
             </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {Object.entries(FIELD_LABELS).map(([key, label]) => {
-                const value = result.extracted_data?.[key];
-                if (value === undefined || value === null || value === "") return null;
+            <div className="space-y-2">
+              {STAGES.map((label, i) => {
+                const active = isStageActive(i);
+                const done = isStageDone(i);
                 return (
-                  <div key={key} className="rounded-xl bg-[var(--bg-input)] border border-[var(--border-subtle)] p-3">
-                    <span className="block text-[10px] uppercase tracking-wider font-bold text-[var(--text-tertiary)]">{label}</span>
-                    <span className="block text-sm font-semibold text-[var(--heading-color)] mt-0.5 break-words">{String(value)}</span>
+                  <div
+                    key={label}
+                    className={`flex items-center gap-3 px-4 py-3 rounded-xl border transition-all duration-300 ${
+                      active
+                        ? "border-[var(--accent-success-border)] bg-[var(--accent-success-soft)]"
+                        : done
+                          ? "border-[var(--border-subtle)] bg-[var(--bg-input)]"
+                          : "border-[var(--border-subtle)] bg-[var(--bg-input)] opacity-60"
+                    }`}
+                  >
+                    {done ? (
+                      <IconCheck className="h-4 w-4 text-[var(--match-text)]" />
+                    ) : active ? (
+                      <IconLoader2 className="h-4 w-4 animate-spin text-[var(--accent-success-text)]" />
+                    ) : (
+                      <span className="h-4 w-4 rounded-full border-2 border-[var(--border-subtle)]" />
+                    )}
+                    <span
+                      className={`text-sm font-semibold ${
+                        active ? "text-[var(--heading-color)]" : done ? "text-[var(--match-text)]" : "text-[var(--text-tertiary)]"
+                      }`}
+                    >
+                      {label}
+                    </span>
                   </div>
                 );
               })}
             </div>
-
-            {result.reasoning_trace && (
-              <div className="rounded-xl bg-[var(--bg-input)] border border-[var(--border-subtle)] p-4">
-                <p className="text-[10px] uppercase tracking-wider font-bold text-[var(--text-tertiary)] mb-2">Judge reasoning</p>
-                <div className="prose prose-sm max-w-none font-sans">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{result.reasoning_trace}</ReactMarkdown>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </section>
-
-      {/* History */}
-      <section className="rounded-2xl border border-[var(--border-visible)] bg-[var(--bg-card)] p-6 shadow-xl backdrop-blur-2xl">
-        <h3 className="text-[10px] font-bold text-[var(--text-tertiary)] uppercase tracking-wider mb-4">Verification history</h3>
-        {history.length === 0 ? (
-          <p className="text-sm text-[var(--text-tertiary)] italic">No verifications yet.</p>
-        ) : (
-          <div className="space-y-2">
-            {history.map((rec) => (
-              <div key={rec.id} className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] overflow-hidden">
-                <button
-                  onClick={() => setExpandedId(expandedId === rec.id ? null : rec.id)}
-                  className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer"
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    {badgeFor(rec.status)}
-                    <span className="text-sm font-semibold text-[var(--heading-color)] truncate">
-                      {String(rec.extracted_data?.certificateOwnerName || "Certificate")}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3 shrink-0">
-                    {rec.confidence !== null && rec.confidence !== undefined && (
-                      <span className="text-[10px] text-[var(--text-tertiary)] font-mono">
-                        {(rec.confidence * 100).toFixed(0)}%
-                      </span>
-                    )}
-                    {rec.created_at && (
-                      <span className="text-[10px] text-[var(--text-tertiary)] hidden sm:inline">
-                        {new Date(rec.created_at).toLocaleString()}
-                      </span>
-                    )}
-                    {expandedId === rec.id ? (
-                      <IconChevronUp className="w-4 h-4 text-[var(--text-tertiary)]" />
-                    ) : (
-                      <IconChevronDown className="w-4 h-4 text-[var(--text-tertiary)]" />
-                    )}
-                  </div>
-                </button>
-                {expandedId === rec.id && (
-                  <div className="px-4 pb-4 space-y-3 border-t border-[var(--border-subtle)] pt-3">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {Object.entries(FIELD_LABELS).map(([key, label]) => {
-                        const value = rec.extracted_data?.[key];
-                        if (value === undefined || value === null || value === "") return null;
-                        return (
-                          <div key={key} className="rounded-lg bg-[var(--bg-input)] border border-[var(--border-subtle)] px-3 py-2">
-                            <span className="block text-[9px] uppercase tracking-wider font-bold text-[var(--text-tertiary)]">{label}</span>
-                            <span className="block text-xs font-semibold text-[var(--heading-color)]">{String(value)}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    {rec.file_url && (
-                      <a
-                        href={buildFileUrl(rec.file_url)}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--accent-primary-text)] hover:text-[var(--accent-primary-text-hover)] transition-colors"
-                      >
-                        <IconCertificate className="w-3.5 h-3.5" />
-                        View source file
-                      </a>
-                    )}
-                    {rec.judge_reasoning && (
-                      <div className="rounded-lg bg-[var(--bg-input)] border border-[var(--border-subtle)] px-3 py-2">
-                        <p className="text-[9px] uppercase tracking-wider font-bold text-[var(--text-tertiary)] mb-1">Judge reasoning</p>
-                        <p className="text-xs text-[var(--text-secondary)] whitespace-pre-wrap">{rec.judge_reasoning}</p>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            ))}
           </div>
         )}
       </section>

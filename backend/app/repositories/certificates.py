@@ -19,9 +19,11 @@ class CertificateRepository:
         extracted_data: dict,
         status: str,
         judge_reasoning: Optional[str] = None,
+        file_hash: Optional[str] = None,
     ) -> CertificateVerification:
         record = CertificateVerification(
             file_url=file_url,
+            file_hash=file_hash,
             extracted_data=extracted_data,
             status=status,
             judge_reasoning=judge_reasoning,
@@ -34,6 +36,16 @@ class CertificateRepository:
     async def get_by_id(self, record_id: UUID) -> Optional[CertificateVerification]:
         result = await self.session.execute(
             select(CertificateVerification).where(CertificateVerification.id == record_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_hash(self, file_hash: str) -> Optional[CertificateVerification]:
+        """Return the most recent verification for a file SHA-256 hash (if any)."""
+        result = await self.session.execute(
+            select(CertificateVerification)
+            .where(CertificateVerification.file_hash == file_hash)
+            .order_by(CertificateVerification.created_at.desc())
+            .limit(1)
         )
         return result.scalar_one_or_none()
 

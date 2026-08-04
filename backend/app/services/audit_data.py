@@ -7,7 +7,7 @@ called from both sync and async FastAPI endpoints without threading concerns.
 
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select
@@ -20,6 +20,50 @@ from app.schemas import AuditLogEntry, DocumentEvidence, SupplierEntry
 logger = logging.getLogger(__name__)
 
 MYR_RATE = 4.70
+
+# GPO operates in UTC+8 (Singapore/Malaysia, no DST). Legacy audit timestamps
+# were stored as naive local wall-clock strings; preserve that wall-clock when
+# converting to TIMESTAMPTZ and back.
+_LOCAL_TZ = timezone(timedelta(hours=8))
+
+
+def _to_db_timestamp(value: Any) -> Optional[datetime]:
+    """Coerce a legacy string timestamp (dd/mm/YYYY, HH:MM:SS or ISO) to datetime.
+
+    The DB columns are now TIMESTAMPTZ; writers may still pass the old display
+    strings (from main.py or the Chrome extension), so parse before insert.
+    """
+    if value is None or value == "":
+        return datetime.now(_LOCAL_TZ)
+    if isinstance(value, datetime):
+        return value
+    s = str(value).strip()
+    for fmt in ("%d/%m/%Y, %H:%M:%S", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            dt = datetime.strptime(s, fmt)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=_LOCAL_TZ)
+            return dt
+        except ValueError:
+            continue
+    try:
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=_LOCAL_TZ)
+        return dt
+    except ValueError:
+        return datetime.now(_LOCAL_TZ)
+
+
+def _display_timestamp(value: Any) -> str:
+    """Format a DB timestamptz back to the legacy dd/mm/YYYY, HH:MM:SS string."""
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=_LOCAL_TZ)
+        return value.astimezone(_LOCAL_TZ).strftime("%d/%m/%Y, %H:%M:%S")
+    return str(value)
 
 
 # ── Suppliers ────────────────────────────────────────────────────────────────
@@ -82,7 +126,7 @@ def _to_audit_log_entry(r: AuditLog) -> AuditLogEntry:
     return AuditLogEntry(
         audit_id=r.audit_id,
         supplier_id=r.supplier_id,
-        timestamp=r.timestamp or "",
+        timestamp=_display_timestamp(r.timestamp),
         supplier_name=r.supplier_name,
         workspace_title=r.workspace_title or "Ariba Workspace",
         cert_type=cert_type,
@@ -127,7 +171,7 @@ async def get_audit_registry() -> List[dict]:
             "supplier_id": r.supplier_id,
             "supplier_name": r.supplier_name,
             "result": r.result or "Mismatch",
-            "timestamp": r.timestamp or "",
+            "timestamp": _display_timestamp(r.timestamp),
             "cert_type": "Relational evidence",
             "document_count": counts.get(r.audit_id, 0),
             "suggested_comment": r.suggested_comment or "",
@@ -163,7 +207,7 @@ def _to_document_evidence(r: NeonDocumentEvidence) -> DocumentEvidence:
     return DocumentEvidence(
         audit_id=r.audit_id,
         supplier_id=r.supplier_id,
-        timestamp=r.timestamp or "",
+        timestamp=_display_timestamp(r.timestamp),
         supplier_name=r.supplier_name,
         filename=r.filename,
         ariba_question_label=r.ariba_question_label,
@@ -282,7 +326,13 @@ async def log_audit_run(
     doc_evidences: List[DocumentEvidence],
     audit_log: Optional[AuditLogEntry] = None,
 ) -> Optional[str]:
-    """Persist an audit run: ensure supplier, insert evidence rows + audit log."""
+    """Persist an audit run: ensure supplier, insert evidence rows + audit log.
+
+    The audit_log row is always created/upserted BEFORE any evidence rows so the
+    ``document_evidence.audit_id -> audit_logs.audit_id`` FK holds. When no
+    audit_log is provided but evidence exists (Phase 1 extract flow), a minimal
+    placeholder audit log is created; the Phase 2 comparison then updates it.
+    """
     try:
         supplier_id = await get_or_create_supplier(supplier_name)
 
@@ -306,13 +356,66 @@ async def log_audit_run(
 
         factory = get_session_factory()
         async with factory() as session:
+            log_repo = AuditLogRepository(session)
+            existing_log = await log_repo.get_by_audit_id(audit_id)
+
+            if audit_log:
+                if existing_log:
+                    existing_log.timestamp = _to_db_timestamp(audit_log.timestamp)
+                    existing_log.supplier_name = audit_log.supplier_name
+                    existing_log.workspace_title = audit_log.workspace_title or "Ariba Workspace"
+                    existing_log.cert_type = audit_log.cert_type or "Relational evidence"
+                    existing_log.complete_qa_data_dump = audit_log.complete_qa_data_dump or "[]"
+                    existing_log.compiled_extracted_data = audit_log.compiled_extracted_data or ""
+                    existing_log.result = audit_log.result or "Mismatch"
+                    existing_log.expiration_date = audit_log.expiration_date or "N/A"
+                    existing_log.suggested_comment = audit_log.suggested_comment or ""
+                    existing_log.screenshot_url = audit_log.screenshot_url
+                    existing_log.comparison_input_tokens = audit_log.comparison_input_tokens or 0
+                    existing_log.comparison_output_tokens = audit_log.comparison_output_tokens or 0
+                    existing_log.comparison_cost_usd = float(audit_log.comparison_cost_usd or 0.0)
+                    existing_log.total_run_cost_usd = float(audit_log.total_run_cost_usd or 0.0)
+                    existing_log.comparison_table = audit_log.comparison_table
+                    await session.commit()
+                else:
+                    await log_repo.create(AuditLog(
+                        audit_id=audit_log.audit_id,
+                        supplier_id=audit_log.supplier_id,
+                        timestamp=_to_db_timestamp(audit_log.timestamp),
+                        supplier_name=audit_log.supplier_name,
+                        workspace_title=audit_log.workspace_title or "Ariba Workspace",
+                        cert_type=audit_log.cert_type or "Relational evidence",
+                        complete_qa_data_dump=audit_log.complete_qa_data_dump or "[]",
+                        compiled_extracted_data=audit_log.compiled_extracted_data or "",
+                        result=audit_log.result or "Mismatch",
+                        expiration_date=audit_log.expiration_date or "N/A",
+                        suggested_comment=audit_log.suggested_comment or "",
+                        screenshot_url=audit_log.screenshot_url,
+                        comparison_input_tokens=audit_log.comparison_input_tokens or 0,
+                        comparison_output_tokens=audit_log.comparison_output_tokens or 0,
+                        comparison_cost_usd=float(audit_log.comparison_cost_usd or 0.0),
+                        total_run_cost_usd=float(audit_log.total_run_cost_usd or 0.0),
+                        comparison_table=audit_log.comparison_table,
+                    ))
+            elif doc_evidences and existing_log is None:
+                # Phase 1 (extract-only) flow: placeholder so the FK holds until
+                # /api/audit/comparison fills in the real verdict.
+                await log_repo.create(AuditLog(
+                    audit_id=audit_id,
+                    supplier_id=supplier_id,
+                    timestamp=_to_db_timestamp(doc_evidences[0].timestamp),
+                    supplier_name=supplier_name,
+                    compiled_extracted_data="[]",
+                    suggested_comment="Pending comparison",
+                ))
+
             ev_repo = DocumentEvidenceRepository(session)
             for doc in doc_evidences:
                 import json
                 await ev_repo.create(NeonDocumentEvidence(
                     audit_id=doc.audit_id,
                     supplier_id=doc.supplier_id,
-                    timestamp=doc.timestamp,
+                    timestamp=_to_db_timestamp(doc.timestamp),
                     supplier_name=doc.supplier_name,
                     filename=doc.filename,
                     ariba_question_label=doc.ariba_question_label,
@@ -322,30 +425,9 @@ async def log_audit_run(
                     file_content_type=doc.file_content_type,
                     input_tokens=doc.input_tokens or 0,
                     output_tokens=doc.output_tokens or 0,
-                    cost_usd=int(doc.cost_usd or 0),
+                    cost_usd=float(doc.cost_usd or 0.0),
                     file_hash=doc.file_hash,
                     file_url=doc.file_url,
-                ))
-
-            if audit_log:
-                log_repo = AuditLogRepository(session)
-                await log_repo.create(AuditLog(
-                    audit_id=audit_log.audit_id,
-                    supplier_id=audit_log.supplier_id,
-                    timestamp=audit_log.timestamp,
-                    supplier_name=audit_log.supplier_name,
-                    workspace_title=audit_log.workspace_title or "Ariba Workspace",
-                    cert_type=audit_log.cert_type or "Relational evidence",
-                    complete_qa_data_dump=audit_log.complete_qa_data_dump or "[]",
-                    compiled_extracted_data=audit_log.compiled_extracted_data or "",
-                    result=audit_log.result or "Mismatch",
-                    suggested_comment=audit_log.suggested_comment or "",
-                    screenshot_url=audit_log.screenshot_url,
-                    comparison_input_tokens=audit_log.comparison_input_tokens or 0,
-                    comparison_output_tokens=audit_log.comparison_output_tokens or 0,
-                    comparison_cost_usd=int(audit_log.comparison_cost_usd or 0),
-                    total_run_cost_usd=int(audit_log.total_run_cost_usd or 0),
-                    comparison_table=audit_log.comparison_table,
                 ))
         return audit_id
     except Exception as e:

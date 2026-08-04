@@ -35,6 +35,7 @@ class ChatMessageRepository:
         self.session = session
 
     async def add(self, session_id: str, role: str, content: str) -> ChatMessage:
+        await ChatSessionRepository(self.session).get_or_create(session_id)
         record = ChatMessage(session_id=session_id, role=role, content=content)
         self.session.add(record)
         await self.session.commit()
@@ -68,7 +69,7 @@ class ChatLogRepository:
             query_text=query_text,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            cost_usd=int(cost_usd),
+            cost_usd=round(float(cost_usd), 6),
             cache_hit=1 if cache_hit else 0,
             latency_ms=latency_ms,
         )

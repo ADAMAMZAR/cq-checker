@@ -1,93 +1,104 @@
 import { test, expect } from "@playwright/test";
 
-const MOCK_PDF = Buffer.from("%PDF-1.4 fake cert");
+const SUPPLIERS = [
+  {
+    audit_id: "AUDIT-1",
+    supplier_id: 1,
+    supplier_name: "ACME Construction",
+    result: "Match",
+    timestamp: "2026-07-21 10:00:00",
+    cert_type: "QSHE",
+    document_count: 1,
+    suggested_comment: "Audit passed. All documents verified.",
+  },
+  {
+    audit_id: "AUDIT-2",
+    supplier_id: 2,
+    supplier_name: "Old Supplier",
+    result: "Mismatch",
+    timestamp: "2026-07-20 09:00:00",
+    cert_type: "QSHE",
+    document_count: 1,
+    suggested_comment: "Audit failed. One or more fields require revisions.",
+  },
+];
 
-async function mockVerifyApi(page: import("@playwright/test").Page) {
-  await page.route(/\/api\/certificates\/verify$/, async (route) => {
+async function mockRegistryApi(page: import("@playwright/test").Page) {
+  await page.route(/\/api\/audit-registry$/, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(SUPPLIERS),
+    });
+  });
+  await page.route(/\/api\/logs\/.*\/assets/, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        status: "PASS",
-        extracted_data: {
-          certificateOwnerName: "ACME Construction",
-          issuerName: "CIDB Malaysia",
-          certificateType: "CIDB Grade G7",
-          certificateNumber: "CIDB-778899",
-          expirationDate: "31/12/2029",
-          effectiveDate: "01/01/2026",
-        },
-        reasoning_trace: "All fields matched the QA form values. Certificate is valid until 31/12/2029.",
-        confidence: 0.95,
-        judge_source: "qwen",
-        record_id: "rec-1",
+        screenshots: [],
+        documents: [
+          { name: "ACME_CIDB.pdf", url: "/api/files/local/ACME/ACME_CIDB.pdf" },
+        ],
       }),
     });
   });
-  await page.route(/\/api\/certificates$/, async (route) => {
+  await page.route(/\/api\/evidence$/, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify([
-        {
-          id: "rec-1",
-          file_url: "/api/files/local/ACME/ACME.pdf",
-          extracted_data: { certificateOwnerName: "ACME Construction" },
-          status: "PASS",
-          judge_reasoning: "All fields matched.",
-          confidence: 0.95,
-          created_at: "2026-07-21T10:00:00Z",
-        },
-        {
-          id: "rec-2",
-          file_url: "/api/files/local/OLD/OLD.pdf",
-          extracted_data: { certificateOwnerName: "Old Supplier" },
-          status: "FAIL",
-          judge_reasoning: "Expired certificate.",
-          confidence: 0.8,
-          created_at: "2026-07-20T09:00:00Z",
-        },
-      ]),
+      body: JSON.stringify([]),
     });
   });
 }
 
-test.describe("Certificate Verification", () => {
+async function openCqCheck(page: import("@playwright/test").Page) {
+  await page.goto("/");
+  // Subnav is hidden on the home page; reach it via the Certificate Checker card first.
+  await page.locator("a").filter({ hasText: "Certificate Checker" }).click();
+  await page.getByRole("button", { name: "CQ Check" }).click();
+}
+
+test.describe("CQ Check (demo flow)", () => {
   test.beforeEach(async ({ page }) => {
-    await mockVerifyApi(page);
-    await page.goto("/");
-    await page.locator("a").filter({ hasText: "Certificate Verify" }).click();
+    await mockRegistryApi(page);
+    await openCqCheck(page);
   });
 
-  test("runs verification and shows the verdict + reasoning", async ({ page }) => {
-    await expect(page.getByText("Verify a Certificate")).toBeVisible();
+  test("searches and selects a supplier from the database list", async ({ page }) => {
+    const input = page.getByLabel("Supplier Name");
+    await expect(input).toBeVisible();
 
-    await page.getByLabel("Supplier Name *").fill("ACME Construction");
-    await page.setInputFiles("#verify-file-input", {
-      name: "ACME_CIDB.pdf",
-      mimeType: "application/pdf",
-      buffer: MOCK_PDF,
-    });
+    // Full list appears on focus
+    await input.click();
+    await expect(page.getByRole("option", { name: /ACME Construction/ })).toBeVisible();
+    await expect(page.getByRole("option", { name: /Old Supplier/ })).toBeVisible();
 
-    await page.getByRole("button", { name: "Run Verification" }).click();
+    // Search filters the list
+    await input.fill("ACME");
+    await expect(page.getByRole("option", { name: /ACME Construction/ })).toBeVisible();
+    await expect(page.getByRole("option", { name: /Old Supplier/ })).not.toBeVisible();
 
-    // Verdict badge + extracted fields
-    await expect(page.getByText("PASS").first()).toBeVisible();
-    await expect(page.getByText("ACME Construction").first()).toBeVisible();
-    await expect(page.getByText("CIDB Malaysia")).toBeVisible();
-
-    // Judge reasoning rendered
-    await expect(page.getByText("All fields matched the QA form values.")).toBeVisible();
+    // Selecting fills the input and closes the dropdown
+    await page.getByRole("option", { name: /ACME Construction/ }).click();
+    await expect(input).toHaveValue("ACME Construction");
+    await expect(page.getByRole("option")).toHaveCount(0);
   });
 
-  test("shows verification history from the backend", async ({ page }) => {
-    // History loaded on mount
-    await expect(page.getByText("ACME Construction").first()).toBeVisible();
-    await expect(page.getByText("Old Supplier")).toBeVisible();
+  test("runs the demo verification and lands on the registry log for that supplier", async ({ page }) => {
+    const input = page.getByLabel("Supplier Name");
+    await input.click();
+    await page.getByRole("option", { name: /ACME Construction/ }).click();
 
-    // Expand a record
-    const oldRecord = page.locator("button").filter({ hasText: "Old Supplier" });
-    await oldRecord.click();
-    await expect(page.getByText("Expired certificate.")).toBeVisible();
+    await page.getByRole("button", { name: "Run CQ Check" }).click();
+
+    // Staged loading animation
+    await expect(page.getByText("Extracting user input")).toBeVisible();
+    await expect(page.getByText("Extracting document evidence")).toBeVisible();
+    await expect(page.getByText("Auditing the supplier")).toBeVisible();
+
+    // Lands on the Audit Registry detail for the selected supplier
+    await expect(page.locator("h2").filter({ hasText: "ACME Construction" })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText("Overall Auditor Verdict")).toBeVisible();
   });
 });

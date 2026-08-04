@@ -185,3 +185,19 @@ export interface CertificateVerificationResponse {
   judge_source?: string | null;
   created_at?: string | null;
 }
+
+// ── Database Browser (read-only preview) ─────────────────────────────────────
+
+export interface DbTableMeta {
+  name: string;
+  row_count: number | null;
+}
+
+export interface DbTableData {
+  table: string;
+  columns: string[];
+  rows: string[][];
+  total: number;
+  limit: number;
+  offset: number;
+}

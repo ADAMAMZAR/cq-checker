@@ -1,7 +1,5 @@
 @import "tailwindcss";
 
-@plugin "@tailwindcss/typography";
-
 /* ── Dark theme (default) ── */
 [data-theme="dark"] {
   --bg-page: #08090d;

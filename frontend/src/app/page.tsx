@@ -17,12 +17,14 @@ const SupplierAudit = dynamic(() => import("@/components/SupplierAudit"), { ssr:
 const Chatbot = dynamic(() => import("@/components/Chatbot"), { ssr: false });
 const DocumentIngest = dynamic(() => import("@/components/DocumentIngest"), { ssr: false });
 const CertificateVerification = dynamic(() => import("@/components/CertificateVerification"), { ssr: false });
+const DatabasePreview = dynamic(() => import("@/components/DatabasePreview"), { ssr: false });
 
 export default function Dashboard() {
   const [activeMainTab, setActiveMainTab] = useState<MainTab>("home");
   const [evidenceLogs, setEvidenceLogs] = useState<DocumentEvidence[]>([]);
   const [isEvidenceLoading, setIsEvidenceLoading] = useState(false);
   const [globalError, setGlobalError] = useState<string | null>(null);
+  const [registrySupplier, setRegistrySupplier] = useState<string | null>(null);
   const evidenceFetched = useRef(false);
 
   const loadEvidence = useCallback(async () => {
@@ -51,6 +53,11 @@ export default function Dashboard() {
 
   const handleGoHome = () => {
     setActiveMainTab("home");
+  };
+
+  const handleNavigateToRegistry = (supplierName: string) => {
+    setRegistrySupplier(supplierName);
+    setActiveMainTab("registry");
   };
 
   return (
@@ -98,7 +105,7 @@ export default function Dashboard() {
 
       {activeMainTab === "verify" && (
         <div className="flex-1 flex flex-col">
-          <CertificateVerification />
+          <CertificateVerification onNavigateToRegistry={handleNavigateToRegistry} />
         </div>
       )}
 
@@ -108,6 +115,7 @@ export default function Dashboard() {
             evidenceLogs={evidenceLogs}
             isEvidenceLoading={isEvidenceLoading}
             onRefreshEvidence={loadEvidence}
+            initialSupplier={registrySupplier}
           />
         </div>
       )}
@@ -126,6 +134,12 @@ export default function Dashboard() {
       {activeMainTab === "costs" && (
         <div className="flex-1 flex flex-col">
           <CostAnalytics />
+        </div>
+      )}
+
+      {activeMainTab === "database" && (
+        <div className="flex-1 flex flex-col">
+          <DatabasePreview />
         </div>
       )}
 

@@ -145,7 +145,7 @@ async def migrate_document_evidence(session: AsyncSession, dry_run: bool) -> int
                 file_content_type=str(r.get("file_content_type", "")),
                 input_tokens=int(r.get("input_tokens") or 0),
                 output_tokens=int(r.get("output_tokens") or 0),
-                cost_usd=int(r.get("cost_usd") or 0),
+                cost_usd=float(r.get("cost_usd") or 0.0),
                 file_hash=r.get("file_hash") or None,
                 file_url=r.get("file_url") or None,
             ))
@@ -182,8 +182,8 @@ async def migrate_audit_results(session: AsyncSession, dry_run: bool) -> int:
                 screenshot_url=r.get("screenshot_url") or None,
                 comparison_input_tokens=int(r.get("comparison_input_tokens") or 0),
                 comparison_output_tokens=int(r.get("comparison_output_tokens") or 0),
-                comparison_cost_usd=int(r.get("comparison_cost_usd") or 0),
-                total_run_cost_usd=int(r.get("total_run_cost_usd") or 0),
+                comparison_cost_usd=float(r.get("comparison_cost_usd") or 0.0),
+                total_run_cost_usd=float(r.get("total_run_cost_usd") or 0.0),
                 comparison_table=comparison_table,
             ))
         existing_ids.add(audit_id)
@@ -224,8 +224,9 @@ async def run(dry_run: bool) -> None:
 
     async with factory() as session:
         n_suppliers = await migrate_suppliers(session, dry_run)
-        n_evidence = await migrate_document_evidence(session, dry_run)
+        # Audit logs first so document_evidence.audit_id FK references exist.
         n_audits = await migrate_audit_results(session, dry_run)
+        n_evidence = await migrate_document_evidence(session, dry_run)
         if not dry_run:
             await session.commit()
 

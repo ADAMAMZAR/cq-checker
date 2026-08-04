@@ -302,6 +302,7 @@ def test_verify_certificate_endpoint(mock_extract, mock_judge, mock_upload):
 
     with patch("app.repositories.certificates.CertificateRepository") as mock_repo:
         mock_repo.return_value.create = AsyncMock(return_value=mock_record)
+        mock_repo.return_value.get_by_hash = AsyncMock(return_value=None)
         with patch("app.db.session.get_session_factory") as mock_factory:
             mock_session = MagicMock()
             mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
@@ -321,8 +322,46 @@ def test_verify_certificate_endpoint_extraction_failure(mock_extract):
     mock_extract.return_value = ({"certificateOwnerName": "Extraction Failed"}, 0, 0, 0.0)
     files = {"file": ("cert.pdf", b"%PDF-1.4 fake", "application/pdf")}
     data = {"supplier_name": "ACME Corp"}
-    response = client.post("/api/certificates/verify", files=files, data=data)
+
+    with patch("app.services.storage.LocalDiskStorage.upload") as mock_upload, \
+         patch("app.repositories.certificates.CertificateRepository") as mock_repo, \
+         patch("app.db.session.get_session_factory") as mock_factory:
+        mock_upload.return_value = "/api/files/local/ACME/cert.pdf"
+        mock_repo.return_value.get_by_hash = AsyncMock(return_value=None)
+        mock_session = MagicMock()
+        mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_factory.return_value.__aexit__ = AsyncMock(return_value=None)
+        response = client.post("/api/certificates/verify", files=files, data=data)
     assert response.status_code == 502
+
+
+def test_verify_certificate_endpoint_dedup_returns_cached():
+    """Same file bytes -> return prior verdict with zero LLM calls (judge_source='cache')."""
+    from app.services import extractor, judge
+
+    mock_record = MagicMock()
+    mock_record.id = "99999999-8888-7777-6666-555555555555"
+    mock_record.status = "PASS"
+    mock_record.judge_reasoning = "Cached reasoning"
+    mock_record.extracted_data = {"certificateOwnerName": "ACME Corp", "confidence": 0.9}
+
+    with patch("app.services.storage.LocalDiskStorage.upload") as mock_upload, \
+         patch("app.repositories.certificates.CertificateRepository") as mock_repo, \
+         patch("app.db.session.get_session_factory") as mock_factory:
+        mock_upload.return_value = "/api/files/local/ACME/cert.pdf"
+        mock_repo.return_value.get_by_hash = AsyncMock(return_value=mock_record)
+        mock_session = MagicMock()
+        mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_factory.return_value.__aexit__ = AsyncMock(return_value=None)
+        files = {"file": ("cert.pdf", b"%PDF-1.4 fake", "application/pdf")}
+        data = {"supplier_name": "ACME Corp"}
+        response = client.post("/api/certificates/verify", files=files, data=data)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "PASS"
+    assert body["judge_source"] == "cache"
+    assert body["record_id"] == "99999999-8888-7777-6666-555555555555"
 
 
 @patch("app.repositories.certificates.CertificateRepository")

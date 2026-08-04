@@ -174,18 +174,20 @@ async def test_log_audit_run_writes_evidence_and_log():
     with patch("app.services.audit_data.get_session_factory", return_value=mock_factory):
         with patch("app.services.audit_data.get_or_create_supplier", new_callable=AsyncMock) as m_get:
             m_get.return_value = 7
-            audit_id = await audit_data.log_audit_run(
-                "ACME Corp",
-                [DocumentEvidence(
-                    audit_id="TEMP_x", supplier_id=0, timestamp="now",
-                    supplier_name="ACME Corp", filename="cert.pdf",
-                    ariba_question_label="1.1", ariba_qa_answers="[]",
-                    gemini_extracted_supplier_name="ACME Corp",
-                    gemini_extracted_metadata="{}",
-                    file_content_type="application/pdf",
-                )],
-                make_log_entry(),
-            )
+            with patch("app.services.audit_data.AuditLogRepository.get_by_audit_id", new_callable=AsyncMock) as m_by_id:
+                m_by_id.return_value = None
+                audit_id = await audit_data.log_audit_run(
+                    "ACME Corp",
+                    [DocumentEvidence(
+                        audit_id="TEMP_x", supplier_id=0, timestamp="now",
+                        supplier_name="ACME Corp", filename="cert.pdf",
+                        ariba_question_label="1.1", ariba_qa_answers="[]",
+                        gemini_extracted_supplier_name="ACME Corp",
+                        gemini_extracted_metadata="{}",
+                        file_content_type="application/pdf",
+                    )],
+                    make_log_entry(),
+                )
     assert audit_id == "AUDIT_0001"
     # Evidence + audit log repos used
     assert mock_session.add.call_count >= 2

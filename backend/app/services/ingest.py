@@ -65,7 +65,7 @@ async def _ingest_blocking(
             )
 
         # Upload
-        file_url = storage.get_storage().upload(file_bytes, "manuals", filename, content_type)
+        file_url = await storage.store_and_record(file_bytes, "manuals", filename, content_type)
         if not file_url:
             return IngestResult(None, title, "failed", message="Upload failed.")
 

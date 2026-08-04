@@ -149,7 +149,9 @@ async def _prepare(query: str, session_id: Optional[str]):
     query_embedding = embeddings.embed_text(query)
     async with factory() as session:
         cache_repo = CacheRepository(session)
-        cached = await cache_repo.find_cached(query_embedding, threshold=0.93)
+        cached = await cache_repo.find_cached(
+            query_embedding, threshold=0.93, ttl_days=settings.query_cache_ttl_days,
+        )
         if cached:
             return cached.cached_response, [], None, query_embedding
         results = await hybrid_search(session, query_embedding, query, k=3)

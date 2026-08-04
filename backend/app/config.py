@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     # ── Local Storage (dev-only, replaced by GCS in Phase 8) ─
     upload_dir: str = Field(default="uploads", env="UPLOAD_DIR")
 
+    # ── Query cache TTL (days) ────────────────────────────────────────
+    query_cache_ttl_days: int = Field(default=30, env="QUERY_CACHE_TTL_DAYS")
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

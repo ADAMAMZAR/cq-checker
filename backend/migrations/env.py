@@ -13,9 +13,14 @@ from app.models.tables import (  # noqa: F401
     ChildChunk,
     CertificateVerification,
     QueryCache,
+    User,
+    ChatSession,
+    ChatMessage,
+    ChatLog,
     Supplier,
     AuditLog,
     DocumentEvidence,
+    ObjectStorage,
 )
 from app.db.session import Base, normalize_database_url
 
