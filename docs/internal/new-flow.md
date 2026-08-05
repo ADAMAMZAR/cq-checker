@@ -1,7 +1,8 @@
-# New Ariba Flow — MiniMax/OCR → DeepSeek → Qwen (inline correction) → Python rules
+# New Ariba Flow — Docling → DeepSeek → Qwen (inline correction) → Python rules
 
 > **Status:** Plan, approved 2026-08-05. No code edits yet.
 > **Replaces:** the legacy Gemini-Worker path currently used by the Ariba Chrome extension and `backend/app/services/legacy_gemini_audit.py`.
+> **Revision:** 2026-08-05 — swapped MiniMax-M3 + PyMuPDF text fallback for **Docling** (IBM OSS) as the single OCR / markdown stage. Removes the DeepSeek-vision fallback path.
 
 ---
 
@@ -9,6 +10,7 @@
 
 | # | Decision | Implication |
 |---|---|---|
+| 0 | **Docling** is the single OCR / markdown stage | Replaces MiniMax-M3 + PyMuPDF text + DeepSeek-vision fallback. Handles native-text PDFs, scanned PDFs (built-in RapidOCR), images, DOCX, XLSX in one call. Output is structured markdown that both DeepSeek (extraction) and Qwen (cross-check) consume. |
 | 1 | Qwen **corrects inline** | New Qwen response carries `corrected_fields: {…}`; backend merges them over the DeepSeek JSON. Corrected values become new persistent columns so the UI can show "DeepSeek said X, Qwen corrected to Y". |
 | 2 | Qwen **does not run the audit** | Qwen's job is only field correctness vs the source markdown. `auditor.run_full_audit` runs on the post-Qwen JSON and stays the source of truth for `result` and `comparison_table`. |
 | 3 | Single-pass + atomic transaction | Extension calls `POST /api/audit` (already exists, currently unused). `log_audit_run` is wrapped in one SQLAlchemy transaction; if anything throws, **zero** rows are committed. The retry button is removed; only **Edit** remains for human overrides. |
@@ -25,10 +27,8 @@
                                   ▼
 ┌─ Backend /api/audit (atomic) ─────────────────────────────────────────────────┐
 │ for each file:                                                                  │
-│  1.  parser.parse_to_text_or_markdown(file_bytes, mime)                        │
-│        ├─ PDF native-text → parser._pyMuPDF_pages → List[{page,text}]          │
-│        ├─ PDF scan      → pdf.pdf_to_images → "see note below"                 │
-│        └─ Image         → single-page text placeholder, image kept aside      │
+│  1.  docling.parse(file_bytes, mime) → structured Markdown + page tracking     │
+│        (PDF / image / DOCX / XLSX → markdown, tables preserved, no AI cost)     │
 │  2.  deepseek.extract_from_text(markdown, qa_label)  (text mode, cheap)         │
 │  3.  qwen.correct_against_source(deepseek_json, source_markdown)               │
 │        → returns {status, reasoning_trace, confidence, corrected_fields}       │
@@ -42,11 +42,118 @@
 └───────────────────────────────────────────────────────────────────────────────┘
 ```
 
-> **Note on PDF scans** — if `parser._pyMuPDF_pages` returns empty/short text, we render pages to JPEG with `pdf.pdf_to_images` (already at `pdf.py:19-53`, 200 DPI, q=85, 10-page cap) and pass those images into **DeepSeek in vision mode** (the current `extractor._build_messages` path at `extractor.py:97-130` is reused). The hybrid is automatic: native text first (free, accurate), vision only when forced. This avoids wasting vision tokens on every document.
+> **Why Docling** — Docling (IBM, OSS) is a single Python library that handles native-text PDFs, scanned PDFs (built-in OCR via RapidOCR/EasyOCR), images, DOCX, XLSX, and HTML in one call, producing structured Markdown with tables, headings, and `<!-- PAGE n -->` markers preserved. This replaces the previous MiniMax-M3 + PyMuPDF hybrid (and removes the DeepSeek-vision fallback that was needed when PyMuPDF returned empty text on scans). One library, one deterministic cost, one output format — the markdown is what DeepSeek and Qwen both consume.
 
 ---
 
 ## 2. File-by-file change set (no edits yet — this is the blueprint)
+
+### 2.0 NEW: `backend/app/services/docling_parser.py` (the OCR / markdown stage)
+
+Replaces **both** `parser.py` and the vision-fallback branch of `extractor.py` for the Ariba path. Docling is a single OSS library (`pip install docling`) that internally does:
+
+- **Layout analysis** (DocLayNet-based) → reads headings, lists, columns, reading order.
+- **Table extraction** (TableFormer) → emits markdown tables.
+- **OCR** (RapidOCR by default; can swap to EasyOCR) → handles scanned PDFs and images.
+- **Format dispatch** → PDF, DOCX, XLSX, PPTX, HTML, image — one API.
+
+```python
+# backend/app/services/docling_parser.py
+from docling.document_converter import DocumentConverter, PdfFormatOption
+from docling.datamodel.base_models import InputFormat
+from docling.datamodel.pipeline_options import PdfPipelineOptions
+
+_PIPELINE_OPTS = PdfPipelineOptions(
+    do_ocr=True,
+    do_table_structure=True,
+    ocr_options=None,           # use RapidOCR default
+    images_scale=2.0,           # 2x render for better OCR
+    generate_page_images=False,
+    generate_picture_images=False,
+)
+
+_converter: DocumentConverter | None = None
+
+
+def _get_converter() -> DocumentConverter:
+    global _converter
+    if _converter is None:
+        _converter = DocumentConverter(
+            format_options={
+                InputFormat.PDF: PdfFormatOption(pipeline_options=_PIPELINE_OPTS),
+                # Other formats use defaults; DocumentConverter picks the right backend.
+            }
+        )
+    return _converter
+
+
+def parse_to_markdown(
+    file_bytes: bytes,
+    mime_type: str,
+    filename: str = "document",
+    max_pages: int = 20,
+) -> tuple[list[dict], float, dict]:
+    """Parse any supported file to per-page markdown.
+
+    Returns:
+        pages: [{page_number: int, markdown: str}, ...]
+        cost_usd: 0.0  (Docling is local)
+        doc_meta: {format, page_count, has_ocr, has_tables, ...}
+    """
+    import io
+    converter = _get_converter()
+    result = converter.convert(io.BytesIO(file_bytes), raises_on_error=False)
+    doc = result.document
+
+    pages: list[dict] = []
+    for i, page in enumerate(doc.pages, start=1):
+        md = page.export_to_markdown() if hasattr(page, "export_to_markdown") else ""
+        if not md and hasattr(doc, "export_to_markdown"):
+            # Fallback: export whole doc, then split on page markers
+            md = doc.export_to_markdown()
+        pages.append({"page_number": i, "markdown": md or ""})
+        if len(pages) >= max_pages:
+            break
+
+    # Defensive: if Docling returned a single doc-level markdown without per-page
+    # breakdown, wrap it as page 1 so the downstream consumers always see pages[].
+    if not pages and hasattr(doc, "export_to_markdown"):
+        full = doc.export_to_markdown()
+        if full:
+            pages.append({"page_number": 1, "markdown": full})
+
+    doc_meta = {
+        "format": result.format.value if result.format else "unknown",
+        "page_count": len(pages),
+        "has_ocr": any(getattr(p, "has_ocr", False) for p in (doc.pages or [])),
+        "has_tables": bool(getattr(doc, "tables", None)),
+    }
+    return pages, 0.0, doc_meta
+```
+
+#### Why Docling over MiniMax / PyMuPDF
+
+| Concern | MiniMax M3 + PyMuPDF (old) | Docling (new) |
+|---|---|---|
+| Cost per parse | ~$0.0003 (MiniMax API) | $0 (local CPU/GPU) |
+| Latency | 1–3 s (API roundtrip) | 0.5–2 s on CPU, <0.5 s on GPU |
+| Scanned PDFs | Needs a separate vision path (DeepSeek-vision fallback) | Handled natively by RapidOCR |
+| Tables | MiniMax preserves them; PyMuPDF plain text loses them | TableFormer emits markdown tables |
+| DOCX / XLSX | Not supported in the old flow | Supported out of the box |
+| Vendor lock-in | MiniMax API key required | None — fully OSS (MIT) |
+| Failure mode | API down → pipeline down | Local process; if Docling fails, we still have the option to fall back to PyMuPDF text for native-text PDFs |
+
+#### Performance note
+
+Docling loads its layout + OCR models into memory on first call (~2 GB RAM for default pipeline). For serverless / short-lived containers, this means **the first request after a cold start is slow** (10–30 s for model load). Mitigations:
+
+- **Warm-up on startup** in `backend/app/main.py` lifespan handler — call `_get_converter()` once at boot so the first user request doesn't pay the cold-start tax.
+- **Persistent worker process** — Cloud Run / Gunicorn `--workers 1 --timeout 120` for the first minute, then scale out once the model is hot.
+- **Optional GPU** — if Cloud Run GPU is enabled, Docling is ~5× faster on the OCR stage.
+
+#### Cost column change
+
+`document_evidence` no longer needs a `parse_cost_usd` column (Docling is free). If the team wants to track in-process compute time for billing visibility, add `parse_duration_ms` instead — same data, clearer semantics. (Listed in §2.4 column table below.)
 
 ### 2.1 NEW: `backend/app/services/ariba_pipeline.py` (the orchestrator)
 
@@ -66,12 +173,11 @@ async def process_certificate(
 
 Internally calls, in order:
 
-1. `parser.parse_to_text_or_markdown(file_bytes, mime_type)` — **new** helper wrapping both `_pyMuPDF_pages` and the MiniMax M3 PDF→markdown path already in `parser.py:47-105`. Returns `(pages: List[{page_number, text}], is_markdown: bool, parse_cost_usd)`.
-2. If `is_markdown=False` AND pages is empty → fall back to `pdf.pdf_to_data_urls` and call `extractor.extract_certificate_data` (vision mode, unchanged).
-3. `deepseek.extract_from_text(pages, question_label)` — **new** function: reuses `EXTRACTION_SCHEMA` and prompt from `extractor.py:25-62, 110-123`, but builds messages from text blocks `{"type": "text", "text": f"<!-- PAGE {n} -->\n{text}"}` instead of image blocks. Returns `(extracted_data, in_t, out_t, cost)`.
-4. `qwen.correct_against_source(extracted_data, pages_markdown, supplier_name, ariba_qa_answers, qa_data_title)` — **new** function. Prompt = EXTRACTED_DATA + SOURCE_PAGES (markdown, truncated to ~12k tokens) + DETERMINISTIC_RULE_RESULT. Asks Qwen for a JSON response with the new schema (see §2.2). Returns `(corrected_extracted_data, qwen_status, qwen_reasoning, qwen_confidence, qwen_corrections: Dict, qwen_in_t, qwen_out_t, qwen_cost)`.
-5. `rules.verify_document(corrected_extracted_data, supplier_name, …)` — **reuse** the function that already exists at `rules.py:56-160`. The result is recorded but **not used for the verdict** — the verdict still comes from `auditor.run_full_audit`. We only use it as a diagnostic payload that travels to the DB (so the frontend can show "rules saw X, Qwen saw Y, final verdict is Z").
-6. Returns `ProcessedFile` (dataclass in §2.3) carrying everything.
+1. `docling.parse_to_markdown(file_bytes, mime_type)` — **new** wrapper around the Docling `DocumentConverter`. Handles native-text PDFs, scanned PDFs (built-in OCR), images, DOCX, XLSX in one call. Returns `(pages: List[{page_number, markdown}], docling_cost_usd: 0.0, doc_meta: dict)`. Cost is zero in the steady state (local CPU/GPU). The first request per process pays a one-time model-load cost (not billed).
+2. `deepseek.extract_from_text(pages, question_label)` — **new** function: reuses `EXTRACTION_SCHEMA` and prompt from `extractor.py:25-62, 110-123`, but builds messages from text blocks `{"type": "text", "text": f"<!-- PAGE {n} -->\n{markdown}"}` instead of image blocks. Returns `(extracted_data, in_t, out_t, cost)`. Vision mode (`extractor.extract_certificate_data`) is no longer reached in the Ariba path.
+3. `qwen.correct_against_source(extracted_data, pages_markdown, supplier_name, ariba_qa_answers, qa_data_title)` — **new** function. Prompt = EXTRACTED_DATA + SOURCE_PAGES (markdown, truncated to ~12k tokens) + DETERMINISTIC_RULE_RESULT. Asks Qwen for a JSON response with the new schema (see §2.3). Returns `(corrected_extracted_data, qwen_status, qwen_reasoning, qwen_confidence, qwen_corrections: Dict, qwen_in_t, qwen_out_t, qwen_cost)`.
+4. `rules.verify_document(corrected_extracted_data, supplier_name, …)` — **reuse** the function that already exists at `rules.py:56-160`. The result is recorded but **not used for the verdict** — the verdict still comes from `auditor.run_full_audit`. We only use it as a diagnostic payload that travels to the DB (so the frontend can show "rules saw X, Qwen saw Y, final verdict is Z").
+5. Returns `ProcessedFile` (dataclass in §2.3) carrying everything.
 
 ### 2.2 NEW: change `app/services/judge.py` — split into two functions
 
@@ -117,15 +223,20 @@ class ProcessedFile(BaseModel):
     ariba_cert_type: str
     file_content_type: str
 
+    # Docling parse
+    parse_model: str = "docling"
+    parse_duration_ms: int
+    parse_format: str
+    parse_page_count: int
+    parse_has_ocr: bool
+    parse_has_tables: bool
+    source_markdown: str                 # concatenated "<!-- PAGE n -->\n…"
+
     # DeepSeek raw
     deepseek_extracted_data: dict
     deepseek_input_tokens: int
     deepseek_output_tokens: int
     deepseek_cost_usd: float
-
-    # Source pages
-    source_markdown: str                 # concatenated "<!-- PAGE n -->\n…"
-    is_vision_fallback: bool             # true if DeepSeek got images, not text
 
     # Qwen corrections
     qwen_status: str                     # PASS / FAIL / REQUIRES_HUMAN_REVIEW
@@ -148,12 +259,17 @@ Add to **`document_evidence`** (`models/tables.py:211-229`):
 
 | Column | Type | Purpose |
 |---|---|---|
+| `parse_model` | `String(50)` | `"docling"` — who produced the markdown |
+| `parse_duration_ms` | `Integer` | Wall-clock time for Docling on this file (Docling is free, so we track time instead of cost) |
+| `parse_format` | `String(50)` | `"pdf" / "image" / "docx" / "xlsx" / "html"` — what Docling saw |
+| `parse_page_count` | `Integer` | Number of pages returned by Docling |
+| `parse_has_ocr` | `Boolean` | True if OCR was needed (scanned PDF) |
+| `parse_has_tables` | `Boolean` | True if Docling detected ≥1 table |
+| `source_markdown` | `Text` | Concatenated per-page markdown used for Qwen cross-check |
 | `extraction_model` | `String(50)` | `"deepseek"` (or future) — which model extracted |
 | `extraction_input_tokens` | `Integer` (rename from `input_tokens`) | DeepSeek input tokens |
 | `extraction_output_tokens` | `Integer` (rename from `output_tokens`) | DeepSeek output tokens |
 | `extraction_cost_usd` | `Numeric(12,6)` (rename from `cost_usd`) | DeepSeek cost |
-| `source_markdown` | `Text` | Concatenated markdown used for Qwen cross-check |
-| `is_vision_fallback` | `Boolean` | True when DeepSeek got images, not text |
 | `qwen_corrections` | `JSONB` | Qwen's `corrected_fields` |
 | `qwen_status` | `String(50)` | Qwen's own PASS/FAIL/REQUIRES_HUMAN_REVIEW |
 | `qwen_reasoning` | `Text` | CoT trace from Qwen |
@@ -163,12 +279,15 @@ Add to **`document_evidence`** (`models/tables.py:211-229`):
 | `qwen_cost_usd` | `Numeric(12,6)` | |
 | `corrected_extracted_data` | `JSONB` | The post-Qwen JSON (what `auditor.run_full_audit` ran on) |
 
+> The `is_vision_fallback` column from the earlier draft is **removed** — Docling replaces both the native-text path and the DeepSeek-vision path, so there is no separate vision branch to flag.
+
 The existing `input_tokens / output_tokens / cost_usd` columns stay as **legacy** aliases to the new extraction_* columns so the frontends that read them via `DocumentEvidence` schema don't break — we keep the Pydantic schema backwards-compatible.
 
 Add to **`audit_logs`** (`models/tables.py:181-208`):
 
 | Column | Type | Purpose |
 |---|---|---|
+| `parse_total_duration_ms` | `Integer` | Sum of Docling time across files (in-process cost signal) |
 | `judge_total_input_tokens` | `Integer` | Sum of Qwen input tokens across files |
 | `judge_total_output_tokens` | `Integer` | Sum of Qwen output tokens across files |
 | `judge_total_cost_usd` | `Numeric(12,6)` | Sum of Qwen cost across files |
@@ -219,12 +338,17 @@ async def log_audit_run_atomic(
                     file_hash=pf.file_hash,
                     file_url=pf.file_url,
                     # NEW columns:
+                    parse_model=pf.parse_model,
+                    parse_duration_ms=pf.parse_duration_ms,
+                    parse_format=pf.parse_format,
+                    parse_page_count=pf.parse_page_count,
+                    parse_has_ocr=pf.parse_has_ocr,
+                    parse_has_tables=pf.parse_has_tables,
+                    source_markdown=pf.source_markdown,
                     extraction_model="deepseek",
                     extraction_input_tokens=pf.deepseek_input_tokens,
                     extraction_output_tokens=pf.deepseek_output_tokens,
                     extraction_cost_usd=pf.deepseek_cost_usd,
-                    source_markdown=pf.source_markdown,
-                    is_vision_fallback=pf.is_vision_fallback,
                     qwen_corrections=pf.qwen_corrections,
                     qwen_status=pf.qwen_status,
                     qwen_reasoning=pf.qwen_reasoning,
@@ -342,10 +466,12 @@ My recommendation: **Option X** for this release. Adding RAG indexing is a separ
 |---|---|---|
 | Qwen emits `corrected_fields` whose values fail the JSON schema (extra keys, wrong types) | Medium | `correct_against_source` validates every key against `EXTRACTION_SCHEMA`; drops unknown keys, casts types; logs warnings to `qwen_reasoning`. |
 | Qwen reorders dates or rewrites `expirationDate` into a non-DD/MM/YYYY form | Medium | Date fields are normalised through `_normalize_date` (`auditor.py:54-61`) before being merged. |
-| DeepSeek text-mode misses a field that vision-mode would have caught (e.g. tiny text in a scan rendered as a hybrid) | Low | The `is_vision_fallback` flag is set whenever DeepSeek runs in vision mode so the UI can show "this row used vision OCR (lower accuracy)" — same UX today. |
+| Docling fails on a specific file (model crash, unsupported sub-format) | Medium | `parse_to_markdown` raises; `ariba_pipeline.process_certificate` catches and falls back to `extractor.extract_certificate_data` (vision mode) for that one file. Marked in `parse_format` as `"docling_failed"`. UI shows a warning. |
+| Docling cold-start is slow on serverless (10–30 s model load) | High on first request | Warm-up in `main.py` lifespan handler + Cloud Run min-instances=1 in prod. Documented in §2.0. |
+| Docling exceeds 2 GB memory on a large cert scan | Low | Cap `max_pages=20` per file; if a file exceeds that, log a warning and pass only the first 20 pages to DeepSeek. |
 | `session.begin()` rolls back when only one evidence row's column write fails | Low | Per-row `try/except` is **not** used inside the transaction; we want all-or-nothing. Failures bubble up; the panel shows "Audit failed" with no rows written. |
 | `legacy_gemini_audit.clean_question_label` import breaks after the legacy file is deleted | High if missed | Move the helper to `auditor.py` or a new `app/services/text_cleaning.py` and update imports **before** deleting the legacy file. |
-| Cost overrun if Qwen is invoked on every file even for already-cached DeepSeek extractions | Low | Per-file dedup uses `file_hash + ariba_question_label` (the existing key at `audit_data_access.find_metadata_by_hash:258-275`); if a cached `corrected_extracted_data` exists, we skip DeepSeek and Qwen entirely. |
+| Cost overrun if Qwen is invoked on every file even for already-cached DeepSeek extractions | Low | Per-file dedup uses `file_hash + ariba_question_label` (the existing key at `audit_data_access.find_metadata_by_hash:258-275`); if a cached `corrected_extracted_data` exists, we skip Docling + DeepSeek + Qwen entirely. |
 
 ---
 
@@ -357,20 +483,22 @@ A change-set is shippable when **all** of the following are true:
 2. Backend `/api/audit` returns the same `AuditResultResponse` shape the extension already reads.
 3. For a 3-file supplier with two native-text PDFs and one scanned PDF, the pipeline produces:
    - 1 `audit_logs` row, 3 `document_evidence` rows, all in one transaction (or 0 rows on any failure).
-   - 1 row with `is_vision_fallback = true`, 2 rows with `is_vision_fallback = false`.
+   - All 3 rows have `parse_model = "docling"`, `source_markdown` non-empty, `parse_duration_ms` populated.
+   - The scanned row has `parse_has_ocr = true`; the other two have `parse_has_ocr = false`.
    - 3 rows with non-empty `qwen_corrections` (or an explicit `{}` if Qwen was unreachable and the fallback fired).
 4. `auditor.run_full_audit` is invoked **exactly once** per audit, on the post-Qwen JSON.
 5. A simulated network drop between the response and the DB commit leaves **zero** rows in Neon (verify with `SELECT COUNT(*) FROM document_evidence WHERE audit_id = 'X'`).
 6. `GET /api/evidence?audit_id=X` returns the `corrected_extracted_data` (renamed column) so the frontend can show the final, post-Qwen values.
 7. `PUT /api/evidence` with a human-edited JSON updates both the evidence row and the audit_logs row in one transaction, and `auditor.run_full_audit` is re-run on the human-edited data.
 8. `legacy_gemini_audit.py` is deleted only after `/api/extract`, `/api/audit/comparison`, and `/api/test/extract` are removed and no remaining import references it.
+9. Docling model is loaded once at app startup; the first audit request after a cold start completes in <2 s on CPU and <0.5 s on GPU (not counting the one-time model load).
 
 ---
 
 ## 6. Implementation order (one PR per step)
 
 1. **PR-1 (DB only):** Alembic migration adding the new columns and the unique constraint. No code change. Ship first so we can roll back independently if the schema is wrong.
-2. **PR-2 (services):** Add `parser.parse_to_text_or_markdown`, `extractor.extract_from_text`, `judge.correct_against_source`, the new `ProcessedFile` schema, and `ariba_pipeline.process_certificate`. Wire unit tests around the four steps. Don't change any route yet.
+2. **PR-2 (services):** Add `docling_parser.parse_to_markdown`, `extractor.extract_from_text`, `judge.correct_against_source`, the new `ProcessedFile` schema, and `ariba_pipeline.process_certificate`. Wire unit tests around the four steps. Don't change any route yet.
 3. **PR-3 (route):** Rewrite `POST /api/audit` to use the new pipeline. Mark `/api/extract` and `/api/audit/comparison` as deprecated. Add `log_audit_run_atomic`. Verify against the acceptance criteria above using the Playwright extension test harness.
 4. **PR-4 (extension):** Switch `background.js` to the single-pass `POST /api/audit` call. Remove the FormData dance.
 5. **PR-5 (cleanup):** Delete `/api/extract`, `/api/audit/comparison`, `/api/test/extract`, and `legacy_gemini_audit.py` (after moving `clean_question_label`).
@@ -383,9 +511,9 @@ A change-set is shippable when **all** of the following are true:
 | Step | Effort | Notes |
 |---|---|---|
 | PR-1 migration | 0.5 day | Pure SQL + Alembic. |
-| PR-2 services | 2–3 days | The new DeepSeek text-mode extractor is the riskiest piece; needs a small eval against 20–30 sample certs. |
+| PR-2 services | 3–4 days | Docling integration (model load, OCR fallback to vision) + the new DeepSeek text-mode extractor is the riskiest piece; needs a small eval against 20–30 sample certs (mix of native-text + scanned). |
 | PR-3 route | 1 day | Mostly mechanical once PR-2 lands. |
 | PR-4 extension | 0.5 day | ~20 lines changed in `background.js`. |
 | PR-5 cleanup | 0.25 day | Mechanical. |
 | PR-6 docs | 0.25 day | Mechanical. |
-| **Total** | **~5–6 days** | Single engineer, no waiting on infra. |
+| **Total** | **~5.5–7 days** | Single engineer. Add ~1 day if Cloud Run cold-start tuning is needed. |
