@@ -31,18 +31,6 @@ export default function Header({ error, isLoading, isEvidenceLoading, onRefresh,
       </button>
       <div className="flex items-center gap-3">
         <ThemeToggle />
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--bg-surface)] border border-[var(--border-visible)] text-[11px] font-medium text-[var(--text-secondary)]">
-          <span className={`h-1.5 w-1.5 rounded-full ${error ? 'bg-[var(--accent-danger)] animate-pulse' : 'bg-[var(--accent-success)]'}`} />
-          {error ? "Database Offline" : "Database Live"}
-        </div>
-        <button
-          onClick={onRefresh}
-          className="icon-action flex items-center justify-center p-2 rounded-full bg-[var(--bg-surface)] border border-[var(--border-visible)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface-hover)] transition-all cursor-pointer active:scale-95"
-          title="Refresh database"
-          aria-label="Refresh database"
-        >
-          <IconLoader2 className={`h-4 w-4 ${(isLoading || isEvidenceLoading) ? 'animate-spin' : ''}`} />
-        </button>
       </div>
     </header>
   );
