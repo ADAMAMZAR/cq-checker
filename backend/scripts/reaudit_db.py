@@ -4,11 +4,11 @@ Reads existing extracted metadata + QA data from the database, runs the
 new auditor engine (code-based, no AI), and writes back the updated
 comparison tables, verdicts, and suggested comments.
 
-Usage:
-    python reaudit_db.py                              # re-audit ALL records
-    python reaudit_db.py --audit-id AUDIT_0001        # single record
-    python reaudit_db.py --dry-run                    # preview only, no writes
-    python reaudit_db.py --supplier "ACME Corp"       # filter by supplier
+Usage (run from backend/):
+    python -m scripts.reaudit_db                            # re-audit ALL records
+    python -m scripts.reaudit_db --audit-id AUDIT_0001      # single record
+    python -m scripts.reaudit_db --dry-run                  # preview only, no writes
+    python -m scripts.reaudit_db --supplier "ACME Corp"     # filter by supplier
 """
 
 import sys
@@ -29,7 +29,7 @@ logging.basicConfig(level=logging.WARNING)
 
 from app.config import settings
 from app.schemas import AuditLogEntry, DocumentEvidence
-from app.services import audit_data, auditor
+from app.services import audit_data_access, auditor
 
 
 def get_db_backend() -> str:
@@ -122,7 +122,7 @@ async def reaudit_run(supplier_name: str, docs: List[DocumentEvidence],
         return result
 
     # Find the correct audit_results audit_id(s) for this supplier
-    all_logs = await audit_data.get_audit_logs()
+    all_logs = await audit_data_access.get_audit_logs()
     supplier_logs = [log for log in all_logs if log.supplier_name.strip().lower() == supplier_name.strip().lower()]
     audit_ids_to_update = set(log.audit_id for log in supplier_logs)
 
@@ -131,7 +131,7 @@ async def reaudit_run(supplier_name: str, docs: List[DocumentEvidence],
         audit_ids_to_update = set(d.audit_id for d in docs)
 
     for aid in audit_ids_to_update:
-        success = await audit_data.update_audit_result(
+        success = await audit_data_access.update_audit_result(
             audit_id=aid,
             result=verdict,
             suggested_comment=comment,
@@ -180,7 +180,7 @@ async def _main():
     print()
 
     # Fetch existing records
-    all_evidence = await audit_data.get_document_evidence_logs()
+    all_evidence = await audit_data_access.get_document_evidence_logs()
     if not all_evidence:
         print("No document evidence records found in database.")
         sys.exit(0)
@@ -189,7 +189,7 @@ async def _main():
 
     # Fetch audit logs for workspace_title region detection
     try:
-        all_logs = await audit_data.get_audit_logs()
+        all_logs = await audit_data_access.get_audit_logs()
         workspace_map = build_workspace_map(all_logs, all_evidence)
         print(f"Total audit logs fetched: {len(all_logs)}")
     except Exception as e:

@@ -1,7 +1,7 @@
 import json
 import pytest
 from app.services import auditor
-from app.regions import Region, detect_region, get_region_config
+from app.region_configs import Region, detect_region, get_region_config
 
 
 # ---------------------------------------------------------------------------

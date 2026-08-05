@@ -182,7 +182,7 @@ backend/
 │   ├── config.py          # Settings (env vars)
 │   ├── main.py            # FastAPI app + routes
 │   ├── schemas.py         # Pydantic models
-│   ├── regions.py         # Region constants
+│   ├── region_configs.py   # Region enum + compliance configs (PL min, validity cap, CIDB)
 │   ├── db/
 │   │   └── session.py     # Async engine + session factory
 │   ├── models/
@@ -191,11 +191,15 @@ backend/
 │   │   ├── documents.py   # Document + chunk CRUD
 │   │   ├── certificates.py # Certificate verification CRUD
 │   │   ├── cache.py       # Semantic query cache
-│   │   └── audit.py       # Legacy audit/supplier/evidence CRUD
+│   │   ├── retrieval.py   # Hybrid vector + full-text retrieval
+│   │   ├── chat.py        # Chat session + message CRUD
+│   │   ├── object_storage.py # Object-storage metadata CRUD
+│   │   └── supplier_audit.py # Legacy audit/supplier/evidence CRUD
 │   └── services/          # Business logic
 │       ├── auditor.py     # Certificate audit rules (legacy /api/audit)
-│       ├── gemini.py      # Gemini extraction (legacy /api/audit)
-│       ├── audit_data.py  # Neon-backed data access (replaces legacy sheets.py)
+│       ├── legacy_gemini_audit.py # Legacy Gemini extraction (legacy /api/audit)
+│       ├── audit_data_access.py  # Neon-backed data access (replaces legacy sheets.py)
+│       ├── database_inspector.py # Read-only DB browser for preview page
 │       ├── storage.py     # StorageProvider (LocalDisk now, GCS in Phase 8)
 │       ├── pdf.py         # PDF -> image rendering (PyMuPDF)
 │       ├── rules.py       # Deterministic certificate rules (reuses auditor.py)

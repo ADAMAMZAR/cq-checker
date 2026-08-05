@@ -9,7 +9,7 @@ os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 import json
 from unittest.mock import MagicMock, patch
 import pytest
-from app.services import gemini
+from app.services import legacy_gemini_audit as gemini
 
 @pytest.fixture
 def mock_gemini_model():
@@ -20,7 +20,7 @@ def mock_gemini_model():
 
 def test_extract_certificate_data_no_key():
     # Test fallback behavior when no API Key is provided
-    with patch("app.services.gemini.settings") as mock_settings:
+    with patch("app.services.legacy_gemini_audit.settings") as mock_settings:
         mock_settings.gemini_api_key = ""
         result, in_t, out_t, cost = gemini.extract_certificate_data(b"some content", "application/pdf")
         
@@ -30,7 +30,7 @@ def test_extract_certificate_data_no_key():
         assert in_t == 150
 
 def test_extract_certificate_data_success(mock_gemini_model):
-    with patch("app.services.gemini.settings") as mock_settings:
+    with patch("app.services.legacy_gemini_audit.settings") as mock_settings:
         mock_settings.gemini_api_key = "fake_key"
         
         base_response = '{"certificateOwnerName": "Target Supplier Inc", "expirationDate": "30/06/2028", "issuerName": "N/A", "certificateType": "N/A", "certificateNumber": "N/A", "effectiveDate": "N/A", "certificateLocation": "N/A", "yearOfPublication": "N/A", "publicLiabilityAmount": "N/A", "currency": "N/A", "isPermanent": false, "recertificationLetter": false, "hasMultipleCertificates": false}'
@@ -46,7 +46,7 @@ def test_extract_certificate_data_success(mock_gemini_model):
         assert result["expirationDate"] == "30/06/2028"
 
 def test_year_of_publication_effective_date_fallback(mock_gemini_model):
-    with patch("app.services.gemini.settings") as mock_settings:
+    with patch("app.services.legacy_gemini_audit.settings") as mock_settings:
         mock_settings.gemini_api_key = "fake_key"
         
         # Worker returns N/A for year; Judge returns the corrected value (2024 from effectiveDate fallback)
@@ -62,7 +62,7 @@ def test_year_of_publication_effective_date_fallback(mock_gemini_model):
         assert result["yearOfPublication"] == "2024"
 
 def test_extract_certificate_data_failure(mock_gemini_model):
-    with patch("app.services.gemini.settings") as mock_settings:
+    with patch("app.services.legacy_gemini_audit.settings") as mock_settings:
         mock_settings.gemini_api_key = "fake_key"
         
         # Make generate_content throw an exception
@@ -75,7 +75,7 @@ def test_extract_certificate_data_failure(mock_gemini_model):
         assert "API Quota Blocked" in result["error"]
 
 # def test_run_audit_comparison_success(mock_gemini_model):
-#     with patch("app.services.gemini.settings") as mock_settings:
+#     with patch("app.services.legacy_gemini_audit.settings") as mock_settings:
 #         mock_settings.gemini_api_key = "fake_key"
 #         
 #         mock_response = MagicMock()
@@ -89,7 +89,7 @@ def test_extract_certificate_data_failure(mock_gemini_model):
 #         assert result["suggested_comment"] == "Verification OK"
 # 
 # def test_run_audit_comparison_failure(mock_gemini_model):
-#     with patch("app.services.gemini.settings") as mock_settings:
+#     with patch("app.services.legacy_gemini_audit.settings") as mock_settings:
 #         mock_settings.gemini_api_key = "fake_key"
 #         
 #         mock_gemini_model.generate_content.side_effect = Exception("Model Overloaded")

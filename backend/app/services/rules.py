@@ -11,7 +11,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-from app.regions import detect_region, get_region_config, is_contractors_questionnaire
+from app.region_configs import detect_region, get_region_config, is_contractors_questionnaire
 from app.services import auditor
 from app.services.auditor import (
     DocCategory,
@@ -24,7 +24,7 @@ from app.services.auditor import (
     match_supplier,
     parse_pl_amount,
 )
-from app.services.gemini import clean_question_label
+from app.services.legacy_gemini_audit import clean_question_label
 
 logger = logging.getLogger(__name__)
 

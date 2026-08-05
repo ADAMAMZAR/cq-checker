@@ -1,3 +1,9 @@
+"""Manual smoke test for the audit endpoint. Not a pytest.
+
+Usage (run from backend/):
+    python -m scripts.manual_smoke_audit_api
+"""
+
 import httpx
 import json
 

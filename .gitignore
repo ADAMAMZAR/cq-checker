@@ -37,6 +37,12 @@ Thumbs.db
 
 MVP.md
 PRD.md
+/Product Requirement Document (PRD).md
+/Development-Plan.md
+/audit-rules-review.html
+/backend/reaudit_db.py
+/backend/revert_audit.py
+/backend/test_upload.py
 
 # Next.js & Extension Node dependencies
 node_modules/
@@ -48,4 +54,5 @@ playwright-report/
 .playwright-artifacts/
 .agents/
 .claude/
+.opencode/
 skills-lock.json

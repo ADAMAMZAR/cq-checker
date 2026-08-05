@@ -8,7 +8,7 @@ import { fetchEvidenceLogs } from "@/lib/api";
 import Header from "@/components/Header";
 import SubNavTabs from "@/components/SubNavTabs";
 import AuditRegistry from "@/components/AuditRegistry";
-import MainHome from "@/components/MainHome";
+import LandingPage from "@/components/LandingPage";
 
 const SupplierDataEditor = dynamic(() => import("@/components/SupplierDataEditor"), { ssr: false });
 const CostAnalytics = dynamic(() => import("@/components/CostAnalytics"), { ssr: false });
@@ -81,7 +81,7 @@ export default function Dashboard() {
 
       {activeMainTab === "home" && (
         <div className="flex-1 flex flex-col">
-          <MainHome onNavigate={setActiveMainTab} />
+          <LandingPage onNavigate={setActiveMainTab} />
         </div>
       )}
 

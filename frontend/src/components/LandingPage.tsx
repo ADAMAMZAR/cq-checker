@@ -7,7 +7,7 @@ import {
 } from "@tabler/icons-react";
 import type { MainTab } from "./SubNavTabs";
 
-interface MainHomeProps {
+interface LandingPageProps {
   onNavigate: (tab: MainTab) => void;
 }
 
@@ -63,7 +63,7 @@ const pageContainers: PageContainerItem[] = [
   },
 ];
 
-export default function MainHome({ onNavigate }: MainHomeProps) {
+export default function LandingPage({ onNavigate }: LandingPageProps) {
   const HERO_IMAGES = [
     "/hero/hero1.jpg",
     "/hero/hero2.jpg",

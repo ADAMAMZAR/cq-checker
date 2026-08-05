@@ -5,7 +5,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
-from app.regions import Region, RegionConfig, detect_region, get_region_config, is_contractors_questionnaire
+from app.region_configs import Region, RegionConfig, detect_region, get_region_config, is_contractors_questionnaire
 
 logger = logging.getLogger(__name__)
 

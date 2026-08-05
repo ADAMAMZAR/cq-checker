@@ -14,7 +14,7 @@ from sqlalchemy import select
 
 from app.db.session import get_session_factory
 from app.models.tables import Supplier, AuditLog, DocumentEvidence as NeonDocumentEvidence
-from app.repositories.audit import SupplierRepository, AuditLogRepository, DocumentEvidenceRepository
+from app.repositories.supplier_audit import SupplierRepository, AuditLogRepository, DocumentEvidenceRepository
 from app.schemas import AuditLogEntry, DocumentEvidence, SupplierEntry
 
 logger = logging.getLogger(__name__)

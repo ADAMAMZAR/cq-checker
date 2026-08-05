@@ -75,7 +75,7 @@ async def test_evict_expired_uses_config_ttl():
 # ── Timestamp conversion helpers ─────────────────────────────────────────────
 
 def test_to_db_timestamp_legacy_format_keeps_wallclock():
-    from app.services.audit_data import _to_db_timestamp, _display_timestamp
+    from app.services.audit_data_access import _to_db_timestamp, _display_timestamp
 
     dt = _to_db_timestamp("04/08/2026, 09:30:00")
     assert dt is not None
@@ -83,7 +83,7 @@ def test_to_db_timestamp_legacy_format_keeps_wallclock():
 
 
 def test_to_db_timestamp_iso_format():
-    from app.services.audit_data import _to_db_timestamp, _display_timestamp
+    from app.services.audit_data_access import _to_db_timestamp, _display_timestamp
 
     dt = _to_db_timestamp("2026-07-20T16:29:15+00:00")
     assert dt is not None
@@ -92,7 +92,7 @@ def test_to_db_timestamp_iso_format():
 
 
 def test_display_timestamp_naive_and_none():
-    from app.services.audit_data import _display_timestamp
+    from app.services.audit_data_access import _display_timestamp
 
     assert _display_timestamp(None) == ""
     dt = datetime(2026, 8, 4, 9, 30, 0)

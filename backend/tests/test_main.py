@@ -19,7 +19,7 @@ def test_read_root():
     assert response.status_code == 200
     assert response.json()["status"] == "healthy"
 
-@patch("app.services.audit_data.get_audit_logs")
+@patch("app.services.audit_data_access.get_audit_logs")
 def test_get_logs(mock_get_logs):
     mock_get_logs.return_value = []
     response = client.get("/api/logs")
@@ -28,9 +28,9 @@ def test_get_logs(mock_get_logs):
     mock_get_logs.assert_called_once()
 
 @patch("app.services.storage.LocalDiskStorage.upload")
-@patch("app.services.audit_data.find_metadata_by_hash")
-@patch("app.services.gemini.extract_certificate_data")
-@patch("app.services.audit_data.log_audit_run")
+@patch("app.services.audit_data_access.find_metadata_by_hash")
+@patch("app.services.legacy_gemini_audit.extract_certificate_data")
+@patch("app.services.audit_data_access.log_audit_run")
 def test_run_audit(mock_log_audit, mock_extract, mock_find_hash, mock_upload):
     mock_upload.return_value = "http://127.0.0.1:8000/mock/test_cert.pdf"
     mock_find_hash.return_value = None
@@ -70,9 +70,9 @@ def test_run_audit(mock_log_audit, mock_extract, mock_find_hash, mock_upload):
     mock_extract.assert_called_once()
 
 @patch("app.services.storage.LocalDiskStorage.upload")
-@patch("app.services.audit_data.find_metadata_by_hash")
-@patch("app.services.gemini.extract_certificate_data")
-@patch("app.services.audit_data.log_audit_run")
+@patch("app.services.audit_data_access.find_metadata_by_hash")
+@patch("app.services.legacy_gemini_audit.extract_certificate_data")
+@patch("app.services.audit_data_access.log_audit_run")
 def test_run_audit_cache_hit(mock_log_audit, mock_extract, mock_find_hash, mock_upload):
     mock_upload.return_value = "http://127.0.0.1:8000/mock/test_cert.pdf"
     mock_find_hash.return_value = {
@@ -107,9 +107,9 @@ def test_run_audit_cache_hit(mock_log_audit, mock_extract, mock_find_hash, mock_
     mock_extract.assert_not_called()
 
 @patch("app.services.storage.LocalDiskStorage.upload")
-@patch("app.services.audit_data.find_metadata_by_hash")
-@patch("app.services.gemini.extract_certificate_data")
-@patch("app.services.audit_data.log_audit_run")
+@patch("app.services.audit_data_access.find_metadata_by_hash")
+@patch("app.services.legacy_gemini_audit.extract_certificate_data")
+@patch("app.services.audit_data_access.log_audit_run")
 def test_run_audit_duplicate_file_different_questions(mock_log_audit, mock_extract, mock_find_hash, mock_upload):
     import json
     mock_upload.return_value = "http://127.0.0.1:8000/mock/test_cert.pdf"
@@ -169,7 +169,7 @@ def test_run_audit_duplicate_file_different_questions(mock_log_audit, mock_extra
     first_call_args = mock_extract.call_args_list[0][0]
     assert first_call_args[2] == "1.1 CIDB"
 
-@patch("app.services.gemini.extract_certificate_data")
+@patch("app.services.legacy_gemini_audit.extract_certificate_data")
 def test_extract_endpoint(mock_extract):
     mock_extract.return_value = ({
         "certificateOwnerName": "ACME Corp",
@@ -188,7 +188,7 @@ def test_extract_endpoint(mock_extract):
     assert json_data["usage"]["input_tokens"] == 150
     mock_extract.assert_called_once()
 
-@patch("app.services.audit_data.get_document_evidence_logs")
+@patch("app.services.audit_data_access.get_document_evidence_logs")
 def test_get_evidence_endpoint(mock_get_evidence):
     mock_get_evidence.return_value = [
         DocumentEvidence(
@@ -216,9 +216,9 @@ def test_get_evidence_endpoint(mock_get_evidence):
     mock_get_evidence.assert_called_once()
 
 @patch("app.services.auditor.run_full_audit")
-@patch("app.services.audit_data.update_document_evidence")
-@patch("app.services.audit_data.update_audit_result")
-@patch("app.services.audit_data.get_document_evidence_logs")
+@patch("app.services.audit_data_access.update_document_evidence")
+@patch("app.services.audit_data_access.update_audit_result")
+@patch("app.services.audit_data_access.get_document_evidence_logs")
 def test_update_evidence_endpoint_success(mock_get_logs, mock_update_result, mock_update, mock_audit):
     mock_get_logs.return_value = [
         DocumentEvidence(
@@ -249,8 +249,8 @@ def test_update_evidence_endpoint_success(mock_get_logs, mock_update_result, moc
     )
 
 
-@patch("app.services.audit_data.update_document_evidence")
-@patch("app.services.audit_data.get_document_evidence_logs")
+@patch("app.services.audit_data_access.update_document_evidence")
+@patch("app.services.audit_data_access.get_document_evidence_logs")
 def test_update_evidence_endpoint_failure(mock_get_logs, mock_update):
     mock_get_logs.return_value = [
         DocumentEvidence(

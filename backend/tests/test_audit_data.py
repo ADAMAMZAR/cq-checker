@@ -35,7 +35,7 @@ def make_log_entry() -> AuditLogEntry:
 
 def test_to_audit_log_entry_extracts_expiry():
     """_to_audit_log_entry should pull expirationDate/certType from compiled data."""
-    from app.services.audit_data import _to_audit_log_entry
+    from app.services.audit_data_access import _to_audit_log_entry
     from app.models.tables import AuditLog
 
     model = AuditLog(
@@ -54,7 +54,7 @@ def test_to_audit_log_entry_extracts_expiry():
 
 
 def test_to_document_evidence():
-    from app.services.audit_data import _to_document_evidence
+    from app.services.audit_data_access import _to_document_evidence
     from app.models.tables import DocumentEvidence as NeonDocumentEvidence
 
     model = NeonDocumentEvidence(
@@ -83,14 +83,14 @@ def test_to_document_evidence():
 @pytest.mark.asyncio
 async def test_get_audit_logs_with_id():
     """get_audit_logs(audit_id) returns a single mapped entry or [] when missing."""
-    from app.services import audit_data
+    from app.services import audit_data_access as audit_data
 
     # Missing -> []
-    with patch("app.services.audit_data.get_session_factory") as mock_factory:
+    with patch("app.services.audit_data_access.get_session_factory") as mock_factory:
         mock_factory.return_value.__aenter__ = AsyncMock(return_value=AsyncMock())
         mock_factory.return_value.__aexit__ = AsyncMock(return_value=None)
         # repo.get_by_audit_id returns None
-        with patch("app.services.audit_data.AuditLogRepository.get_by_audit_id", new_callable=AsyncMock) as m:
+        with patch("app.services.audit_data_access.AuditLogRepository.get_by_audit_id", new_callable=AsyncMock) as m:
             m.return_value = None
             res = await audit_data.get_audit_logs(audit_id="NOPE")
             assert res == []
@@ -99,7 +99,7 @@ async def test_get_audit_logs_with_id():
 
 @pytest.mark.asyncio
 async def test_get_next_audit_id_increments():
-    from app.services import audit_data
+    from app.services import audit_data_access as audit_data
     mock_session = AsyncMock()
     mock_result = MagicMock()
     mock_result.__iter__ = MagicMock(return_value=iter([
@@ -109,14 +109,14 @@ async def test_get_next_audit_id_increments():
     mock_factory = MagicMock()
     mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
     mock_factory.return_value.__aexit__ = AsyncMock(return_value=None)
-    with patch("app.services.audit_data.get_session_factory", return_value=mock_factory):
+    with patch("app.services.audit_data_access.get_session_factory", return_value=mock_factory):
         result = await audit_data.get_next_audit_id()
     assert result == "AUDIT_0004"
 
 
 @pytest.mark.asyncio
 async def test_get_next_audit_id_starts_at_0001():
-    from app.services import audit_data
+    from app.services import audit_data_access as audit_data
     mock_session = AsyncMock()
     mock_result = MagicMock()
     mock_result.fetchall.return_value = []
@@ -124,14 +124,14 @@ async def test_get_next_audit_id_starts_at_0001():
     mock_factory = MagicMock()
     mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
     mock_factory.return_value.__aexit__ = AsyncMock(return_value=None)
-    with patch("app.services.audit_data.get_session_factory", return_value=mock_factory):
+    with patch("app.services.audit_data_access.get_session_factory", return_value=mock_factory):
         result = await audit_data.get_next_audit_id()
     assert result == "AUDIT_0001"
 
 
 @pytest.mark.asyncio
 async def test_get_cost_analytics_aggregates():
-    from app.services import audit_data
+    from app.services import audit_data_access as audit_data
     from app.models.tables import DocumentEvidence as NeonDocumentEvidence
 
     recs = [
@@ -151,7 +151,7 @@ async def test_get_cost_analytics_aggregates():
     mock_factory = MagicMock()
     mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
     mock_factory.return_value.__aexit__ = AsyncMock(return_value=None)
-    with patch("app.services.audit_data.get_session_factory", return_value=mock_factory):
+    with patch("app.services.audit_data_access.get_session_factory", return_value=mock_factory):
         stats = await audit_data.get_cost_analytics()
     assert stats["total_documents"] == 2
     assert stats["total_cost_myr"] == round((2 + 3) * 4.70, 4)
@@ -161,7 +161,7 @@ async def test_get_cost_analytics_aggregates():
 @pytest.mark.asyncio
 async def test_log_audit_run_writes_evidence_and_log():
     """log_audit_run creates supplier, evidence rows, and an audit log."""
-    from app.services import audit_data
+    from app.services import audit_data_access as audit_data
     from app.models.tables import Supplier
 
     supplier = Supplier(id=7, supplier_name="ACME Corp")
@@ -171,10 +171,10 @@ async def test_log_audit_run_writes_evidence_and_log():
     mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
     mock_factory.return_value.__aexit__ = AsyncMock(return_value=None)
 
-    with patch("app.services.audit_data.get_session_factory", return_value=mock_factory):
-        with patch("app.services.audit_data.get_or_create_supplier", new_callable=AsyncMock) as m_get:
+    with patch("app.services.audit_data_access.get_session_factory", return_value=mock_factory):
+        with patch("app.services.audit_data_access.get_or_create_supplier", new_callable=AsyncMock) as m_get:
             m_get.return_value = 7
-            with patch("app.services.audit_data.AuditLogRepository.get_by_audit_id", new_callable=AsyncMock) as m_by_id:
+            with patch("app.services.audit_data_access.AuditLogRepository.get_by_audit_id", new_callable=AsyncMock) as m_by_id:
                 m_by_id.return_value = None
                 audit_id = await audit_data.log_audit_run(
                     "ACME Corp",
@@ -196,9 +196,9 @@ async def test_log_audit_run_writes_evidence_and_log():
 @pytest.mark.asyncio
 async def test_log_audit_run_handles_failure():
     """log_audit_run returns None when an exception occurs."""
-    from app.services import audit_data
+    from app.services import audit_data_access as audit_data
 
-    with patch("app.services.audit_data.get_or_create_supplier", new_callable=AsyncMock) as m_get:
+    with patch("app.services.audit_data_access.get_or_create_supplier", new_callable=AsyncMock) as m_get:
         m_get.side_effect = RuntimeError("db down")
         result = await audit_data.log_audit_run("ACME", [], None)
     assert result is None

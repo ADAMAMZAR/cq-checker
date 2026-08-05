@@ -1,6 +1,9 @@
 """
 Revert audit results to old-style comparison using the original
 gemini.run_programmatic_audit() function (fuzzy matching, all 8 fields).
+
+Usage (run from backend/):
+    python -m scripts.revert_to_legacy_audit
 """
 
 import sys
@@ -14,12 +17,12 @@ import asyncio
 import logging
 logging.basicConfig(level=logging.WARNING)
 
-from app.services import audit_data
-from app.services.gemini import run_programmatic_audit
+from app.services import audit_data_access
+from app.services.legacy_gemini_audit import run_programmatic_audit
 
 
 async def main():
-    all_evidence = await audit_data.get_document_evidence_logs()
+    all_evidence = await audit_data_access.get_document_evidence_logs()
     print(f"Found {len(all_evidence)} document evidence records")
 
     groups = {}
@@ -55,7 +58,7 @@ async def main():
 
         audit_ids = set(d.audit_id for d in docs)
         for aid in audit_ids:
-            ok = await audit_data.update_audit_result(aid, verdict, comment, comp_table)
+            ok = await audit_data_access.update_audit_result(aid, verdict, comment, comp_table)
             if ok:
                 count += 1
                 print(f"  Reverted {aid} ({supplier_name})")

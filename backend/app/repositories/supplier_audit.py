@@ -12,7 +12,7 @@ from app.models.tables import Supplier, AuditLog, DocumentEvidence
 
 def _to_timestamp(value) -> object:
     """Coerce legacy string timestamps to datetimes for timestamptz columns."""
-    from app.services.audit_data import _to_db_timestamp
+    from app.services.audit_data_access import _to_db_timestamp
     return _to_db_timestamp(value)
 
 

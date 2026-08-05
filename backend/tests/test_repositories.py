@@ -16,7 +16,7 @@ from app.models.tables import (
 from app.repositories.documents import DocumentRepository, ChunkRepository
 from app.repositories.certificates import CertificateRepository
 from app.repositories.cache import CacheRepository
-from app.repositories.audit import SupplierRepository, AuditLogRepository, DocumentEvidenceRepository
+from app.repositories.supplier_audit import SupplierRepository, AuditLogRepository, DocumentEvidenceRepository
 from app.repositories.object_storage import ObjectStorageRepository
 
 
@@ -252,7 +252,7 @@ class TestAuditLogRepository:
 class TestDocumentEvidenceRepository:
     async def _seed_audit_log(self, db_session, supplier_id: int, audit_id: str):
         """Create a parent audit_logs row so the document_evidence FK holds."""
-        from app.repositories.audit import AuditLogRepository
+        from app.repositories.supplier_audit import AuditLogRepository
         repo = AuditLogRepository(db_session)
         return await repo.create(AuditLog(
             audit_id=audit_id,

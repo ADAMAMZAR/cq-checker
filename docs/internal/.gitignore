@@ -1,0 +1,5 @@
+# Ignore everything inside this folder (internal business docs)
+# These files are kept locally for use on other machines but should
+# not be pushed to the remote repo.
+*
+!.gitignore

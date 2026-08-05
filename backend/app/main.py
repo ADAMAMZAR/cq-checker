@@ -24,9 +24,9 @@ from app.schemas import (
     DocumentIngestResult, DocumentSummary, ChatRequest, ChatResponse, ChatSource,
     ChatHistoryResponse,
 )
-from app.services import audit_data, gemini, storage
+from app.services import audit_data_access, legacy_gemini_audit, storage
 from app.services import auditor
-from app.services.gemini import clean_question_label
+from app.services.legacy_gemini_audit import clean_question_label
 
 API_TAGS = [
     {"name": "System / Health", "description": "Service health check."},
@@ -98,7 +98,7 @@ async def _process_uploaded_files(
                 break
 
         fhash = hashlib.sha256(raw).hexdigest()
-        cached_record = await audit_data.find_metadata_by_hash(fhash, q_label)
+        cached_record = await audit_data_access.find_metadata_by_hash(fhash, q_label)
         if cached_record:
             try:
                 metadata_dict = json.loads(cached_record["gemini_extracted_metadata"])
@@ -106,7 +106,7 @@ async def _process_uploaded_files(
                 metadata_dict = {}
             task = asyncio.to_thread(lambda md=metadata_dict: (md, 0, 0, 0.0))
         else:
-            task = asyncio.to_thread(gemini.extract_certificate_data, raw, content_type, q_label)
+            task = asyncio.to_thread(legacy_gemini_audit.extract_certificate_data, raw, content_type, q_label)
 
         file_url = await storage.store_and_record(raw, safe_supplier_name, orig_filename, content_type)
 
@@ -151,7 +151,7 @@ async def get_logs():
     """
     Fetches all historical audit logs from Neon.
     """
-    logs = await audit_data.get_audit_logs()
+    logs = await audit_data_access.get_audit_logs()
     return logs
 
 @app.get("/api/audit-registry", response_model=List[AuditRegistryEntry], tags=["Supplier Audit — Read / Update"])
@@ -159,14 +159,14 @@ async def get_audit_registry():
     """
     Consolidated audit registry with supplier info, result, and document counts.
     """
-    return await audit_data.get_audit_registry()
+    return await audit_data_access.get_audit_registry()
 
 @app.get("/api/evidence", response_model=List[DocumentEvidence], tags=["Supplier Audit — Read / Update"])
 async def get_evidence():
     """
     Fetches all historical document evidence logs (extracted file details) from Neon.
     """
-    evidence = await audit_data.get_document_evidence_logs()
+    evidence = await audit_data_access.get_document_evidence_logs()
     return evidence
 
 @app.put("/api/evidence", tags=["Supplier Audit — Read / Update"])
@@ -176,7 +176,7 @@ async def update_evidence(payload: UpdateEvidenceRequest):
     record identified by its Audit ID and Filename, and re-runs the comparison table audit.
     Computation happens BEFORE any DB mutation — returns 500 if verdict cannot be computed.
     """
-    matching_docs = await audit_data.get_document_evidence_logs(audit_id=payload.audit_id)
+    matching_docs = await audit_data_access.get_document_evidence_logs(audit_id=payload.audit_id)
     if not matching_docs:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -198,7 +198,7 @@ async def update_evidence(payload: UpdateEvidenceRequest):
     for doc in matching_docs:
         file_contexts.append({
             "filename": doc.filename,
-            "ariba_question_label": gemini.clean_question_label(doc.ariba_question_label),
+            "ariba_question_label": legacy_gemini_audit.clean_question_label(doc.ariba_question_label),
             "ariba_qa_answers": doc.ariba_qa_answers,
         })
         if doc.filename == payload.filename:
@@ -221,7 +221,7 @@ async def update_evidence(payload: UpdateEvidenceRequest):
             detail=f"Verdict recalculation failed — no data was saved: {e}"
         )
 
-    success = await audit_data.update_document_evidence(
+    success = await audit_data_access.update_document_evidence(
         audit_id=payload.audit_id,
         filename=payload.filename,
         updated_metadata=payload.updated_metadata,
@@ -232,7 +232,7 @@ async def update_evidence(payload: UpdateEvidenceRequest):
             detail="Failed to save updated metadata."
         )
 
-    await audit_data.update_audit_result(
+    await audit_data_access.update_audit_result(
         audit_id=payload.audit_id,
         result=audit_result,
         suggested_comment=suggested_comment,
@@ -255,7 +255,7 @@ async def test_extract_file(file: UploadFile = File(...)):
     file_bytes = await file.read()
     mime_type = file.content_type or "application/pdf"
     
-    extracted_data, in_t, out_t, cost = gemini.extract_certificate_data(file_bytes, mime_type)
+    extracted_data, in_t, out_t, cost = legacy_gemini_audit.extract_certificate_data(file_bytes, mime_type)
     return {
         "extracted_data": extracted_data,
         "usage": {
@@ -307,7 +307,7 @@ async def extract_documents(
         supplier_name, safe_supplier_name, files, qa_list, temp_audit_id, timestamp,
     )
 
-    resolved_audit_id = await audit_data.log_audit_run(supplier_name, doc_evidences, None)
+    resolved_audit_id = await audit_data_access.log_audit_run(supplier_name, doc_evidences, None)
     if not resolved_audit_id:
         resolved_audit_id = temp_audit_id
 
@@ -339,7 +339,7 @@ async def run_audit_comparison(
     Loads document evidence from DB by audit_id, runs the code-based auditor comparison,
     saves the full audit log including results, and returns the verdict.
     """
-    matching_docs = await audit_data.get_document_evidence_logs(audit_id=audit_id)
+    matching_docs = await audit_data_access.get_document_evidence_logs(audit_id=audit_id)
 
     file_contexts = []
     extracted_results = []
@@ -347,7 +347,7 @@ async def run_audit_comparison(
     for doc in matching_docs:
         file_contexts.append({
             "filename": doc.filename,
-            "ariba_question_label": gemini.clean_question_label(doc.ariba_question_label),
+            "ariba_question_label": legacy_gemini_audit.clean_question_label(doc.ariba_question_label),
             "ariba_qa_answers": doc.ariba_qa_answers
         })
         try:
@@ -397,7 +397,7 @@ async def run_audit_comparison(
         comparison_table=comparison_table_dict
     )
 
-    resolved_audit_id = await audit_data.log_audit_run(supplier_name, [], audit_log)
+    resolved_audit_id = await audit_data_access.log_audit_run(supplier_name, [], audit_log)
     if not resolved_audit_id:
         resolved_audit_id = audit_id
 
@@ -504,7 +504,7 @@ async def run_audit(
         comparison_table=comparison_table_dict,
     )
 
-    resolved_audit_id = await audit_data.log_audit_run(supplier_name, doc_evidences, audit_log)
+    resolved_audit_id = await audit_data_access.log_audit_run(supplier_name, doc_evidences, audit_log)
     supplier_id = doc_evidences[0].supplier_id if doc_evidences else 0
 
     if not resolved_audit_id:
@@ -531,7 +531,7 @@ async def run_audit(
 
 @app.get("/api/costs", tags=["Cost Analytics"])
 async def get_cost_analytics():
-    return await audit_data.get_cost_analytics()
+    return await audit_data_access.get_cost_analytics()
 
 
 @app.post("/api/certificates/verify", response_model=CertificateVerifyResult, tags=["Certificate Verification"])
@@ -764,8 +764,8 @@ async def get_supplier_assets(supplier_id: int):
     """
     Returns documents and screenshots for a supplier via file_urls in the DB.
     """
-    screenshots = await audit_data.get_screenshot_urls_by_supplier_id(supplier_id)
-    documents = await audit_data.get_evidence_urls_by_supplier_id(supplier_id)
+    screenshots = await audit_data_access.get_screenshot_urls_by_supplier_id(supplier_id)
+    documents = await audit_data_access.get_evidence_urls_by_supplier_id(supplier_id)
     return {"screenshots": screenshots, "documents": documents}
 
 
@@ -868,8 +868,8 @@ async def db_list_tables():
     """
     Read-only: list all public tables with row counts. No writes exposed.
     """
-    from app.services import db_browser
-    return await db_browser.list_tables()
+    from app.services import database_inspector
+    return await database_inspector.list_tables()
 
 
 @app.get("/api/db/tables/{table_name}", tags=["Database Browser"])
@@ -878,12 +878,12 @@ async def db_get_table(table_name: str, limit: int = 100, offset: int = 0):
     Read-only: return a page of rows for a table (validated against the
     whitelist from information_schema). `limit` is clamped to 500.
     """
-    from app.services import db_browser
+    from app.services import database_inspector
 
-    valid = await db_browser.list_tables()
+    valid = await database_inspector.list_tables()
     names = {t["name"] for t in valid}
     if table_name not in names:
         raise HTTPException(status_code=404, detail=f"Table '{table_name}' not found.")
-    return await db_browser.get_table_data(table_name, limit=limit, offset=offset)
+    return await database_inspector.get_table_data(table_name, limit=limit, offset=offset)
 
 
