@@ -16,7 +16,6 @@ const ComparisonPlayground = dynamic(() => import("@/components/ComparisonPlaygr
 const SupplierAudit = dynamic(() => import("@/components/SupplierAudit"), { ssr: false });
 const Chatbot = dynamic(() => import("@/components/Chatbot"), { ssr: false });
 const DocumentIngest = dynamic(() => import("@/components/DocumentIngest"), { ssr: false });
-const CertificateVerification = dynamic(() => import("@/components/CertificateVerification"), { ssr: false });
 const DatabasePreview = dynamic(() => import("@/components/DatabasePreview"), { ssr: false });
 
 export default function Dashboard() {
@@ -78,37 +77,31 @@ export default function Dashboard() {
           onGoHome={handleGoHome}
         />
       )}
-
       {activeMainTab === "home" && (
         <div className="flex-1 flex flex-col">
           <LandingPage onNavigate={setActiveMainTab} />
         </div>
       )}
-
       {activeMainTab === "assistant" && (
         <div className="flex-1 flex flex-col">
           <Chatbot onGoHome={handleGoHome} />
         </div>
       )}
-
       {activeMainTab === "chat" && (
         <div className="flex-1 flex flex-col">
           <Chatbot onGoHome={handleGoHome} />
         </div>
       )}
-
       {activeMainTab === "ingest" && (
         <div className="flex-1 flex flex-col">
           <DocumentIngest />
         </div>
       )}
-
-      {activeMainTab === "verify" && (
+      {activeMainTab === "audit" && (
         <div className="flex-1 flex flex-col">
-          <CertificateVerification onNavigateToRegistry={handleNavigateToRegistry} />
+          <SupplierAudit onNavigateToRegistry={handleNavigateToRegistry} />
         </div>
       )}
-
       {activeMainTab === "registry" && (
         <div className="flex-1 flex flex-col">
           <AuditRegistry
@@ -119,7 +112,6 @@ export default function Dashboard() {
           />
         </div>
       )}
-
       {activeMainTab === "editor" && (
         <div className="flex-1 flex flex-col">
           <SupplierDataEditor
@@ -130,28 +122,19 @@ export default function Dashboard() {
           />
         </div>
       )}
-
       {activeMainTab === "costs" && (
         <div className="flex-1 flex flex-col">
           <CostAnalytics />
         </div>
       )}
-
       {activeMainTab === "database" && (
         <div className="flex-1 flex flex-col">
           <DatabasePreview />
         </div>
       )}
-
       {activeMainTab === "playground" && (
         <div className="flex-1 flex flex-col">
           <ComparisonPlayground />
-        </div>
-      )}
-
-      {activeMainTab === "audit" && (
-        <div className="flex-1 flex flex-col">
-          <SupplierAudit evidenceLogs={evidenceLogs} isEvidenceLoading={isEvidenceLoading} />
         </div>
       )}
     </div>

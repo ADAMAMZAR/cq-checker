@@ -11,13 +11,12 @@ interface SubNavTabsProps {
 }
 
 const tabs: { key: MainTab; label: string; icon: typeof IconFiles }[] = [
-  { key: "verify", label: "CQ Check", icon: IconCertificate },
+  { key: "audit", label: "Audit", icon: IconSearch },
   { key: "registry", label: "Audit Registry", icon: IconFiles },
   { key: "editor", label: "Supplier Data Editor", icon: IconEdit },
   { key: "costs", label: "Cost Analytics", icon: IconCoin },
   { key: "database", label: "Database", icon: IconDatabase },
   { key: "playground", label: "Playground", icon: IconPlaylist },
-  { key: "audit", label: "Audit", icon: IconSearch },
 ];
 
 export default function SubNavTabs({ active, onChange, onGoHome }: SubNavTabsProps) {

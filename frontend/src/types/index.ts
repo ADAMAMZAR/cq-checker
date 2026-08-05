@@ -175,7 +175,7 @@ export interface CertificateVerifyResult {
   record_id?: string | null;
 }
 
-export interface CertificateVerificationResponse {
+export interface SupplierAuditResponse {
   id: string;
   file_url: string;
   extracted_data: Record<string, unknown>;

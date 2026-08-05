@@ -112,7 +112,7 @@ Grouped by function. Source: `backend/app/main.py`
 ### `GET /api/certificates`
 - **Purpose:** List past verifications with pagination.
 - **Query params:** `limit` (default 50), `offset` (default 0).
-- **Returns:** `List[CertificateVerificationResponse]`.
+- **Returns:** `List[SupplierAuditResponse]`.
 
 ---
 

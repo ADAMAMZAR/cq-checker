@@ -57,9 +57,9 @@ const pageContainers: PageContainerItem[] = [
     subtitle: "Audit Registry Engine",
     description: "Manage, update, and resolve supplier certificate data and audit findings.",
     iconClass: "fa-thin fa-certificate fa-solid",
-    anchor: "#verify",
+    anchor: "#audit",
     isExternal: false,
-    targetTab: "verify",
+    targetTab: "audit",
   },
 ];
 

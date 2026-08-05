@@ -11,7 +11,7 @@ import type {
   DocumentIngestResult,
   DocumentSummary,
   CertificateVerifyResult,
-  CertificateVerificationResponse,
+  SupplierAuditResponse,
   DbTableMeta,
   DbTableData,
 } from "@/types";
@@ -173,7 +173,7 @@ export async function sendChat(
     }
   }
   if (streamError) throw streamError;
-  if (reader) await reader.cancel().catch(() => {});
+  if (reader) await reader.cancel().catch(() => { });
 
   if (!done) {
     done = { done: true, sources: [], cost_usd: 0, cache_hit: false, session_id: sessionId };
@@ -242,7 +242,7 @@ export async function verifyCertificate(
   return res.json();
 }
 
-export async function fetchCertificates(): Promise<CertificateVerificationResponse[]> {
+export async function fetchCertificates(): Promise<SupplierAuditResponse[]> {
   const res = await fetch(`${API_BASE}/certificates`);
   if (!res.ok) throw new Error(await errorDetail(res));
   return res.json();
