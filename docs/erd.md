@@ -40,20 +40,22 @@ erDiagram
         timestamptz created_at "server_default now()"
     }
     PARENT_CHUNKS {
-        uuid id PK "gen_random_uuid()"
+        uuid id PK "uuid7()"
         uuid document_id FK "documents.id, ON DELETE CASCADE"
         text content "NOT NULL — ~800-1000 tokens"
         int page_number "nullable"
+        timestamptz created_at "server_default now()"
     }
     CHILD_CHUNKS {
-        uuid id PK "gen_random_uuid()"
+        uuid id PK "uuid7()"
         uuid parent_id FK "parent_chunks.id, ON DELETE CASCADE"
         text content "NOT NULL — ~200 tokens"
         vector(1536) embedding "nullable — HNSW indexed"
         tsvector tsv_content "GENERATED from to_tsvector('english', content)"
+        timestamptz created_at "server_default now()"
     }
     CERTIFICATE_VERIFICATIONS {
-        uuid id PK "gen_random_uuid()"
+        uuid id PK "uuid7()"
         text file_url "NOT NULL"
         varchar(64) file_hash "UNIQUE, idx — SHA-256 dedup"
         jsonb extracted_data "NOT NULL — Name/ID/Expiry/Authority + confidence"
@@ -62,7 +64,7 @@ erDiagram
         timestamptz created_at "server_default now()"
     }
     QUERY_CACHE {
-        uuid id PK "gen_random_uuid()"
+        uuid id PK "uuid7()"
         text query_text "NOT NULL"
         vector(1536) query_embedding "nullable"
         text cached_response "NOT NULL"
@@ -71,27 +73,27 @@ erDiagram
         timestamptz created_at "idx — TTL eviction"
     }
     USERS {
-        uuid id PK "gen_random_uuid()"
+        uuid id PK "uuid7()"
         varchar(255) email "UNIQUE, idx — NOT NULL"
         varchar(255) display_name "nullable"
         varchar(50) role "default 'employee'"
         timestamptz created_at "server_default now()"
     }
     CHAT_SESSIONS {
-        uuid id PK "gen_random_uuid()"
+        uuid id PK "uuid7()"
         varchar(100) session_id "UNIQUE, idx — client-supplied"
         uuid user_id FK "users.id, ON DELETE SET NULL"
         timestamptz created_at "server_default now()"
     }
     CHAT_MESSAGES {
-        uuid id PK "gen_random_uuid()"
+        uuid id PK "uuid7()"
         varchar(100) session_id "FK — chat_sessions.session_id, ON DELETE CASCADE"
         varchar(20) role "CHECK: user | assistant"
         text content "NOT NULL"
         timestamptz created_at "server_default now()"
     }
     CHAT_LOGS {
-        uuid id PK "gen_random_uuid()"
+        uuid id PK "uuid7()"
         text query_text "NOT NULL"
         int input_tokens "default 0"
         int output_tokens "default 0"
@@ -101,7 +103,7 @@ erDiagram
         timestamptz created_at "server_default now()"
     }
     OBJECT_STORAGE {
-        uuid id PK "gen_random_uuid()"
+        uuid id PK "uuid7()"
         text file_url "UNIQUE, idx — NOT NULL"
         varchar(255) bucket "nullable — e.g. 'cqa-storage' (GCS)"
         text object_key "nullable — object path/URL"
@@ -113,13 +115,12 @@ erDiagram
     SUPPLIERS {
         int id PK "autoincrement"
         varchar(255) supplier_name "UNIQUE, NOT NULL"
-        timestamptz date_added "server_default now()"
+        timestamptz created_at "server_default now()"
     }
     AUDIT_LOGS {
-        uuid id PK "gen_random_uuid()"
+        uuid id PK "uuid7()"
         varchar(100) audit_id "UNIQUE, idx"
         int supplier_id FK "suppliers.id, NOT NULL"
-        timestamptz timestamp "NOT NULL — real date (was VARCHAR)"
         varchar(255) supplier_name "NOT NULL — denormalized copy"
         varchar(255) workspace_title "default 'Ariba Workspace'"
         varchar(100) cert_type "default 'Relational evidence'"
@@ -137,10 +138,9 @@ erDiagram
         timestamptz created_at "server_default now()"
     }
     DOCUMENT_EVIDENCE {
-        uuid id PK "gen_random_uuid()"
+        uuid id PK "uuid7()"
         varchar(100) audit_id "FK — audit_logs.audit_id, ON DELETE CASCADE"
         int supplier_id FK "suppliers.id, NOT NULL"
-        timestamptz timestamp "NOT NULL — real date (was VARCHAR)"
         varchar(255) supplier_name "NOT NULL — denormalized copy"
         varchar(500) filename "NOT NULL"
         varchar(500) ariba_question_label "NOT NULL"
@@ -153,6 +153,7 @@ erDiagram
         numeric(12,6) cost_usd "default 0 — fractional USD preserved"
         varchar(64) file_hash "nullable"
         text file_url "nullable"
+        timestamptz created_at "server_default now()"
     }
 ```
 

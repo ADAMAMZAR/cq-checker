@@ -2,7 +2,7 @@
 
 import os
 import pytest
-from uuid import uuid4
+from app.models.tables import uuid7
 
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy import text
@@ -78,7 +78,7 @@ class TestDocumentRepository:
     @pytest.mark.asyncio
     async def test_get_document_not_found(self, db_session):
         repo = DocumentRepository(db_session)
-        found = await repo.get_by_id(uuid4())
+        found = await repo.get_by_id(uuid7())
         assert found is None
 
     @pytest.mark.asyncio
@@ -239,7 +239,7 @@ class TestAuditLogRepository:
         log = AuditLog(
             audit_id="AUDIT_TEST_001",
             supplier_id=supplier.id,
-            timestamp="31/07/2026, 10:00:00",
+            created_at="31/07/2026, 10:00:00",
             supplier_name="Audit Test Supplier",
             compiled_extracted_data="[]",
             suggested_comment="Test audit",
@@ -257,7 +257,7 @@ class TestDocumentEvidenceRepository:
         return await repo.create(AuditLog(
             audit_id=audit_id,
             supplier_id=supplier_id,
-            timestamp="31/07/2026, 10:00:00",
+            created_at="31/07/2026, 10:00:00",
             supplier_name="Evidence Test Supplier",
             compiled_extracted_data="[]",
             suggested_comment="Test audit",
@@ -273,7 +273,7 @@ class TestDocumentEvidenceRepository:
         evidence = DocumentEvidence(
             audit_id="test-audit-001",
             supplier_id=supplier.id,
-            timestamp="31/07/2026, 10:00:00",
+            created_at="31/07/2026, 10:00:00",
             supplier_name="Evidence Test Supplier",
             filename="test_cert.pdf",
             ariba_question_label="Q1",
@@ -297,7 +297,7 @@ class TestDocumentEvidenceRepository:
             await repo.create(DocumentEvidence(
                 audit_id="multi-evidence-001",
                 supplier_id=supplier.id,
-                timestamp="31/07/2026, 10:00:00",
+                created_at="31/07/2026, 10:00:00",
                 supplier_name="Multi-Evidence Supplier",
                 filename=f"doc_{i}.pdf",
                 ariba_question_label=f"Q{i}",

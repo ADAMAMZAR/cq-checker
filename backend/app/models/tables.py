@@ -1,5 +1,7 @@
 """SQLAlchemy ORM models for Neon PostgreSQL + pgvector."""
 
+import os
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -22,12 +24,39 @@ from pgvector.sqlalchemy import Vector
 from app.db.session import Base
 
 
+def uuid7() -> uuid.UUID:
+    """Generate a UUIDv7 (RFC 9562).
+
+    Uses native `uuid.uuid7()` on Python 3.14+, or pure-Python fallback on older versions.
+    """
+    if hasattr(uuid, "uuid7"):
+        return uuid.uuid7()  # type: ignore[attr-defined]
+
+    ms = int(time.time() * 1000)
+    rand_bytes = os.urandom(10)
+
+    time_high = (ms >> 16) & 0xFFFFFFFF
+    time_low = ms & 0xFFFF
+
+    rand_a = int.from_bytes(rand_bytes[:2], "big") & 0x0FFF
+    ver_and_rand_a = 0x7000 | rand_a
+
+    rand_b = int.from_bytes(rand_bytes[2:], "big") & 0x3FFFFFFFFFFFFFFF
+    var_and_rand_b = 0x8000000000000000 | rand_b
+
+    uuid_int = (time_high << 96) | (time_low << 80) | (ver_and_rand_a << 64) | var_and_rand_b
+    return uuid.UUID(int=uuid_int)
+
+
+_new_uuid = uuid7
+
+
 # ── Document Ingestion & RAG ────────────────────────────────────────────────
 
 class Document(Base):
     __tablename__ = "documents"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
     title = Column(String(255), nullable=False)
     file_url = Column(Text, nullable=False)
     file_hash = Column(String(64), nullable=True, unique=True, index=True)
@@ -39,10 +68,11 @@ class Document(Base):
 class ParentChunk(Base):
     __tablename__ = "parent_chunks"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
     document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
     content = Column(Text, nullable=False)
     page_number = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     document = relationship("Document", back_populates="parent_chunks")
     child_chunks = relationship("ChildChunk", back_populates="parent", cascade="all, delete-orphan")
@@ -51,7 +81,7 @@ class ParentChunk(Base):
 class ChildChunk(Base):
     __tablename__ = "child_chunks"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
     parent_id = Column(UUID(as_uuid=True), ForeignKey("parent_chunks.id", ondelete="CASCADE"), nullable=False)
     content = Column(Text, nullable=False)
     embedding = Column(Vector(1536), nullable=True)
@@ -61,6 +91,7 @@ class ChildChunk(Base):
         Computed("to_tsvector('english', content)"),
         nullable=False,
     )
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     parent = relationship("ParentChunk", back_populates="child_chunks")
 
@@ -70,7 +101,7 @@ class ChildChunk(Base):
 class CertificateVerification(Base):
     __tablename__ = "certificate_verifications"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
     file_url = Column(Text, nullable=False)
     file_hash = Column(String(64), nullable=True, unique=True, index=True)
     extracted_data = Column(JSONB, nullable=False)
@@ -91,7 +122,7 @@ class CertificateVerification(Base):
 class QueryCache(Base):
     __tablename__ = "query_cache"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
     query_text = Column(Text, nullable=False)
     query_embedding = Column(Vector(1536), nullable=True)
     cached_response = Column(Text, nullable=False)
@@ -106,7 +137,7 @@ class QueryCache(Base):
 class User(Base):
     __tablename__ = "users"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
     email = Column(String(255), nullable=False, unique=True, index=True)
     display_name = Column(String(255), nullable=True)
     role = Column(String(50), nullable=False, default="employee")
@@ -116,7 +147,7 @@ class User(Base):
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
     session_id = Column(String(100), nullable=False, unique=True, index=True)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -127,7 +158,7 @@ class ChatSession(Base):
 class ChatMessage(Base):
     __tablename__ = "chat_messages"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
     session_id = Column(String(100), ForeignKey("chat_sessions.session_id", ondelete="CASCADE"), nullable=False, index=True)
     role = Column(String(20), nullable=False)  # "user" | "assistant"
     content = Column(Text, nullable=False)
@@ -141,7 +172,7 @@ class ChatMessage(Base):
 class ChatLog(Base):
     __tablename__ = "chat_logs"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
     query_text = Column(Text, nullable=False)
     input_tokens = Column(Integer, nullable=False, default=0)
     output_tokens = Column(Integer, nullable=False, default=0)
@@ -156,7 +187,7 @@ class ChatLog(Base):
 class ObjectStorage(Base):
     __tablename__ = "object_storage"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
     file_url = Column(Text, nullable=False, unique=True, index=True)
     bucket = Column(String(255), nullable=True)
     object_key = Column(Text, nullable=True)
@@ -173,7 +204,7 @@ class Supplier(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     supplier_name = Column(String(255), nullable=False, unique=True)
-    date_added = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     audit_logs = relationship("AuditLog", back_populates="supplier", cascade="all, delete-orphan")
 
@@ -181,10 +212,9 @@ class Supplier(Base):
 class AuditLog(Base):
     __tablename__ = "audit_logs"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
     audit_id = Column(String(100), nullable=False, unique=True, index=True)
     supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=False)
-    timestamp = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     supplier_name = Column(String(255), nullable=False)
     workspace_title = Column(String(255), nullable=True, default="Ariba Workspace")
     cert_type = Column(String(100), nullable=True, default="Relational evidence")
@@ -211,10 +241,9 @@ class AuditLog(Base):
 class DocumentEvidence(Base):
     __tablename__ = "document_evidence"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
     audit_id = Column(String(100), ForeignKey("audit_logs.audit_id", ondelete="CASCADE"), nullable=False, index=True)
     supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=False)
-    timestamp = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     supplier_name = Column(String(255), nullable=False)
     filename = Column(String(500), nullable=False)
     ariba_question_label = Column(String(500), nullable=False)
@@ -227,3 +256,6 @@ class DocumentEvidence(Base):
     cost_usd = Column(Numeric(12, 6), nullable=False, default=0)
     file_hash = Column(String(64), nullable=True)
     file_url = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+

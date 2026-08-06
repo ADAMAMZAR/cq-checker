@@ -11,12 +11,8 @@ import AuditRegistry from "@/components/AuditRegistry";
 import LandingPage from "@/components/LandingPage";
 
 const SupplierDataEditor = dynamic(() => import("@/components/SupplierDataEditor"), { ssr: false });
-const CostAnalytics = dynamic(() => import("@/components/CostAnalytics"), { ssr: false });
-const ComparisonPlayground = dynamic(() => import("@/components/ComparisonPlayground"), { ssr: false });
 const SupplierAudit = dynamic(() => import("@/components/SupplierAudit"), { ssr: false });
 const Chatbot = dynamic(() => import("@/components/Chatbot"), { ssr: false });
-const DocumentIngest = dynamic(() => import("@/components/DocumentIngest"), { ssr: false });
-const DatabasePreview = dynamic(() => import("@/components/DatabasePreview"), { ssr: false });
 
 export default function Dashboard() {
   const [activeMainTab, setActiveMainTab] = useState<MainTab>("home");
@@ -92,11 +88,6 @@ export default function Dashboard() {
           <Chatbot onGoHome={handleGoHome} />
         </div>
       )}
-      {activeMainTab === "ingest" && (
-        <div className="flex-1 flex flex-col">
-          <DocumentIngest />
-        </div>
-      )}
       {activeMainTab === "audit" && (
         <div className="flex-1 flex flex-col">
           <SupplierAudit onNavigateToRegistry={handleNavigateToRegistry} />
@@ -120,21 +111,6 @@ export default function Dashboard() {
             onRefreshEvidence={loadEvidence}
             onRefreshLogs={handleRefresh}
           />
-        </div>
-      )}
-      {activeMainTab === "costs" && (
-        <div className="flex-1 flex flex-col">
-          <CostAnalytics />
-        </div>
-      )}
-      {activeMainTab === "database" && (
-        <div className="flex-1 flex flex-col">
-          <DatabasePreview />
-        </div>
-      )}
-      {activeMainTab === "playground" && (
-        <div className="flex-1 flex flex-col">
-          <ComparisonPlayground />
         </div>
       )}
     </div>

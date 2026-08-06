@@ -49,8 +49,8 @@ test.describe("GPO Certificate Auditor Frontend Dashboard E2E", () => {
       });
     });
 
-    // 2. Mock API call for supplier assets (using regex matcher)
-    await page.route(/\/api\/logs\/.*\/assets/, async (route) => {
+    // 2. Mock API call for supplier evidence/assets (using regex matcher)
+    await page.route(/\/api\/logs\/.*\/(assets|evidence)/, async (route) => {
       if (route.request().method() === "OPTIONS") {
         await route.fulfill({
           status: 200,

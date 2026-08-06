@@ -11,6 +11,7 @@ import json
 import asyncio
 import requests
 import uuid
+from app.models.tables import uuid7
 from datetime import datetime
 from typing import List, Optional
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, status
@@ -19,7 +20,7 @@ from fastapi.responses import Response, StreamingResponse
 
 from app.config import settings
 from app.schemas import (
-    AuditLogEntry, AuditResultResponse, DocumentEvidence, UpdateEvidenceRequest,
+    SupplierEntry, AuditLogEntry, AuditResultResponse, DocumentEvidence, UpdateEvidenceRequest,
     AuditRegistryEntry, CertificateVerificationResponse, CertificateVerifyResult,
     DocumentIngestResult, DocumentSummary, ChatRequest, ChatResponse, ChatSource,
     ChatHistoryResponse,
@@ -153,6 +154,13 @@ async def get_logs():
     """
     logs = await audit_data_access.get_audit_logs()
     return logs
+
+@app.get("/api/suppliers", response_model=List[SupplierEntry], tags=["Supplier Audit — Read / Update"])
+async def get_suppliers():
+    """
+    Fetches the list of all registered suppliers.
+    """
+    return await audit_data_access.list_suppliers()
 
 @app.get("/api/audit-registry", response_model=List[AuditRegistryEntry], tags=["Supplier Audit — Read / Update"])
 async def get_audit_registry():
@@ -291,7 +299,7 @@ async def extract_documents(
             screenshot_bytes, safe_supplier_name, screenshot_filename, "image/png"
         )
 
-    temp_audit_id = f"TEMP_{uuid.uuid4()}"
+    temp_audit_id = f"TEMP_{uuid7()}"
     timestamp = datetime.now().strftime("%d/%m/%Y, %H:%M:%S")
 
     try:
@@ -448,7 +456,7 @@ async def run_audit(
             screenshot_bytes, safe_supplier_name, screenshot_filename, "image/png"
         )
 
-    temp_audit_id = f"TEMP_{uuid.uuid4()}"
+    temp_audit_id = f"TEMP_{uuid7()}"
     timestamp = datetime.now().strftime("%d/%m/%Y, %H:%M:%S")
 
     try:
@@ -759,8 +767,8 @@ async def chat_history(session_id: str):
     return ChatHistoryResponse(session_id=session_id, messages=messages)
 
 
-@app.get("/api/logs/{supplier_id}/assets", tags=["Supplier Audit — Read / Update"])
-async def get_supplier_assets(supplier_id: int):
+@app.get("/api/logs/{supplier_id}/evidence", tags=["Supplier Audit — Read / Update"])
+async def get_supplier_evidence(supplier_id: int):
     """
     Returns documents and screenshots for a supplier via file_urls in the DB.
     """
@@ -796,6 +804,8 @@ def proxy_supabase_file(encoded_url: str):
 
     try:
         resp = requests.get(url, stream=True, timeout=30, headers={"User-Agent": "GPO-Auditor/1.0"})
+        if resp.status_code == 404:
+            raise HTTPException(status_code=404, detail="File not found in remote storage.")
         resp.raise_for_status()
 
         content_length = resp.headers.get("content-length")
@@ -822,10 +832,10 @@ def proxy_supabase_file(encoded_url: str):
                             "Content-Disposition": f'inline; filename="{filename}"',
                             "Access-Control-Allow-Origin": "*",
                         })
-    except requests.HTTPError as e:
-        raise HTTPException(status_code=502, detail=f"Storage fetch failed: {e}")
     except HTTPException:
         raise
+    except requests.HTTPError as e:
+        raise HTTPException(status_code=e.response.status_code if e.response is not None else 502, detail=f"Storage fetch failed: {e}")
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Failed to fetch file: {e}")
 
@@ -870,6 +880,20 @@ async def db_list_tables():
     """
     from app.services import database_inspector
     return await database_inspector.list_tables()
+
+
+@app.get("/api/db/schema", tags=["Database Browser"])
+async def db_get_schema():
+    """
+    Read-only: return the full public schema for the Schema Viewer page.
+
+    Each table carries its columns (with type, nullable, default, PK/FK
+    flags, and FK references), primary-key columns, and non-PK index names.
+    A flat list of FK relationships is also returned for drawing edges.
+    No row data is touched.
+    """
+    from app.services import database_inspector
+    return await database_inspector.get_full_schema()
 
 
 @app.get("/api/db/tables/{table_name}", tags=["Database Browser"])

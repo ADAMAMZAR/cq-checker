@@ -86,7 +86,8 @@ async def list_suppliers() -> List[SupplierEntry]:
         SupplierEntry(
             supplier_id=s.id,
             supplier_name=s.supplier_name,
-            date_added=s.date_added.strftime("%d/%m/%Y, %H:%M:%S") if s.date_added else "",
+            created_at=s.created_at.strftime("%d/%m/%Y, %H:%M:%S") if getattr(s, "created_at", None) else "",
+            date_added=s.created_at.strftime("%d/%m/%Y, %H:%M:%S") if getattr(s, "created_at", None) else "",
         )
         for s in suppliers
     ]
@@ -123,10 +124,13 @@ def _to_audit_log_entry(r: AuditLog) -> AuditLogEntry:
             cert_type = first.get("certificateType", "Relational evidence")
     except Exception:
         pass
+    ts_val = getattr(r, "created_at", None) or getattr(r, "timestamp", None)
+    disp_ts = _display_timestamp(ts_val)
     return AuditLogEntry(
         audit_id=r.audit_id,
         supplier_id=r.supplier_id,
-        timestamp=_display_timestamp(r.timestamp),
+        created_at=disp_ts,
+        timestamp=disp_ts,
         supplier_name=r.supplier_name,
         workspace_title=r.workspace_title or "Ariba Workspace",
         cert_type=cert_type,
@@ -166,12 +170,15 @@ async def get_audit_registry() -> List[dict]:
             counts[audit.audit_id] = counts.get(audit.audit_id, 0) + 1
     result = []
     for r in logs:
+        ts_val = getattr(r, "created_at", None) or getattr(r, "timestamp", None)
+        disp_ts = _display_timestamp(ts_val)
         result.append({
             "audit_id": r.audit_id,
             "supplier_id": r.supplier_id,
             "supplier_name": r.supplier_name,
             "result": r.result or "Mismatch",
-            "timestamp": _display_timestamp(r.timestamp),
+            "created_at": disp_ts,
+            "timestamp": disp_ts,
             "cert_type": "Relational evidence",
             "document_count": counts.get(r.audit_id, 0),
             "suggested_comment": r.suggested_comment or "",
@@ -204,10 +211,13 @@ async def update_audit_result(
 # ── Document evidence ────────────────────────────────────────────────────────
 
 def _to_document_evidence(r: NeonDocumentEvidence) -> DocumentEvidence:
+    ts_val = getattr(r, "created_at", None) or getattr(r, "timestamp", None)
+    disp_ts = _display_timestamp(ts_val)
     return DocumentEvidence(
         audit_id=r.audit_id,
         supplier_id=r.supplier_id,
-        timestamp=_display_timestamp(r.timestamp),
+        created_at=disp_ts,
+        timestamp=disp_ts,
         supplier_name=r.supplier_name,
         filename=r.filename,
         ariba_question_label=r.ariba_question_label,
@@ -360,8 +370,9 @@ async def log_audit_run(
             existing_log = await log_repo.get_by_audit_id(audit_id)
 
             if audit_log:
+                log_ts = _to_db_timestamp(audit_log.created_at or audit_log.timestamp)
                 if existing_log:
-                    existing_log.timestamp = _to_db_timestamp(audit_log.timestamp)
+                    existing_log.created_at = log_ts
                     existing_log.supplier_name = audit_log.supplier_name
                     existing_log.workspace_title = audit_log.workspace_title or "Ariba Workspace"
                     existing_log.cert_type = audit_log.cert_type or "Relational evidence"
@@ -381,7 +392,7 @@ async def log_audit_run(
                     await log_repo.create(AuditLog(
                         audit_id=audit_log.audit_id,
                         supplier_id=audit_log.supplier_id,
-                        timestamp=_to_db_timestamp(audit_log.timestamp),
+                        created_at=log_ts,
                         supplier_name=audit_log.supplier_name,
                         workspace_title=audit_log.workspace_title or "Ariba Workspace",
                         cert_type=audit_log.cert_type or "Relational evidence",
@@ -400,10 +411,11 @@ async def log_audit_run(
             elif doc_evidences and existing_log is None:
                 # Phase 1 (extract-only) flow: placeholder so the FK holds until
                 # /api/audit/comparison fills in the real verdict.
+                first_ts = _to_db_timestamp(doc_evidences[0].created_at or doc_evidences[0].timestamp)
                 await log_repo.create(AuditLog(
                     audit_id=audit_id,
                     supplier_id=supplier_id,
-                    timestamp=_to_db_timestamp(doc_evidences[0].timestamp),
+                    created_at=first_ts,
                     supplier_name=supplier_name,
                     compiled_extracted_data="[]",
                     suggested_comment="Pending comparison",
@@ -412,10 +424,11 @@ async def log_audit_run(
             ev_repo = DocumentEvidenceRepository(session)
             for doc in doc_evidences:
                 import json
+                doc_ts = _to_db_timestamp(doc.created_at or doc.timestamp)
                 await ev_repo.create(NeonDocumentEvidence(
                     audit_id=doc.audit_id,
                     supplier_id=doc.supplier_id,
-                    timestamp=_to_db_timestamp(doc.timestamp),
+                    created_at=doc_ts,
                     supplier_name=doc.supplier_name,
                     filename=doc.filename,
                     ariba_question_label=doc.ariba_question_label,

@@ -72,7 +72,7 @@ def fetch_all(table: str) -> List[Dict[str, Any]]:
 # ── Neon write helpers ────────────────────────────────────────────────────────
 
 async def _existing_evidence_keys(session: AsyncSession) -> "Counter":
-    """Count of existing document_evidence rows keyed by (audit_id, filename, question_label, timestamp).
+    """Count of existing document_evidence rows keyed by (audit_id, filename, question_label, created_at).
 
     The same file can legitimately appear under multiple question labels
     (a merged PDF may answer several questions), and even identical rows can
@@ -82,9 +82,9 @@ async def _existing_evidence_keys(session: AsyncSession) -> "Counter":
     from collections import Counter
     result = await session.execute(
         select(NeonDocumentEvidence.audit_id, NeonDocumentEvidence.filename,
-               NeonDocumentEvidence.ariba_question_label, NeonDocumentEvidence.timestamp)
+               NeonDocumentEvidence.ariba_question_label, NeonDocumentEvidence.created_at)
     )
-    return Counter((r[0], r[1], r[2], r[3]) for r in result)
+    return Counter((r[0], r[1], r[2], str(r[3])) for r in result)
 
 
 async def _existing_audit_log_ids(session: AsyncSession) -> set:
@@ -135,7 +135,7 @@ async def migrate_document_evidence(session: AsyncSession, dry_run: bool) -> int
             session.add(NeonDocumentEvidence(
                 audit_id=key[0],
                 supplier_id=int(r.get("supplier_id") or 0),
-                timestamp=key[3],
+                created_at=key[3],
                 supplier_name=str(r.get("supplier_name", "")),
                 filename=key[1],
                 ariba_question_label=key[2],
@@ -172,7 +172,7 @@ async def migrate_audit_results(session: AsyncSession, dry_run: bool) -> int:
             session.add(AuditLog(
                 audit_id=audit_id,
                 supplier_id=int(r.get("supplier_id") or 0),
-                timestamp=str(r.get("timestamp", "")),
+                created_at=str(r.get("timestamp", "")),
                 supplier_name=str(r.get("supplier_name", "")),
                 workspace_title=str(r.get("workspace_title") or "Ariba Workspace"),
                 complete_qa_data_dump=str(r.get("complete_qa_data_dump") or "[]"),

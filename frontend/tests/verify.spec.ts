@@ -31,7 +31,7 @@ async function mockRegistryApi(page: import("@playwright/test").Page) {
       body: JSON.stringify(SUPPLIERS),
     });
   });
-  await page.route(/\/api\/logs\/.*\/assets/, async (route) => {
+  await page.route(/\/api\/logs\/.*\/(assets|evidence)/, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",

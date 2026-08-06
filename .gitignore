@@ -11,6 +11,7 @@ __pycache__/
 htmlcov/
 
 # Local uploads and artifacts
+uploads/
 backend/uploads/
 backend/scripts/backups/
 

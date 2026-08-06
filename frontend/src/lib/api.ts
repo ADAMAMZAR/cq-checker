@@ -2,6 +2,7 @@ import type {
   AuditLog,
   AuditRegistryEntry,
   DocumentEvidence,
+  SupplierEntry,
   SupplierAssets,
   CostAnalyticsData,
   ChatResponse,
@@ -14,6 +15,7 @@ import type {
   SupplierAuditResponse,
   DbTableMeta,
   DbTableData,
+  DbSchema,
 } from "@/types";
 
 // Single seam for backend routing.
@@ -55,17 +57,25 @@ export async function fetchAuditLogs(): Promise<AuditLog[]> {
   return data;
 }
 
+export async function fetchSuppliers(): Promise<SupplierEntry[]> {
+  const res = await fetch(`${API_BASE}/suppliers`);
+  if (!res.ok) throw new Error(`Failed to load suppliers: HTTP ${res.status}`);
+  return res.json();
+}
+
 export async function fetchAuditRegistry(): Promise<AuditRegistryEntry[]> {
   const res = await fetch(`${API_BASE}/audit-registry`);
   if (!res.ok) throw new Error(`Failed to load audit registry: HTTP ${res.status}`);
   return res.json();
 }
 
-export async function fetchSupplierAssets(supplierId: number): Promise<SupplierAssets> {
-  const res = await fetch(`${API_BASE}/logs/${supplierId}/assets`);
-  if (!res.ok) throw new Error(`Failed to load supplier assets: HTTP ${res.status}`);
+export async function fetchSupplierEvidence(supplierId: number): Promise<SupplierAssets> {
+  const res = await fetch(`${API_BASE}/logs/${supplierId}/evidence`);
+  if (!res.ok) throw new Error(`Failed to load supplier evidence: HTTP ${res.status}`);
   return res.json();
 }
+
+export const fetchSupplierAssets = fetchSupplierEvidence;
 
 export async function fetchCostAnalytics(): Promise<CostAnalyticsData> {
   const res = await fetch(`${API_BASE}/costs`);
@@ -264,6 +274,12 @@ export async function fetchDbTable(
   const res = await fetch(
     `${API_BASE}/db/tables/${encodeURIComponent(table)}?limit=${limit}&offset=${offset}`
   );
+  if (!res.ok) throw new Error(await errorDetail(res));
+  return res.json();
+}
+
+export async function fetchDbSchema(): Promise<DbSchema> {
+  const res = await fetch(`${API_BASE}/db/schema`);
   if (!res.ok) throw new Error(await errorDetail(res));
   return res.json();
 }

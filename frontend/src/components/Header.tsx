@@ -1,6 +1,7 @@
 "use client";
 
-import { IconLoader2, IconHome } from "@tabler/icons-react";
+import Link from "next/link";
+import { IconLoader2, IconHome, IconSettings } from "@tabler/icons-react";
 import ThemeToggle from "./ThemeToggle";
 
 interface HeaderProps {
@@ -30,6 +31,14 @@ export default function Header({ error, isLoading, isEvidenceLoading, onRefresh,
         </h1>
       </button>
       <div className="flex items-center gap-3">
+        <Link
+          href="/admin"
+          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[var(--border-visible)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:text-[var(--heading-color)] hover:border-[var(--accent-primary-border)] text-xs font-semibold transition-all"
+          title="Open the admin tools (database, costs, schema, playground, ingest)"
+        >
+          <IconSettings className="w-3.5 h-3.5" />
+          Admin
+        </Link>
         <ThemeToggle />
       </div>
     </header>

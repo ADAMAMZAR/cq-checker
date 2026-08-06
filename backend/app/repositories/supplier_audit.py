@@ -49,7 +49,9 @@ class AuditLogRepository:
         self.session = session
 
     async def create(self, log: AuditLog) -> AuditLog:
-        log.timestamp = _coerce_ts(log.timestamp)
+        raw_ts = getattr(log, "created_at", None) or getattr(log, "timestamp", None)
+        if raw_ts is not None:
+            log.created_at = _coerce_ts(raw_ts)
         self.session.add(log)
         await self.session.commit()
         await self.session.refresh(log)
@@ -79,7 +81,9 @@ class DocumentEvidenceRepository:
         self.session = session
 
     async def create(self, evidence: DocumentEvidence) -> DocumentEvidence:
-        evidence.timestamp = _coerce_ts(evidence.timestamp)
+        raw_ts = getattr(evidence, "created_at", None) or getattr(evidence, "timestamp", None)
+        if raw_ts is not None:
+            evidence.created_at = _coerce_ts(raw_ts)
         self.session.add(evidence)
         await self.session.commit()
         await self.session.refresh(evidence)
@@ -102,6 +106,6 @@ class DocumentEvidenceRepository:
 
     async def list_all(self, limit: int = 100, offset: int = 0) -> List[DocumentEvidence]:
         result = await self.session.execute(
-            select(DocumentEvidence).order_by(DocumentEvidence.timestamp.desc()).limit(limit).offset(offset)
+            select(DocumentEvidence).order_by(DocumentEvidence.created_at.desc()).limit(limit).offset(offset)
         )
         return list(result.scalars().all())
