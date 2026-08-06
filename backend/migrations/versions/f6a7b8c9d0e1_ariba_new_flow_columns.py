@@ -29,6 +29,28 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
+    # ── Pre-flight: dedupe legacy (audit_id, filename) duplicates ────────
+    # The legacy two-pass flow (extract -> comparison) sometimes inserted the
+    # same evidence row twice. We must collapse them before adding the
+    # uq_document_evidence_audit_filename UNIQUE constraint. Keep the row
+    # with the latest timestamp per (audit_id, filename); tiebreak on the
+    # higher UUID (lexicographic) so the choice is deterministic. Raw SQL so we
+    # can use a CTE that Alembic's op layer doesn't expose.
+    op.execute(
+        """
+        WITH ranked AS (
+            SELECT id,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY audit_id, filename
+                       ORDER BY timestamp DESC, id DESC
+                   ) AS rn
+            FROM document_evidence
+        )
+        DELETE FROM document_evidence
+        WHERE id IN (SELECT id FROM ranked WHERE rn > 1)
+        """
+    )
+
     # ── document_evidence: Docling + DeepSeek + Qwen columns ───────────
     op.add_column("document_evidence", sa.Column("parse_model", sa.String(50), nullable=True))
     op.add_column("document_evidence", sa.Column("parse_duration_ms", sa.Integer(), nullable=True))

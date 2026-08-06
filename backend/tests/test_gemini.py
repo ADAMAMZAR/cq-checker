@@ -13,10 +13,16 @@ from app.services import legacy_gemini_audit as gemini
 
 @pytest.fixture
 def mock_gemini_model():
-    with patch("google.generativeai.GenerativeModel") as mock_model_class:
-        mock_model = MagicMock()
-        mock_model_class.return_value = mock_model
-        yield mock_model
+    """Patches the google-genai Client that legacy_gemini_audit constructed at
+    import time. Yields `mock_client.models` so tests can configure
+    `mock_gemini_model.generate_content.side_effect = [...]` exactly as they
+    used to with the old GenerativeModel mock.
+    """
+    from app.services import legacy_gemini_audit as _gemini_mod
+
+    mock_client = MagicMock()
+    with patch.object(_gemini_mod, "_client", mock_client):
+        yield mock_client.models
 
 def test_extract_certificate_data_no_key():
     # Test fallback behavior when no API Key is provided
