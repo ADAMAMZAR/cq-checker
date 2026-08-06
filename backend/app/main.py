@@ -12,6 +12,7 @@ import asyncio
 import requests
 import uuid
 from app.models.tables import uuid7
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import List, Optional
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, status
@@ -25,9 +26,17 @@ from app.schemas import (
     DocumentIngestResult, DocumentSummary, ChatRequest, ChatResponse, ChatSource,
     ChatHistoryResponse,
 )
-from app.services import audit_data_access, legacy_gemini_audit, storage
+from app.services import audit_data_access, legacy_gemini_audit, storage, docling_parser
 from app.services import auditor
 from app.services.legacy_gemini_audit import clean_question_label
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Pre-warm Docling converter model in background thread during startup
+    asyncio.create_task(asyncio.to_thread(docling_parser.warmup))
+    yield
+
 
 API_TAGS = [
     {"name": "System / Health", "description": "Service health check."},
@@ -46,6 +55,7 @@ app = FastAPI(
     description="Backend API for auditing certificates and logging results to Neon PostgreSQL",
     version="1.0.0",
     openapi_tags=API_TAGS,
+    lifespan=lifespan,
 )
 
 # Configure CORS so the Chrome Extension and Next.js can connect
@@ -58,8 +68,17 @@ app.add_middleware(
 )
 
 @app.get("/", tags=["System / Health"])
-def read_root():
-    return {"status": "healthy", "service": "GPO Automatic Certificate Auditor API"}
+async def root():
+    return {"status": "healthy", "service": "cq-checker-backend"}
+
+
+@app.get("/api/health/docling", tags=["System / Health"])
+async def docling_health():
+    loaded = docling_parser.is_loaded()
+    return {
+        "loaded": loaded,
+        "status": "ready" if loaded else "warming",
+    }
 
 async def _process_uploaded_files(
     supplier_name: str,
