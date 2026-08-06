@@ -22,12 +22,14 @@ class TestSettingsDefaults:
         ]:
             monkeypatch.delenv(key, raising=False)
         from app.config import Settings
+        from pydantic_settings import SettingsConfigDict
 
         class TestSettings(Settings):
-            class Config:
-                env_file = None  # Skip .env file — read only from env vars
-                env_file_encoding = "utf-8"
-                extra = "ignore"
+            model_config = SettingsConfigDict(
+                env_file=None,  # Skip .env file — read only from env vars
+                env_file_encoding="utf-8",
+                extra="ignore",
+            )
 
         return TestSettings()
 

@@ -1,6 +1,7 @@
 export interface AuditLog {
   audit_id: string;
   supplier_id: number;
+  created_at?: string;
   timestamp: string;
   supplier_name: string;
   workspace_title: string;
@@ -19,6 +20,13 @@ export interface AuditLog {
   total_run_cost_myr?: number;
 }
 
+export interface SupplierEntry {
+  supplier_id: number;
+  supplier_name: string;
+  created_at?: string;
+  date_added?: string;
+}
+
 export interface SupplierAssets {
   screenshots: string[];
   documents: { name: string; url: string }[];
@@ -27,6 +35,7 @@ export interface SupplierAssets {
 export interface DocumentEvidence {
   audit_id: string;
   supplier_id: number;
+  created_at?: string;
   timestamp: string;
   supplier_name: string;
   filename: string;
@@ -77,6 +86,7 @@ export interface AuditRegistryEntry {
   supplier_id: number;
   supplier_name: string;
   result: string;
+  created_at?: string;
   timestamp: string;
   cert_type: string;
   document_count: number;
@@ -200,4 +210,38 @@ export interface DbTableData {
   total: number;
   limit: number;
   offset: number;
+}
+
+// ── Schema Viewer (read-only ERD-style visualisation) ─────────────────────
+
+export interface DbColumnMeta {
+  name: string;
+  type: string;            // raw Postgres UDT: "uuid", "varchar", "numeric", ...
+  type_display: string;    // human-friendly: "UUID", "VARCHAR", "NUMERIC"
+  nullable: boolean;
+  default: string | null;
+  is_primary_key: boolean;
+  is_foreign_key: boolean;
+  references: { table: string; column: string } | null;
+}
+
+export interface DbTableSchema {
+  name: string;
+  row_count: number | null;
+  columns: DbColumnMeta[];
+  primary_keys: string[];
+  indexes: string[];
+}
+
+export interface DbRelationship {
+  from_table: string;
+  from_column: string;
+  to_table: string;
+  to_column: string;
+  constraint: string;
+}
+
+export interface DbSchema {
+  tables: DbTableSchema[];
+  relationships: DbRelationship[];
 }

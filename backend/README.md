@@ -74,10 +74,11 @@ Grouped by function. Full reference: [`API-Endpoints.md`](../API-Endpoints.md). 
 | `POST` | `/api/audit` | Supplier Audit — Full Run |
 | `POST` | `/api/audit/comparison` | Supplier Audit — Comparison |
 | `GET` | `/api/logs` | Supplier Audit — Read |
+| `GET` | `/api/suppliers` | Supplier Audit — Read |
 | `GET` | `/api/audit-registry` | Supplier Audit — Read |
 | `GET` | `/api/evidence` | Supplier Audit — Read |
 | `PUT` | `/api/evidence` | Supplier Audit — Update |
-| `GET` | `/api/logs/{supplier_id}/assets` | Supplier Audit — Read |
+| `GET` | `/api/logs/{supplier_id}/evidence` | Supplier Audit — Read |
 | `GET` | `/api/costs` | Cost Analytics |
 | `POST` | `/api/certificates/verify` | Certificate Verification |
 | `GET` | `/api/certificates` | Certificate Verification |
@@ -106,10 +107,11 @@ Grouped by function. Full reference: [`API-Endpoints.md`](../API-Endpoints.md). 
 ### 📄 Supplier Audit — Read / Update
 
 - **`GET /api/logs`** — All historical audit logs → `List[AuditLogEntry]`.
+- **`GET /api/suppliers`** — All registered suppliers → `List[SupplierEntry]`.
 - **`GET /api/audit-registry`** — Consolidated registry (supplier, result, document counts) for the AuditRegistry screen.
 - **`GET /api/evidence`** — All document-evidence records → `List[DocumentEvidence]`.
 - **`PUT /api/evidence`** — Update extracted metadata for one evidence record (by `audit_id` + `filename`), recompute verdict before saving. Body: `UpdateEvidenceRequest`. 404 if not found; 500 if recompute fails (nothing saved).
-- **`GET /api/logs/{supplier_id}/assets`** — Supplier's screenshots + documents via stored `file_url`s.
+- **`GET /api/logs/{supplier_id}/evidence`** — Supplier's screenshots + documents via stored `file_url`s.
 
 ### 💰 Cost Analytics
 

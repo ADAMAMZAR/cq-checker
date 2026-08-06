@@ -11,14 +11,21 @@ import logging
 import re
 from datetime import datetime
 from typing import Dict, Any, Optional, List
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Initialize the Gemini SDK
+# Initialize the new google-genai SDK. Clients are constructed once at module
+# load (if an API key is set) and reused. Tests can patch `app.services.legacy_gemini_audit._client`
+# to swap a MagicMock in. This whole module is legacy and is scheduled for
+# deletion in Phase 6 of the Ariba new-flow plan.
+_client: Optional[genai.Client] = None
 if settings.gemini_api_key:
-    genai.configure(api_key=settings.gemini_api_key)
+    _client = genai.Client(api_key=settings.gemini_api_key)
+
+_MODEL_NAME = "gemini-2.5-flash-lite"
 
 # Gemini API Pricing (USD per 1 Million tokens)
 # gemini-2.5-flash-lite  — used for OCR extraction
@@ -113,15 +120,17 @@ def _run_extraction(file_bytes: bytes, mime_type: str, question_label: Optional[
         return mock_data, 150, 45, calculate_cost(150, 45)
 
     try:
-        # Use gemini-1.5-flash for cost-efficient and capable OCR extraction
-        model = genai.GenerativeModel("gemini-2.5-flash-lite")
-        
+        # Use gemini-2.5-flash-lite via the new google-genai SDK. Tests can swap
+        # _client with a MagicMock and configure `.models.generate_content.return_value`.
+        if _client is None:
+            raise RuntimeError("Gemini client not initialized (no API key).")
+
         section_context = f" for the section '{question_label}'" if question_label else ""
         merged_instruction = (
             f"\nNote: If this document contains multiple different certificates merged together, "
             f"only extract the metadata for the specific certificate relevant to '{question_label}'."
         ) if question_label else ""
-        
+
         prompt = (
             f"OCR this certificate{section_context}. Extract every field exactly as written. "
             "Use 'N/A' for any field not found. "
@@ -135,20 +144,18 @@ def _run_extraction(file_bytes: bytes, mime_type: str, question_label: Optional[
             "If the document is a permanent/non-expiring certificate (e.g. 'KEKAL SAH', 'NO EXPIRY'), set isPermanent to true. "
             "If the document is a recertification letter, renewal confirmation, or similar renewal notice (not a full certificate), set recertificationLetter to true."
         )
-        
-        response = model.generate_content(
-            [
+
+        response = _client.models.generate_content(
+            model=_MODEL_NAME,
+            contents=[
                 prompt,
-                {
-                    "mime_type": mime_type,
-                    "data": file_bytes
-                }
+                types.Part.from_bytes(data=file_bytes, mime_type=mime_type),
             ],
-            generation_config={
-                "temperature": 0,                        # deterministic OCR — no creativity
-                "response_mime_type": "application/json",
-                "response_schema": EXTRACTION_SCHEMA     # enforce exact keys/types
-            }
+            config=types.GenerateContentConfig(
+                temperature=0,                            # deterministic OCR — no creativity
+                response_mime_type="application/json",
+                response_schema=EXTRACTION_SCHEMA,        # enforce exact keys/types
+            ),
         )
         
         # Parse the JSON response
@@ -194,9 +201,10 @@ def _run_verification(file_bytes: bytes, mime_type: str, initial_data: Dict[str,
         return initial_data, 0, 0, 0.0
 
     try:
-        # Use gemini-1.5-flash as it's capable and cost-effective for this task.
-        # For higher stakes, you could swap this with "gemini-1.5-pro".
-        model = genai.GenerativeModel("gemini-2.5-flash-lite")
+        # Use gemini-2.5-flash-lite via the new google-genai SDK. Tests can swap
+        # _client with a MagicMock and configure `.models.generate_content.return_value`.
+        if _client is None:
+            raise RuntimeError("Gemini client not initialized (no API key).")
 
         initial_json_str = json.dumps(initial_data, indent=2)
 
@@ -211,16 +219,17 @@ def _run_verification(file_bytes: bytes, mime_type: str, initial_data: Dict[str,
             f"\n\nINITIAL_EXTRACTED_DATA:\n```json\n{initial_json_str}\n```"
         )
 
-        response = model.generate_content(
-            [
+        response = _client.models.generate_content(
+            model=_MODEL_NAME,
+            contents=[
                 prompt,
-                {"mime_type": mime_type, "data": file_bytes}
+                types.Part.from_bytes(data=file_bytes, mime_type=mime_type),
             ],
-            generation_config={
-                "temperature": 0,
-                "response_mime_type": "application/json",
-                "response_schema": EXTRACTION_SCHEMA
-            }
+            config=types.GenerateContentConfig(
+                temperature=0,
+                response_mime_type="application/json",
+                response_schema=EXTRACTION_SCHEMA,
+            ),
         )
 
         verified_data = json.loads(response.text.strip())

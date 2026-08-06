@@ -22,7 +22,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Gamuda Group Procurement Office",
+  title: "GPO Deck",
   description: "Centralized compliance verification logs, vendor audits, and procurement intelligence",
 };
 

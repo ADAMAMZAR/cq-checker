@@ -9,7 +9,7 @@ import {
   IconCheck,
   IconBuildingStore,
 } from "@tabler/icons-react";
-import { fetchAuditRegistry } from "@/lib/api";
+import { fetchSuppliers } from "@/lib/api";
 
 interface SupplierAuditProps {
   onNavigateToRegistry?: (supplierName: string) => void;
@@ -35,8 +35,8 @@ export default function SupplierAudit({ onNavigateToRegistry }: SupplierAuditPro
 
   const loadSuppliers = useCallback(async () => {
     try {
-      const registry = await fetchAuditRegistry();
-      const names = Array.from(new Set(registry.map((r) => r.supplier_name).filter(Boolean)));
+      const supplierList = await fetchSuppliers();
+      const names = Array.from(new Set(supplierList.map((s) => s.supplier_name).filter(Boolean)));
       names.sort((a, b) => a.localeCompare(b));
       setSuppliers(names);
     } catch {
