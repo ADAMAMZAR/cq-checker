@@ -104,9 +104,9 @@ Grouped by function. Source: `backend/app/main.py`
 ## 📜 Certificate Verification (Phase 4 pipeline)
 
 ### `POST /api/certificates/verify`
-- **Purpose:** Upload cert → DeepSeek extraction → Qwen judge → persist to `certificate_verifications` → return verdict + reasoning.
+- **Purpose:** Upload cert → Gemini 3.5 Flash Lite extraction → deterministic rules → persist to `certificate_verifications` → return verdict + reasoning. Gemini returns one JSON object per distinct certificate in the file (nested under `extracted_data.certificates[]`); the overall status is worst-wins across certificates.
 - **Form params:** `file`, `supplier_name`, `question_label` (optional), `qa_answers` (optional, default `"[]"`), `qa_data_title` (optional).
-- **Returns:** `CertificateVerifyResult` (`status`, `extracted_data`, `reasoning_trace`, `confidence`, `judge_source`, `rule_result`, `record_id`).
+- **Returns:** `CertificateVerifyResult` (`status`, `extracted_data` with nested `certificates[]`, `reasoning_trace`, `confidence`, `rule_result`, `record_id`).
 - **Errors:** 502 if extraction fails.
 
 ### `GET /api/certificates`
@@ -134,7 +134,7 @@ Grouped by function. Source: `backend/app/main.py`
 ## 💬 RAG Chatbot (Phase 6)
 
 ### `POST /api/chat`
-- **Purpose:** RAG query. Flow: semantic cache (cosine > 0.93) → hybrid retrieval (pgvector + tsvector) → DeepSeek generation. Multi-turn aware via `session_id`. Set `stream: true` for an **SSE** streaming answer.
+- **Purpose:** RAG query. Flow: semantic cache (cosine > 0.93) → hybrid retrieval (pgvector + tsvector) → Gemini generation. Multi-turn aware via `session_id`. Set `stream: true` for an **SSE** streaming answer.
 - **Body:** `ChatRequest` (`query`, `session_id?`, `stream?`).
 - **Returns:** `ChatResponse` (`answer`, `sources`, `cost_usd`, `cache_hit`, `session_id`) — or SSE event stream when `stream: true`.
 

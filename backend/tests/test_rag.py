@@ -47,7 +47,7 @@ async def test_cache_hit_returns_cached(mock_factory):
 
 
 @pytest.mark.asyncio
-async def test_cache_miss_calls_deepseek_and_writes(mock_factory):
+async def test_cache_miss_calls_gemini_and_writes(mock_factory):
     factory = mock_factory
     results = [{
         "child_id": "c1", "child_content": "x", "parent_id": "p1",
@@ -60,16 +60,16 @@ async def test_cache_miss_calls_deepseek_and_writes(mock_factory):
         with patch("app.services.embeddings.embed_text", return_value=[0.1] * 1536):
             with patch("app.repositories.cache.CacheRepository.find_cached", new_callable=AsyncMock) as m_find, \
                  patch("app.services.rag.hybrid_search", new_callable=AsyncMock) as m_search, \
-                 patch("app.services.rag._call_deepseek") as m_deepseek, \
+                 patch("app.services.rag._call_gemini") as m_gemini, \
                  patch("app.repositories.cache.CacheRepository.put", new_callable=AsyncMock) as m_put, \
-                 patch("app.config.settings.deepseek_api_key", "sk-test"):
+                 patch("app.config.settings.gemini_api_key", "g-test"):
                 m_find.return_value = None
                 m_search.return_value = results
-                m_deepseek.return_value = ("Answer from DeepSeek", 500, 100)
+                m_gemini.return_value = ("Answer from Gemini", 500, 100)
 
                 result = await rag.answer_query("safety policy?")
 
-    assert result["answer"] == "Answer from DeepSeek"
+    assert result["answer"] == "Answer from Gemini"
     assert result["cache_hit"] is False
     assert result["sources"][0]["title"] == "Safety Manual"
     assert result["sources"][0]["page_number"] == 3
@@ -78,7 +78,7 @@ async def test_cache_miss_calls_deepseek_and_writes(mock_factory):
 
 
 @pytest.mark.asyncio
-async def test_fallback_without_deepseek_key(mock_factory):
+async def test_fallback_without_gemini_key(mock_factory):
     factory = mock_factory
     results = [{
         "child_id": "c1", "child_content": "x", "parent_id": "p1",
@@ -91,7 +91,7 @@ async def test_fallback_without_deepseek_key(mock_factory):
         with patch("app.services.embeddings.embed_text", return_value=[0.1] * 1536):
             with patch("app.repositories.cache.CacheRepository.find_cached", new_callable=AsyncMock) as m_find, \
                  patch("app.services.rag.hybrid_search", new_callable=AsyncMock) as m_search, \
-                 patch("app.config.settings.deepseek_api_key", ""):
+                 patch("app.config.settings.gemini_api_key", ""):
                 m_find.return_value = None
                 m_search.return_value = results
 
@@ -108,7 +108,7 @@ async def test_fallback_no_results(mock_factory):
         with patch("app.services.embeddings.embed_text", return_value=[0.1] * 1536):
             with patch("app.repositories.cache.CacheRepository.find_cached", new_callable=AsyncMock) as m_find, \
                  patch("app.services.rag.hybrid_search", new_callable=AsyncMock) as m_search, \
-                 patch("app.config.settings.deepseek_api_key", ""):
+                 patch("app.config.settings.gemini_api_key", ""):
                 m_find.return_value = None
                 m_search.return_value = []
 
@@ -184,8 +184,8 @@ async def test_stream_emits_deltas_and_sources(mock_factory):
         with patch("app.services.embeddings.embed_text", return_value=[0.1] * 1536):
             with patch("app.repositories.cache.CacheRepository.find_cached", new_callable=AsyncMock) as m_find, \
                  patch("app.services.rag.hybrid_search", new_callable=AsyncMock) as m_search, \
-                 patch("app.services.rag._iter_deepseek_stream") as m_stream, \
-                 patch("app.config.settings.deepseek_api_key", "sk-test"):
+                 patch("app.services.rag._iter_gemini_stream") as m_stream, \
+                 patch("app.config.settings.gemini_api_key", "g-test"):
                 m_find.return_value = None
                 m_search.return_value = results
                 m_stream.return_value = stream_chunks
@@ -203,7 +203,7 @@ async def test_stream_emits_deltas_and_sources(mock_factory):
 
 
 @pytest.mark.asyncio
-async def test_stream_fallback_without_deepseek_key(mock_factory):
+async def test_stream_fallback_without_gemini_key(mock_factory):
     factory = mock_factory
     results = [_result(parent_content="Manual content here")]
 
@@ -211,7 +211,7 @@ async def test_stream_fallback_without_deepseek_key(mock_factory):
         with patch("app.services.embeddings.embed_text", return_value=[0.1] * 1536):
             with patch("app.repositories.cache.CacheRepository.find_cached", new_callable=AsyncMock) as m_find, \
                  patch("app.services.rag.hybrid_search", new_callable=AsyncMock) as m_search, \
-                 patch("app.config.settings.deepseek_api_key", ""):
+                 patch("app.config.settings.gemini_api_key", ""):
                 m_find.return_value = None
                 m_search.return_value = results
 

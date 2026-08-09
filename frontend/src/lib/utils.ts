@@ -82,15 +82,18 @@ export function getLabelSortKey(label: string): number[] {
 export function parseEvidenceMetadata(ev: DocumentEvidence): Record<string, string> {
   try {
     const parsed = JSON.parse(ev.gemini_extracted_metadata);
+    const src = (parsed && Array.isArray(parsed.certificates) && parsed.certificates[0])
+      ? parsed.certificates[0]
+      : parsed;
     return {
-      certificateOwnerName: parsed.certificateOwnerName || "",
-      issuerName: parsed.issuerName || "",
-      certificateType: parsed.certificateType || "",
-      certificateNumber: parsed.certificateNumber || "",
-      yearOfPublication: parsed.yearOfPublication || "",
-      expirationDate: parsed.expirationDate || "",
-      effectiveDate: parsed.effectiveDate || "",
-      certificateLocation: parsed.certificateLocation || ""
+      certificateOwnerName: src?.certificateOwnerName || "",
+      issuerName: src?.issuerName || "",
+      certificateType: src?.certificateType || "",
+      certificateNumber: src?.certificateNumber || "",
+      yearOfPublication: src?.yearOfPublication || "",
+      expirationDate: src?.expirationDate || "",
+      effectiveDate: src?.effectiveDate || "",
+      certificateLocation: src?.certificateLocation || ""
     };
   } catch {
     return {

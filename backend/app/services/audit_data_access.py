@@ -252,28 +252,39 @@ async def get_document_evidence_logs(
 async def update_document_evidence(audit_id: str, filename: str, updated_metadata: dict) -> bool:
     factory = get_session_factory()
     async with factory() as session:
-        repo = DocumentEvidenceRepository(session)
-        record = await repo.get_by_filename(audit_id, filename)
-        if not record:
+        result = await session.execute(
+            select(NeonDocumentEvidence).where(
+                NeonDocumentEvidence.audit_id == audit_id,
+                NeonDocumentEvidence.filename == filename,
+            )
+        )
+        records = result.scalars().all()
+        if not records:
             return False
         import json
-        record.gemini_extracted_metadata = json.dumps(updated_metadata)
-        owner = updated_metadata.get("certificateOwnerName")
-        if owner:
-            record.gemini_extracted_supplier_name = owner
+        certs = updated_metadata.get("certificates") if isinstance(updated_metadata, dict) else None
+        first = certs[0] if isinstance(certs, list) and certs else updated_metadata
+        owner = first.get("certificateOwnerName") if isinstance(first, dict) else None
+        for record in records:
+            record.gemini_extracted_metadata = json.dumps(updated_metadata)
+            if owner:
+                record.gemini_extracted_supplier_name = owner
         await session.commit()
     return True
 
 
-async def find_metadata_by_hash(file_hash: str, ariba_question_label: str) -> Optional[Dict[str, Any]]:
+async def find_metadata_by_hash(file_hash: str) -> Optional[Dict[str, Any]]:
+    """Return cached extraction metadata for identical file bytes (any question).
+
+    Extraction is question-agnostic (the extractor returns every certificate in
+    the file), so the same bytes can be reused across every question that
+    references the file — each question is then audited separately.
+    """
     factory = get_session_factory()
     async with factory() as session:
         result = await session.execute(
             select(NeonDocumentEvidence)
-            .where(
-                NeonDocumentEvidence.file_hash == file_hash,
-                NeonDocumentEvidence.ariba_question_label == ariba_question_label,
-            )
+            .where(NeonDocumentEvidence.file_hash == file_hash)
             .limit(1)
         )
         record = result.scalars().first()

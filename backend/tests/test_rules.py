@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 sys.modules['google._upb._message'] = None
 os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 
-from app.services.rules import verify_document
+from app.services.rules import RuleResult, _derive_status_from_rules, verify_document
 
 
 def _valid_cert(**overrides):
@@ -117,3 +117,13 @@ def test_comparison_rows_populated():
     )
     assert len(result.comparison_rows) >= 7
     assert all(r["result"] in ("Match", "Mismatch") for r in result.comparison_rows)
+
+
+def test_derive_status_mapping():
+    assert _derive_status_from_rules(RuleResult(verdict="Match", region="malaysia")) == "PASS"
+    assert _derive_status_from_rules(RuleResult(verdict="Mismatch", region="malaysia", intercept_type="EXPIRED")) == "FAIL"
+    assert _derive_status_from_rules(RuleResult(verdict="Mismatch", region="malaysia", intercept_type="FIELD_MISMATCH")) == "REQUIRES_HUMAN_REVIEW"
+    assert _derive_status_from_rules(RuleResult(verdict="Mismatch", region="malaysia", intercept_type="SSM_UPLOAD")) == "FAIL"
+    assert _derive_status_from_rules(RuleResult(verdict="Mismatch", region="malaysia", intercept_type="RECERTIFICATION_LETTER")) == "FAIL"
+    assert _derive_status_from_rules(RuleResult(verdict="Mismatch", region="malaysia", intercept_type="SUPPLIER_MISMATCH")) == "FAIL"
+    assert _derive_status_from_rules(RuleResult(verdict="Mismatch", region="malaysia", expiry_status="PERMANENT_NEEDS_REVISION")) == "FAIL"

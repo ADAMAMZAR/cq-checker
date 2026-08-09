@@ -180,7 +180,6 @@ export interface CertificateVerifyResult {
   extracted_data: Record<string, unknown>;
   reasoning_trace: string;
   confidence: number;
-  judge_source: string;
   rule_result?: Record<string, unknown> | null;
   record_id?: string | null;
 }
@@ -190,9 +189,8 @@ export interface SupplierAuditResponse {
   file_url: string;
   extracted_data: Record<string, unknown>;
   status: CertificateStatus;
-  judge_reasoning?: string | null;
+  reasoning_trace?: string | null;
   confidence?: number | null;
-  judge_source?: string | null;
   created_at?: string | null;
 }
 
@@ -210,6 +208,7 @@ export interface DbTableData {
   total: number;
   limit: number;
   offset: number;
+  primary_keys?: string[];
 }
 
 // ── Schema Viewer (read-only ERD-style visualisation) ─────────────────────

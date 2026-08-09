@@ -17,7 +17,7 @@ class TestSettingsDefaults:
         """Create a Settings instance that reads ONLY from env vars, not .env file."""
         for key in [
             "NEON_DATABASE_URL", "GEMINI_API_KEY", "MINIMAX_API_KEY",
-            "DEEPSEEK_API_KEY", "QWEN_API_KEY", "UPLOAD_DIR",
+            "UPLOAD_DIR",
             "SUPABASE_URL", "SUPABASE_KEY", "VERTEX_PROJECT", "VERTEX_LOCATION",
         ]:
             monkeypatch.delenv(key, raising=False)
@@ -41,8 +41,7 @@ class TestSettingsDefaults:
         s = self._fresh_settings(monkeypatch)
         assert s.gemini_api_key == ""
         assert s.minimax_api_key == ""
-        assert s.deepseek_api_key == ""
-        assert s.qwen_api_key == ""
+        assert s.gemini_chat_model == "gemini-3.5-flash-lite"
 
     def test_deprecated_fields_present(self, monkeypatch):
         """Deprecated Supabase fields still exist for migration."""
@@ -69,14 +68,12 @@ class TestSettingsFromEnv:
     def test_ai_keys_from_env(self, monkeypatch):
         monkeypatch.setenv("GEMINI_API_KEY", "gemini-123")
         monkeypatch.setenv("MINIMAX_API_KEY", "minimax-456")
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek-789")
-        monkeypatch.setenv("QWEN_API_KEY", "qwen-abc")
+        monkeypatch.setenv("GEMINI_CHAT_MODEL", "gemini-3.5-flash-lite")
         from app.config import Settings
         s = Settings()
         assert s.gemini_api_key == "gemini-123"
         assert s.minimax_api_key == "minimax-456"
-        assert s.deepseek_api_key == "deepseek-789"
-        assert s.qwen_api_key == "qwen-abc"
+        assert s.gemini_chat_model == "gemini-3.5-flash-lite"
 
     def test_upload_dir_from_env(self, monkeypatch):
         monkeypatch.setenv("UPLOAD_DIR", "/tmp/test-uploads")

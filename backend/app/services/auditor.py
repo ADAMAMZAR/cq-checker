@@ -756,6 +756,28 @@ def clean_question_label(label: Optional[str]) -> str:
 # Orchestrator — Evaluation Precedence Waterfall
 # ---------------------------------------------------------------------------
 
+
+def _expected_cert_type(qa_answers_str: str) -> str:
+    """Extract the question's expected certificate type from its QA answers."""
+    try:
+        qa_list = json.loads(qa_answers_str or "[]")
+        if isinstance(qa_list, list):
+            for item in qa_list:
+                label = str(item.get("label", "")).strip().lower()
+                if "certificate type" in label:
+                    return str(item.get("value", ""))
+    except Exception:
+        pass
+    return ""
+
+
+def _cert_matches_expected(cert: dict, expected: str, region_config) -> bool:
+    ev_ct = str(cert.get("certificateType", "") or "")
+    if not ev_ct or ev_ct == "N/A":
+        return False
+    return match_flexible(ev_ct, expected) or check_standard_equivalence(ev_ct, expected, region_config)
+
+
 def run_full_audit(
     supplier_name: str,
     file_contexts: list,
@@ -773,7 +795,27 @@ def run_full_audit(
         "tables": [],
     }
 
-    pairs = list(zip(file_contexts, extraction_results))
+    # Expand multi-certificate extractions ({"certificates": [...]}) into one
+    # comparison entry per certificate. Flat single-cert dicts pass through
+    # unchanged (cert_index stays None), preserving legacy behaviour.
+    # When a merged file holds several certificates, only the ones matching the
+    # question's expected certificate type are audited against that question —
+    # an unrelated certificate in the same file must not fail it.
+    pairs = []
+    for ctx, extracted in zip(file_contexts, extraction_results):
+        certs = extracted.get("certificates") if isinstance(extracted, dict) else None
+        if isinstance(certs, list) and len(certs) > 1:
+            expected = _expected_cert_type(ctx.get("ariba_qa_answers", "[]"))
+            selected = [c for c in certs if _cert_matches_expected(c, expected, region_config)] if expected else []
+            if not selected:
+                selected = certs
+            for i, cert in enumerate(selected, start=1):
+                pairs.append((ctx, cert, i))
+        elif isinstance(certs, list) and len(certs) == 1:
+            # Single-cert nested output unwraps to the flat dict (legacy shape).
+            pairs.append((ctx, certs[0], None))
+        else:
+            pairs.append((ctx, extracted, None))
 
     def _sort_key(pair):
         label = clean_question_label(pair[0].get("ariba_question_label", "General Attachment"))
@@ -790,10 +832,11 @@ def run_full_audit(
     all_comment_parts = []
     intercept_groups = defaultdict(list)
 
-    for ctx, extracted_data in pairs:
+    for ctx, extracted_data, cert_index in pairs:
         question_label = clean_question_label(ctx.get("ariba_question_label", "General Attachment"))
         qa_answers_str = ctx.get("ariba_qa_answers", "[]")
         filename = ctx.get("filename", "")
+        cert_suffix = f" [Cert {cert_index}]" if cert_index else ""
 
         qa_answers_list = []
         try:
@@ -825,6 +868,8 @@ def run_full_audit(
             "expiry_status": None,
             "comparison_rows": [],
         }
+        if cert_index:
+            table_entry["certificate_index"] = cert_index
 
         intercept = None
         intercept_params = {}
@@ -950,13 +995,13 @@ def run_full_audit(
                     (k, str(v)) for k, v in intercept_params.items()
                 ))
                 intercept_groups[group_key].append({
-                    "label": question_label,
+                    "label": question_label + cert_suffix,
                     "filename": filename,
                     "lines": entry_lines,
                 })
             else:
                 # Non-intercept entries (field-level, PL_INSUFFICIENT) — keep individual
-                label = f"{question_label} ({filename})" if filename else question_label
+                label = (f"{question_label} ({filename})" if filename else question_label) + cert_suffix
                 block = f"{label}:\n" + "\n".join(f"- {line}" for line in entry_lines)
                 all_comment_parts.append(block)
 

@@ -150,7 +150,7 @@ class TestCertificateRepository:
             file_url="https://example.com/cert.pdf",
             extracted_data={"name": "Test Corp", "expiry": "2027-01-01"},
             status="PASS",
-            judge_reasoning="All fields match.",
+            reasoning_trace="All fields match.",
         )
         assert record.status == "PASS"
         assert record.extracted_data["name"] == "Test Corp"

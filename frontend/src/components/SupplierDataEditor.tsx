@@ -262,7 +262,7 @@ function SupplierFileList({ supplierName, files, selectedEvidence, onSelectFile,
             files.map(ev => {
               const isSelected = selectedEvidence?.audit_id === ev.audit_id && selectedEvidence?.filename === ev.filename;
               return (
-                <button key={`${ev.audit_id}-${ev.filename}`} type="button" onClick={() => onSelectFile(ev)}
+                <button key={`${ev.audit_id}-${ev.filename}-${ev.ariba_question_label}`} type="button" onClick={() => onSelectFile(ev)}
                   className={`w-full text-left p-4 rounded-xl border transition-all duration-300 cursor-pointer ${isSelected
                     ? "bg-[var(--bg-surface-hover)] border-[var(--match-border)] glow-success"
                     : "bg-[var(--bg-surface)] border-[var(--border-visible)] hover:border-[var(--accent-success)] hover:bg-[var(--accent-success-soft)]"

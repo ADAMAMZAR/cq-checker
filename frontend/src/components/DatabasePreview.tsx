@@ -9,11 +9,72 @@ import {
   IconChevronLeft,
   IconChevronRight,
   IconSearch,
+  IconX,
+  IconTrash,
+  IconEraser,
 } from "@tabler/icons-react";
 import type { DbTableMeta, DbTableData } from "@/types";
-import { fetchDbTables, fetchDbTable } from "@/lib/api";
+import { fetchDbTables, fetchDbTable, deleteDbRow, clearChatCache } from "@/lib/api";
 
 const PAGE_SIZE = 100;
+
+function prettyCellValue(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[") && !trimmed.startsWith('"')) {
+    return value;
+  }
+  try {
+    return JSON.stringify(JSON.parse(value), null, 2);
+  } catch {
+    return value;
+  }
+}
+
+function CellModal({ column, rowNumber, value, onClose }: {
+  column: string;
+  rowNumber: number;
+  value: string;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-8 bg-black/60 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="flex flex-col w-full max-w-4xl max-h-[85vh] rounded-xl border border-[var(--border-visible)] bg-[var(--bg-card)] shadow-2xl overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-subtle)] shrink-0">
+          <div className="min-w-0">
+            <h3 className="font-sans text-sm font-bold text-[var(--heading-color)] truncate">{column}</h3>
+            <p className="font-mono text-[10px] text-[var(--text-tertiary)]">Row {rowNumber}</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg border border-[var(--border-visible)] text-[var(--text-secondary)] hover:text-[var(--heading-color)] hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer shrink-0"
+            title="Close (Esc)"
+          >
+            <IconX className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-auto p-4 bg-[var(--bg-input)]">
+          <pre className="whitespace-pre-wrap break-words text-xs font-mono leading-relaxed text-[var(--text-primary)]">
+            {value === "" ? <span className="text-[var(--text-tertiary)]">NULL</span> : prettyCellValue(value)}
+          </pre>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function DatabasePreview() {
   const [tables, setTables] = useState<DbTableMeta[]>([]);
@@ -25,6 +86,9 @@ export default function DatabasePreview() {
   const [dataLoading, setDataLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(0);
+  const [expandedCell, setExpandedCell] = useState<{ column: string; rowNumber: number; value: string } | null>(null);
+  const [deletingRow, setDeletingRow] = useState<number | null>(null);
+  const [clearingCache, setClearingCache] = useState(false);
 
   const fetched = useRef(false);
 
@@ -73,6 +137,49 @@ export default function DatabasePreview() {
     if (selectedTable) loadTableData(selectedTable, page * PAGE_SIZE);
   };
 
+  const handleClearCache = async () => {
+    setClearingCache(true);
+    setError(null);
+    try {
+      const cleared = await clearChatCache();
+      setError(null);
+      setClearingCache(false);
+      window.alert(`Cleared ${cleared} cached query entr${cleared === 1 ? "y" : "ies"}.`);
+      handleRefresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to clear cache.");
+      setClearingCache(false);
+    }
+  };
+
+  const handleDeleteRow = async (rIdx: number) => {
+    if (!data) return;
+    const pks = data.primary_keys ?? [];
+    if (pks.length === 0) {
+      setError("This table has no primary key — cannot delete rows.");
+      return;
+    }
+    const row = data.rows[rIdx];
+    const pk: Record<string, string> = {};
+    pks.forEach((col) => {
+      const idx = data.columns.indexOf(col);
+      pk[col] = row[idx] ?? "";
+    });
+    const confirmText = `Delete this row from "${data.table}"?\n\n${pks.map((c) => `${c}: ${pk[c]}`).join("\n")}`;
+    if (!window.confirm(confirmText)) return;
+    setDeletingRow(rIdx);
+    setError(null);
+    try {
+      await deleteDbRow(data.table, pk);
+      loadTableData(data.table, page * PAGE_SIZE);
+      loadTables();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete row.");
+    } finally {
+      setDeletingRow(null);
+    }
+  };
+
   const goToPage = (next: number) => {
     if (!selectedTable || next < 0) return;
     const totalPages = data ? Math.ceil(data.total / PAGE_SIZE) : 0;
@@ -106,13 +213,24 @@ export default function DatabasePreview() {
             </p>
           </div>
         </div>
-        <button
-          onClick={handleRefresh}
-          className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-primary-hover)] text-white text-xs font-semibold transition-all cursor-pointer"
-        >
-          <IconRefresh className="w-4 h-4" />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleClearCache}
+            disabled={clearingCache}
+            title="Clear the RAG semantic query cache (query_cache table)"
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-visible)] text-[var(--text-secondary)] hover:text-[var(--heading-color)] hover:bg-[var(--bg-surface-hover)] text-xs font-semibold transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <IconEraser className="w-4 h-4" />
+            {clearingCache ? "Clearing…" : "Clear cache"}
+          </button>
+          <button
+            onClick={handleRefresh}
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-primary-hover)] text-white text-xs font-semibold transition-all cursor-pointer"
+          >
+            <IconRefresh className="w-4 h-4" />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -247,6 +365,9 @@ export default function DatabasePreview() {
                             {col}
                           </th>
                         ))}
+                        <th className="py-2 px-3 uppercase tracking-wider text-[10px] text-[var(--text-tertiary)] font-bold w-12">
+                          <span className="sr-only">Actions</span>
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
@@ -261,13 +382,35 @@ export default function DatabasePreview() {
                           {row.map((cell, cIdx) => (
                             <td
                               key={cIdx}
-                              className="py-1.5 px-3 align-top max-w-[360px] break-words"
+                              onDoubleClick={() =>
+                                setExpandedCell({
+                                  column: data.columns[cIdx],
+                                  rowNumber: data.offset + rIdx + 1,
+                                  value: cell ?? "",
+                                })
+                              }
+                              title="Double-click to enlarge"
+                              className="py-1.5 px-3 align-top max-w-[360px] break-words cursor-zoom-in"
                             >
-                              <span className="line-clamp-3" title={cell}>
+                              <span className="line-clamp-3">
                                 {cell === "" ? <span className="text-[var(--text-tertiary)]">NULL</span> : cell}
                               </span>
                             </td>
                           ))}
+                          <td className="py-1.5 px-3 text-center whitespace-nowrap">
+                            <button
+                              onClick={() => handleDeleteRow(rIdx)}
+                              disabled={deletingRow === rIdx}
+                              title="Delete this row"
+                              className="inline-flex items-center justify-center p-1.5 rounded-lg border border-transparent text-[var(--text-tertiary)] hover:text-red-400 hover:border-red-500/30 hover:bg-red-500/10 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              {deletingRow === rIdx ? (
+                                <IconLoader2 className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <IconTrash className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -282,6 +425,15 @@ export default function DatabasePreview() {
           )}
         </section>
       </div>
+
+      {expandedCell && (
+        <CellModal
+          column={expandedCell.column}
+          rowNumber={expandedCell.rowNumber}
+          value={expandedCell.value}
+          onClose={() => setExpandedCell(null)}
+        />
+      )}
     </div>
   );
 }

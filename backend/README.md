@@ -44,12 +44,7 @@ The API will be available at `http://localhost:8000`.
 | `NEON_DATABASE_URL` | Neon PostgreSQL connection string (asyncpg) | `postgresql+asyncpg://postgres:postgres@localhost:5432/cq_checker` |
 | `GEMINI_API_KEY` | Google Gemini API key | — |
 | `MINIMAX_API_KEY` | MiniMax M3 parser API key | — |
-| `DEEPSEEK_API_KEY` | DeepSeek V4 Flash API key | — |
-| `QWEN_API_KEY` | Qwen Reasoning judge API key | — |
-| `DEEPSEEK_BASE_URL` | DeepSeek API base URL | `https://api.deepseek.com` |
-| `DEEPSEEK_MODEL` | DeepSeek model name | `deepseek-v4-flash` |
-| `QWEN_BASE_URL` | Qwen (DashScope) OpenAI-compatible base URL | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
-| `QWEN_MODEL` | Qwen model name | `qwen-max` |
+| `GEMINI_CHAT_MODEL` | Gemini model for the RAG chatbot | `gemini-3.5-flash-lite` |
 | `MINIMAX_BASE_URL` | MiniMax M3 API base URL | `https://api.minimax.chat` |
 | `MINIMAX_MODEL` | MiniMax model name | `MiniMax-M3` |
 | `GEMINI_EMBEDDING_MODEL` | Gemini embedding model | `gemini-embedding-2` |
@@ -119,7 +114,7 @@ Grouped by function. Full reference: [`API-Endpoints.md`](../API-Endpoints.md). 
 
 ### 📜 Certificate Verification (Phase 4)
 
-- **`POST /api/certificates/verify`** — Upload cert → DeepSeek extraction → Qwen judge → persist to `certificate_verifications` → verdict + reasoning. Form: `file`, `supplier_name`, `question_label?`, `qa_answers?`, `qa_data_title?`. Returns `CertificateVerifyResult`. 502 if extraction fails.
+- **`POST /api/certificates/verify`** — Upload cert → Gemini 3.5 Flash Lite extraction (one JSON per certificate in the file, nested under `certificates[]`) → deterministic rules (worst-wins across certificates) → persist to `certificate_verifications` → verdict + reasoning. Form: `file`, `supplier_name`, `question_label?`, `qa_answers?`, `qa_data_title?`. Returns `CertificateVerifyResult`. 502 if extraction fails.
 - **`GET /api/certificates`** — List past verifications. Query: `limit` (50), `offset` (0).
 
 ### 📚 Document Ingestion / RAG (Phase 5)
@@ -129,7 +124,7 @@ Grouped by function. Full reference: [`API-Endpoints.md`](../API-Endpoints.md). 
 
 ### 💬 RAG Chatbot (Phase 6)
 
-- **`POST /api/chat`** — RAG query: semantic cache (cosine > 0.93) → hybrid retrieval (pgvector + tsvector) → DeepSeek. Multi-turn via `session_id`. `stream: true` returns SSE. Body: `ChatRequest`.
+- **`POST /api/chat`** — RAG query: semantic cache (cosine > 0.93) → hybrid retrieval (pgvector + tsvector) → Gemini. Multi-turn via `session_id`. `stream: true` returns SSE. Body: `ChatRequest`.
 - **`GET /api/chat/history`** — Conversation history for a session. Query: `session_id`.
 - **`POST /api/chat/cache/clear`** — Admin: clear semantic cache. Returns `{"cleared": N}`.
 
@@ -204,14 +199,13 @@ backend/
 │       ├── database_inspector.py # Read-only DB browser for preview page
 │       ├── storage.py     # StorageProvider (LocalDisk now, GCS in Phase 8)
 │       ├── pdf.py         # PDF -> image rendering (PyMuPDF)
-│       ├── rules.py       # Deterministic certificate rules (reuses auditor.py)
-│       ├── extractor.py   # DeepSeek V4 Flash extractor
-│       ├── judge.py       # Qwen reasoning judge (with rules fallback)
+│       ├── rules.py       # Deterministic certificate rules + status mapping
+│       ├── extractor.py   # Gemini 3.5 Flash Lite extractor
 │       ├── parser.py      # PDF -> Markdown (MiniMax M3 + PyMuPDF fallback)
 │       ├── chunker.py     # Parent-child chunking
 │       ├── embeddings.py  # Gemini Embedding 2 (REST, 1536-dim)
 │       ├── ingest.py      # Document ingestion orchestrator
-│       └── rag.py         # RAG chatbot (cache + hybrid retrieval + DeepSeek)
+│       └── rag.py         # RAG chatbot (cache + hybrid retrieval + Gemini)
 ├── migrations/            # Alembic database migrations
 │   ├── env.py
 │   └── versions/

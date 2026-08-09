@@ -56,4 +56,6 @@ playwright-report/
 .agents/
 .claude/
 .opencode/
+.impeccable/
+.gemini/
 skills-lock.json

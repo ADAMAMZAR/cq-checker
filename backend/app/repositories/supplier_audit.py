@@ -102,7 +102,7 @@ class DocumentEvidenceRepository:
                 DocumentEvidence.filename == filename,
             )
         )
-        return result.scalar_one_or_none()
+        return result.scalars().first()
 
     async def list_all(self, limit: int = 100, offset: int = 0) -> List[DocumentEvidence]:
         result = await self.session.execute(

@@ -25,10 +25,10 @@ _client: Optional[genai.Client] = None
 if settings.gemini_api_key:
     _client = genai.Client(api_key=settings.gemini_api_key)
 
-_MODEL_NAME = "gemini-2.5-flash-lite"
+_MODEL_NAME = "gemini-3.5-flash-lite"
 
 # Gemini API Pricing (USD per 1 Million tokens)
-# gemini-2.5-flash-lite  — used for OCR extraction
+# gemini-3.5-flash-lite  — used for OCR extraction
 EXTRACTION_INPUT_RATE  = 0.10 / 1_000_000
 EXTRACTION_OUTPUT_RATE = 0.40 / 1_000_000
 # # gemini-3.5-flash — used for audit comparison (kept for accuracy)
@@ -120,7 +120,7 @@ def _run_extraction(file_bytes: bytes, mime_type: str, question_label: Optional[
         return mock_data, 150, 45, calculate_cost(150, 45)
 
     try:
-        # Use gemini-2.5-flash-lite via the new google-genai SDK. Tests can swap
+        # Use gemini-3.5-flash-lite via the new google-genai SDK. Tests can swap
         # _client with a MagicMock and configure `.models.generate_content.return_value`.
         if _client is None:
             raise RuntimeError("Gemini client not initialized (no API key).")
@@ -201,7 +201,7 @@ def _run_verification(file_bytes: bytes, mime_type: str, initial_data: Dict[str,
         return initial_data, 0, 0, 0.0
 
     try:
-        # Use gemini-2.5-flash-lite via the new google-genai SDK. Tests can swap
+        # Use gemini-3.5-flash-lite via the new google-genai SDK. Tests can swap
         # _client with a MagicMock and configure `.models.generate_content.return_value`.
         if _client is None:
             raise RuntimeError("Gemini client not initialized (no API key).")
@@ -365,6 +365,10 @@ def run_programmatic_audit(supplier_name: str, file_contexts: List[Dict[str, Any
     }
 
     for ctx, extracted_data in pairs:
+        # Tolerate nested {"certificates": [...]} extraction output — compare the first cert.
+        certs = extracted_data.get("certificates") if isinstance(extracted_data, dict) else None
+        if isinstance(certs, list) and certs:
+            extracted_data = certs[0]
         question_label = clean_question_label(ctx.get("ariba_question_label", "General Attachment"))
         qa_answers_str = ctx.get("ariba_qa_answers", "[]")
 

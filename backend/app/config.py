@@ -10,17 +10,9 @@ class Settings(BaseSettings):
     # ── AI API Keys ───────────────────────────────────────────────
     gemini_api_key: str = Field(default="", validation_alias="GEMINI_API_KEY")
     minimax_api_key: str = Field(default="", validation_alias="MINIMAX_API_KEY")
-    deepseek_api_key: str = Field(default="", validation_alias="DEEPSEEK_API_KEY")
-    qwen_api_key: str = Field(default="", validation_alias="QWEN_API_KEY")
 
     # ── AI Providers: endpoints / models ──────────────────────────
-    deepseek_base_url: str = Field(default="https://api.deepseek.com", validation_alias="DEEPSEEK_BASE_URL")
-    deepseek_model: str = Field(default="deepseek-v4-flash", validation_alias="DEEPSEEK_MODEL")
-    qwen_base_url: str = Field(
-        default="https://dashscope.aliyuncs.com/compatible-mode/v1",
-        validation_alias="QWEN_BASE_URL",
-    )
-    qwen_model: str = Field(default="qwen-max", validation_alias="QWEN_MODEL")
+    gemini_chat_model: str = Field(default="gemini-3.5-flash-lite", validation_alias="GEMINI_CHAT_MODEL")
     minimax_base_url: str = Field(default="https://api.minimax.chat", validation_alias="MINIMAX_BASE_URL")
     minimax_model: str = Field(default="MiniMax-M3", validation_alias="MINIMAX_MODEL")
     gemini_embedding_model: str = Field(default="gemini-embedding-2", validation_alias="GEMINI_EMBEDDING_MODEL")

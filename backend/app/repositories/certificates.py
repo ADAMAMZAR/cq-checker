@@ -18,7 +18,7 @@ class CertificateRepository:
         file_url: str,
         extracted_data: dict,
         status: str,
-        judge_reasoning: Optional[str] = None,
+        reasoning_trace: Optional[str] = None,
         file_hash: Optional[str] = None,
     ) -> CertificateVerification:
         record = CertificateVerification(
@@ -26,7 +26,7 @@ class CertificateRepository:
             file_hash=file_hash,
             extracted_data=extracted_data,
             status=status,
-            judge_reasoning=judge_reasoning,
+            reasoning_trace=reasoning_trace,
         )
         self.session.add(record)
         await self.session.commit()

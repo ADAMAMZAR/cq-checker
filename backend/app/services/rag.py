@@ -1,17 +1,25 @@
+import sys
+# Force python to raise ImportError when attempting to load the incompatible C-extension
+sys.modules['google._upb._message'] = None
+
+import os
+# Force pure Python implementation of Protobuf to bypass Python 3.14 C-extension incompatibilities
+os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
+
 """RAG chatbot orchestration.
 
-Pipeline: semantic cache -> hybrid retrieval -> parent fetch -> DeepSeek
+Pipeline: semantic cache -> hybrid retrieval -> parent fetch -> Gemini
 generation -> write cache + cost log. Multi-turn aware via session history.
 Supports both one-shot (``answer_query``) and SSE streaming
 (``answer_query_stream``) responses.
 """
 
-import json
 import logging
 import time
 from typing import Dict, List, Optional
 
-import requests
+from google import genai
+from google.genai import types
 
 from app.config import settings
 from app.db.session import get_session_factory
@@ -19,12 +27,24 @@ from app.repositories.cache import CacheRepository
 from app.repositories.chat import ChatMessageRepository, ChatLogRepository
 from app.repositories.retrieval import hybrid_search
 from app.services import embeddings
+from app.services.timezones import to_malaysia
 
 logger = logging.getLogger(__name__)
 
-# DeepSeek pricing (approx, USD per 1M tokens)
-INPUT_RATE = 0.20 / 1_000_000
-OUTPUT_RATE = 1.00 / 1_000_000
+_client: Optional[genai.Client] = None
+
+
+def _get_client() -> genai.Client:
+    global _client
+    if _client is None:
+        _client = genai.Client(api_key=settings.gemini_api_key)
+    return _client
+
+
+# Gemini pricing (approx, USD per 1M tokens) — adjust when the published
+# gemini-3.5-flash-lite rates are confirmed.
+INPUT_RATE = 0.10 / 1_000_000
+OUTPUT_RATE = 0.40 / 1_000_000
 
 SYSTEM_PROMPT = (
     "You are CQ Assistant, an internal compliance assistant for GPO. "
@@ -64,73 +84,78 @@ def _sources(results: List[dict]) -> List[dict]:
     return out
 
 
-def _call_deepseek(messages: List[dict]) -> tuple[str, int, int]:
-    url = settings.deepseek_base_url.rstrip("/") + "/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {settings.deepseek_api_key}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": settings.deepseek_model,
-        "messages": messages,
-        "temperature": 0.2,
-    }
-    resp = requests.post(url, headers=headers, json=payload, timeout=90)
-    resp.raise_for_status()
-    body = resp.json()
-    content = body["choices"][0]["message"]["content"]
-    usage = body.get("usage", {})
-    in_tokens = int(usage.get("prompt_tokens", 0))
-    out_tokens = int(usage.get("completion_tokens", 0))
+def _split_messages(messages: List[dict]) -> tuple[Optional[str], List[dict]]:
+    """Split OpenAI-style messages into Gemini system_instruction + contents."""
+    system_parts = []
+    contents = []
+    for m in messages:
+        role = m.get("role")
+        content = m.get("content", "")
+        if role == "system":
+            system_parts.append(content)
+        else:
+            contents.append({
+                "role": "model" if role == "assistant" else "user",
+                "parts": [{"text": content}],
+            })
+    system = "\n".join(system_parts) if system_parts else None
+    return system, contents
+
+
+def _call_gemini(messages: List[dict]) -> tuple[str, int, int]:
+    system, contents = _split_messages(messages)
+    response = _get_client().models.generate_content(
+        model=settings.gemini_chat_model,
+        contents=contents,
+        config=types.GenerateContentConfig(
+            system_instruction=system,
+            temperature=0.2,
+        ),
+    )
+    content = response.text.strip()
+    usage = response.usage_metadata
+    in_tokens = usage.prompt_token_count if usage else 0
+    out_tokens = usage.candidates_token_count if usage else 0
     return content, in_tokens, out_tokens
 
 
-def _iter_deepseek_stream(messages: List[dict]):
-    """Stream DeepSeek completions.
+def _iter_gemini_stream(messages: List[dict]):
+    """Stream Gemini completions.
 
     Yields ``(delta_text, usage_or_None)`` tuples. The final chunk carries the
-    token usage when ``stream_options.include_usage`` is honoured by the API.
+    token usage when the SDK exposes it; otherwise tokens are estimated from the
+    streamed text so cost accounting never hard-fails.
     """
-    url = settings.deepseek_base_url.rstrip("/") + "/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {settings.deepseek_api_key}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": settings.deepseek_model,
-        "messages": messages,
-        "temperature": 0.2,
-        "stream": True,
-        "stream_options": {"include_usage": True},
-    }
-    with requests.post(url, headers=headers, json=payload, timeout=90, stream=True) as resp:
-        resp.raise_for_status()
-        for raw in resp.iter_lines():
-            if not raw:
-                continue
-            if not raw.startswith(b"data:"):
-                continue
-            line = raw[5:].strip()
-            if not line or line == b"[DONE]":
-                continue
-            try:
-                chunk = json.loads(line)
-            except Exception:
-                continue
-            usage = chunk.get("usage")
-            if usage:
-                yield "", usage
-                continue
-            choices = chunk.get("choices") or []
-            if choices:
-                delta = choices[0].get("delta") or {}
-                text = delta.get("content")
-                if text:
-                    yield text, None
+    system, contents = _split_messages(messages)
+    stream = _get_client().models.generate_content_stream(
+        model=settings.gemini_chat_model,
+        contents=contents,
+        config=types.GenerateContentConfig(
+            system_instruction=system,
+            temperature=0.2,
+        ),
+    )
+    parts = []
+    usage = None
+    for chunk in stream:
+        if chunk.text:
+            parts.append(chunk.text)
+            yield chunk.text, None
+        um = getattr(chunk, "usage_metadata", None)
+        if um is not None and um.prompt_token_count is not None:
+            usage = {
+                "prompt_tokens": um.prompt_token_count,
+                "completion_tokens": um.candidates_token_count or 0,
+            }
+    if usage is None and parts:
+        est = max(1, sum(len(t.split()) for t in parts))
+        usage = {"prompt_tokens": 0, "completion_tokens": est}
+    if usage:
+        yield "", usage
 
 
 def _fallback_answer(results: List[dict]) -> str:
-    """Grounded answer when DeepSeek is unavailable — quotes the top parents."""
+    """Grounded answer when Gemini is unavailable — quotes the top parents."""
     if not results:
         return "No relevant manuals found for this query."
     lines = ["Here are the most relevant passages from the manuals:"]
@@ -157,7 +182,7 @@ async def _prepare(query: str, session_id: Optional[str]):
         results = await hybrid_search(session, query_embedding, query, k=3)
 
     messages = None
-    if settings.deepseek_api_key and results:
+    if settings.gemini_api_key and results:
         messages = [{"role": "system", "content": SYSTEM_PROMPT}]
         if session_id:
             messages.extend(await _load_history(factory, session_id, limit=6))
@@ -192,17 +217,17 @@ async def _finalize(
 
 
 async def _generate(messages: Optional[List[dict]], results: List[dict]) -> tuple:
-    """One-shot generation: DeepSeek with grounded fallback.
+    """One-shot generation: Gemini with grounded fallback.
 
     Returns ``(answer, in_tokens, out_tokens, cost)``.
     """
     if messages:
         try:
-            answer, in_tokens, out_tokens = _call_deepseek(messages)
+            answer, in_tokens, out_tokens = _call_gemini(messages)
             cost = _calculate_cost(in_tokens, out_tokens)
             return answer, in_tokens, out_tokens, cost
         except Exception as e:
-            logger.warning(f"DeepSeek chat failed ({e}) — using grounded fallback.")
+            logger.warning(f"Gemini chat failed ({e}) — using grounded fallback.")
     answer = _fallback_answer(results)
     return answer, 0, 0, 0.0
 
@@ -261,7 +286,7 @@ async def answer_query_stream(query: str, session_id: Optional[str] = None):
     if messages:
         try:
             parts = []
-            for text, usage in _iter_deepseek_stream(messages):
+            for text, usage in _iter_gemini_stream(messages):
                 if usage:
                     in_tokens = int(usage.get("prompt_tokens", 0))
                     out_tokens = int(usage.get("completion_tokens", 0))
@@ -270,7 +295,7 @@ async def answer_query_stream(query: str, session_id: Optional[str] = None):
                     yield {"delta": text}
             answer = "".join(parts)
         except Exception as e:
-            logger.warning(f"DeepSeek stream failed ({e}) — using grounded fallback.")
+            logger.warning(f"Gemini stream failed ({e}) — using grounded fallback.")
             answer = _fallback_answer(results)
             yield {"delta": answer}
     else:
@@ -322,5 +347,5 @@ async def get_history(session_id: str) -> List[dict]:
     factory = get_session_factory()
     async with factory() as session:
         msgs = await ChatMessageRepository(session).recent(session_id, limit=50)
-    return [{"role": m.role, "content": m.content, "created_at": m.created_at.isoformat() if m.created_at else None}
+    return [{"role": m.role, "content": m.content, "created_at": to_malaysia(m.created_at).strftime("%d/%m/%Y, %H:%M:%S") if m.created_at else None}
             for m in msgs]

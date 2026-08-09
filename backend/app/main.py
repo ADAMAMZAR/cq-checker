@@ -9,10 +9,10 @@ os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 import hashlib
 import json
 import asyncio
+import logging
 import requests
 import uuid
 from app.models.tables import uuid7
-from datetime import datetime
 from typing import List, Optional
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,19 +25,61 @@ from app.schemas import (
     DocumentIngestResult, DocumentSummary, ChatRequest, ChatResponse, ChatSource,
     ChatHistoryResponse,
 )
-from app.services import audit_data_access, legacy_gemini_audit, storage
+from app.services import audit_data_access, extractor, legacy_gemini_audit, storage
 from app.services import auditor
 from app.services.legacy_gemini_audit import clean_question_label
+from app.services.timezones import now_malaysia, to_malaysia
+
+logger = logging.getLogger(__name__)
+
+
+def _first_cert(meta: dict) -> dict:
+    """Return the first certificate dict from nested ``{"certificates": [...]}``
+    extraction output, or the dict itself when it is already a flat single cert."""
+    if isinstance(meta, dict):
+        certs = meta.get("certificates")
+        if isinstance(certs, list) and certs and isinstance(certs[0], dict):
+            return certs[0]
+    return meta if isinstance(meta, dict) else {}
+
+
+def _wrap_cert(cert: dict) -> dict:
+    """Wrap a flat certificate dict into the nested ``{"certificates": [...]}`` shape."""
+    return {"certificates": [cert] if isinstance(cert, dict) else []}
+
+
+def _questions_for_file(
+    qa_list: list,
+    filename: str,
+    fallback_label: str = "General Attachment",
+    fallback_answers: str = "[]",
+) -> List[tuple]:
+    """Return ``(question_label, qa_answers_json)`` for EVERY QA block whose
+    attachedFile matches the given filename. A merged file attached to several
+    questions yields several pairs so each question gets audited. Falls back to
+    one default pair when the file is not referenced by any question."""
+    fname_lower = (filename or "").lower()
+    matches = []
+    for block in qa_list or []:
+        attached = (block.get("attachedFile") or "").strip().lower()
+        if attached and (attached in fname_lower or fname_lower in attached):
+            matches.append((
+                clean_question_label(block.get("questionLabel", "General Question")),
+                json.dumps(block.get("answers", [])),
+            ))
+    if matches:
+        return matches
+    return [(fallback_label, fallback_answers)]
 
 API_TAGS = [
     {"name": "System / Health", "description": "Service health check."},
-    {"name": "Supplier Audit — Extraction", "description": "Legacy Gemini flow — Phase 1 file extraction (Chrome Extension)."},
-    {"name": "Supplier Audit — Full Run & Comparison", "description": "Legacy Gemini flow — full audit run and comparison phase."},
+    {"name": "Supplier Audit — Extraction", "description": "Gemini extraction — Phase 1 file extraction (Chrome Extension, multi-certificate)."},
+    {"name": "Supplier Audit — Full Run & Comparison", "description": "Gemini extraction — full audit run and comparison phase."},
     {"name": "Supplier Audit — Read / Update", "description": "Legacy audit logs, registry, evidence, and supplier assets."},
     {"name": "Cost Analytics", "description": "Aggregated cost/usage analytics across audits."},
-    {"name": "Certificate Verification", "description": "Phase 4 — DeepSeek extraction + Qwen judge pipeline."},
+    {"name": "Certificate Verification", "description": "Phase 4 — Gemini extraction + deterministic rules pipeline."},
     {"name": "Document Ingestion / RAG", "description": "Phase 5 — manual ingestion: parse, chunk, embed, store."},
-    {"name": "RAG Chatbot", "description": "Phase 6 — semantic cache + hybrid retrieval + DeepSeek generation."},
+    {"name": "RAG Chatbot", "description": "Phase 6 — semantic cache + hybrid retrieval + Gemini generation."},
     {"name": "File Serving", "description": "Serve uploaded files (local disk and legacy Supabase proxy)."},
 ]
 
@@ -70,36 +112,21 @@ async def _process_uploaded_files(
     timestamp: str,
 ):
     """
-    Single-pass file processing: read -> match -> hash -> upload -> dispatch Gemini.
-    Returns (doc_evidences, file_contexts, extracted_docs, total_extraction_cost).
+    Single-pass file processing: read -> hash -> upload -> one Gemini extraction
+    per unique file -> one context per (file, question) so every question that
+    references a file is audited. Returns (doc_evidences, file_contexts,
+    extracted_docs, total_extraction_cost).
     """
-    file_tasks = []
-    file_contexts = []
-
-    qa_attachments = {}
-    for block in qa_list:
-        attached = block.get("attachedFile", "").strip().lower()
-        if attached and attached not in qa_attachments:
-            q_label = clean_question_label(block.get("questionLabel", "General Question"))
-            q_answers = json.dumps(block.get("answers", []))
-            qa_attachments[attached] = (q_label, q_answers)
+    file_entries = []
 
     for file in files:
         raw = await file.read()
-        fname_lower = file.filename.lower() if file.filename else ""
         content_type = file.content_type or "application/pdf"
         orig_filename = file.filename or "document"
-
-        q_label = "General Attachment"
-        q_answers = "[]"
-        for attached_name, (ql, qa) in qa_attachments.items():
-            if attached_name in fname_lower or fname_lower in attached_name:
-                q_label = ql
-                q_answers = qa
-                break
+        q_pairs = _questions_for_file(qa_list, orig_filename)
 
         fhash = hashlib.sha256(raw).hexdigest()
-        cached_record = await audit_data_access.find_metadata_by_hash(fhash, q_label)
+        cached_record = await audit_data_access.find_metadata_by_hash(fhash)
         if cached_record:
             try:
                 metadata_dict = json.loads(cached_record["gemini_extracted_metadata"])
@@ -107,42 +134,54 @@ async def _process_uploaded_files(
                 metadata_dict = {}
             task = asyncio.to_thread(lambda md=metadata_dict: (md, 0, 0, 0.0))
         else:
-            task = asyncio.to_thread(legacy_gemini_audit.extract_certificate_data, raw, content_type, q_label)
+            task = asyncio.to_thread(extractor.extract_certificate_data, raw, content_type)
 
         file_url = await storage.store_and_record(raw, safe_supplier_name, orig_filename, content_type)
 
-        file_contexts.append({
-            "filename": orig_filename, "content_type": content_type,
-            "ariba_question_label": q_label, "ariba_qa_answers": q_answers,
-            "file_hash": fhash, "file_url": file_url,
+        file_entries.append({
+            "filename": orig_filename,
+            "content_type": content_type,
+            "q_pairs": q_pairs,
+            "file_hash": fhash,
+            "file_url": file_url,
+            "task": task,
         })
-        file_tasks.append(task)
 
-    extraction_results = await asyncio.gather(*file_tasks)
+    extraction_results = await asyncio.gather(*[e["task"] for e in file_entries])
 
     doc_evidences = []
+    file_contexts = []
     extracted_docs = []
     total_cost = 0.0
 
-    for ctx, (extracted_data, in_t, out_t, cost) in zip(file_contexts, extraction_results):
-        gemini_supp_name = extracted_data.get("certificateOwnerName", supplier_name)
+    for entry, (extracted_data, in_t, out_t, cost) in zip(file_entries, extraction_results):
+        gemini_supp_name = _first_cert(extracted_data).get("certificateOwnerName", supplier_name)
         total_cost += cost
-        extracted_docs.append({
-            "filename": ctx["filename"], "extracted_data": extracted_data,
-            "input_tokens": in_t, "output_tokens": out_t, "cost_usd": cost,
-        })
-        doc_evidences.append(DocumentEvidence(
-            audit_id=temp_audit_id, supplier_id=0, timestamp=timestamp,
-            supplier_name=supplier_name, filename=ctx["filename"],
-            ariba_question_label=ctx["ariba_question_label"],
-            ariba_qa_answers=ctx["ariba_qa_answers"],
-            gemini_extracted_supplier_name=gemini_supp_name,
-            gemini_extracted_metadata=json.dumps(extracted_data),
-            file_content_type=ctx["content_type"],
-            input_tokens=in_t, output_tokens=out_t,
-            cost_usd=cost,
-            file_hash=ctx["file_hash"], file_url=ctx.get("file_url"),
-        ))
+
+        # One evidence record per (file, question) so a merged file attached to
+        # several questions is fully represented in the database.
+        for q_label, q_answers in entry["q_pairs"]:
+            doc_evidences.append(DocumentEvidence(
+                audit_id=temp_audit_id, supplier_id=0, timestamp=timestamp,
+                supplier_name=supplier_name, filename=entry["filename"],
+                ariba_question_label=q_label,
+                ariba_qa_answers=q_answers,
+                gemini_extracted_supplier_name=gemini_supp_name,
+                gemini_extracted_metadata=json.dumps(extracted_data),
+                file_content_type=entry["content_type"],
+                input_tokens=in_t, output_tokens=out_t,
+                cost_usd=cost,
+                file_hash=entry["file_hash"], file_url=entry.get("file_url"),
+            ))
+            file_contexts.append({
+                "filename": entry["filename"], "content_type": entry["content_type"],
+                "ariba_question_label": q_label, "ariba_qa_answers": q_answers,
+                "file_hash": entry["file_hash"], "file_url": entry.get("file_url"),
+            })
+            extracted_docs.append({
+                "filename": entry["filename"], "extracted_data": extracted_data,
+                "input_tokens": in_t, "output_tokens": out_t, "cost_usd": cost,
+            })
 
     return doc_evidences, file_contexts, extracted_docs, total_cost
 
@@ -210,7 +249,7 @@ async def update_evidence(payload: UpdateEvidenceRequest):
             "ariba_qa_answers": doc.ariba_qa_answers,
         })
         if doc.filename == payload.filename:
-            extracted_results.append(payload.updated_metadata)
+            extracted_results.append(_wrap_cert(payload.updated_metadata))
         else:
             try:
                 meta = json.loads(doc.gemini_extracted_metadata)
@@ -232,7 +271,7 @@ async def update_evidence(payload: UpdateEvidenceRequest):
     success = await audit_data_access.update_document_evidence(
         audit_id=payload.audit_id,
         filename=payload.filename,
-        updated_metadata=payload.updated_metadata,
+        updated_metadata=_wrap_cert(payload.updated_metadata),
     )
     if not success:
         raise HTTPException(
@@ -263,7 +302,7 @@ async def test_extract_file(file: UploadFile = File(...)):
     file_bytes = await file.read()
     mime_type = file.content_type or "application/pdf"
     
-    extracted_data, in_t, out_t, cost = legacy_gemini_audit.extract_certificate_data(file_bytes, mime_type)
+    extracted_data, in_t, out_t, cost = extractor.extract_certificate_data(file_bytes, mime_type)
     return {
         "extracted_data": extracted_data,
         "usage": {
@@ -292,7 +331,7 @@ async def extract_documents(
 
     screenshot_url = None
     if screenshot:
-        screenshot_filename = f"screenshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        screenshot_filename = f"screenshot_{now_malaysia().strftime('%Y%m%d_%H%M%S')}.png"
         screenshot_bytes = screenshot.file.read()
         screenshot.file.seek(0)
         screenshot_url = await storage.store_and_record(
@@ -300,7 +339,7 @@ async def extract_documents(
         )
 
     temp_audit_id = f"TEMP_{uuid7()}"
-    timestamp = datetime.now().strftime("%d/%m/%Y, %H:%M:%S")
+    timestamp = now_malaysia().strftime("%d/%m/%Y, %H:%M:%S")
 
     try:
         qa_list = json.loads(qa_data)
@@ -349,13 +388,14 @@ async def run_audit_comparison(
     """
     matching_docs = await audit_data_access.get_document_evidence_logs(audit_id=audit_id)
 
+    # Each evidence row is one (file, question) pair — audit it directly.
     file_contexts = []
     extracted_results = []
 
     for doc in matching_docs:
         file_contexts.append({
             "filename": doc.filename,
-            "ariba_question_label": legacy_gemini_audit.clean_question_label(doc.ariba_question_label),
+            "ariba_question_label": clean_question_label(doc.ariba_question_label),
             "ariba_qa_answers": doc.ariba_qa_answers
         })
         try:
@@ -366,7 +406,7 @@ async def run_audit_comparison(
 
     expiration_date = "N/A"
     if extracted_results:
-        expiration_date = extracted_results[0].get("expirationDate", "N/A")
+        expiration_date = _first_cert(extracted_results[0]).get("expirationDate", "N/A")
 
     qa_data_title = f"{workspace_title} {cert_type}"
     audit_result, suggested_comment, comparison_table_dict = auditor.run_full_audit(
@@ -449,7 +489,7 @@ async def run_audit(
 
     screenshot_url = None
     if screenshot:
-        screenshot_filename = f"screenshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        screenshot_filename = f"screenshot_{now_malaysia().strftime('%Y%m%d_%H%M%S')}.png"
         screenshot_bytes = screenshot.file.read()
         screenshot.file.seek(0)
         screenshot_url = await storage.store_and_record(
@@ -457,7 +497,7 @@ async def run_audit(
         )
 
     temp_audit_id = f"TEMP_{uuid7()}"
-    timestamp = datetime.now().strftime("%d/%m/%Y, %H:%M:%S")
+    timestamp = now_malaysia().strftime("%d/%m/%Y, %H:%M:%S")
 
     try:
         qa_list = json.loads(qa_data)
@@ -476,7 +516,7 @@ async def run_audit(
 
     expiration_date = "N/A"
     if extracted_docs:
-        expiration_date = extracted_docs[0]["extracted_data"].get("expirationDate", "N/A")
+        expiration_date = _first_cert(extracted_docs[0]["extracted_data"]).get("expirationDate", "N/A")
 
     qa_data_title = f"{workspace_title} {cert_type}"
     audit_result, suggested_comment, comparison_table_dict = auditor.run_full_audit(
@@ -551,12 +591,13 @@ async def verify_certificate(
     qa_data_title: Optional[str] = Form(""),
 ):
     """
-    Phase 4 pipeline: upload a certificate PDF/image -> DeepSeek extraction ->
-    Qwen judge -> save to certificate_verifications -> return verdict + reasoning.
+    Phase 4 pipeline: upload a certificate PDF/image -> Gemini extraction ->
+    deterministic rules -> save to certificate_verifications -> return verdict + reasoning.
     Idempotent by file SHA-256: re-uploading the same file returns the prior
     verdict with zero LLM cost.
     """
-    from app.services import extractor, judge
+    from app.services import extractor
+    from app.services.rules import verify_document, _derive_status_from_rules
     from app.db.session import get_session_factory
     from app.repositories.certificates import CertificateRepository
 
@@ -579,9 +620,8 @@ async def verify_certificate(
             return CertificateVerifyResult(
                 status=existing.status,
                 extracted_data=existing.extracted_data,
-                reasoning_trace=existing.judge_reasoning or "",
+                reasoning_trace=existing.reasoning_trace or "",
                 confidence=float(confidence) if confidence is not None else None,
-                judge_source="cache",
                 record_id=str(existing.id),
             )
 
@@ -589,17 +629,52 @@ async def verify_certificate(
     extracted_data, in_t, out_t, cost = extractor.extract_certificate_data(
         file_bytes, mime_type, question_label,
     )
-    if extracted_data.get("certificateOwnerName") == "Extraction Failed":
+    certs = extracted_data.get("certificates")
+    if not certs or certs[0].get("certificateOwnerName") == "Extraction Failed":
         raise HTTPException(status_code=502, detail="Certificate extraction failed.")
 
-    # 2. Judge
-    verdict = judge.judge_certificate(
-        extracted_data,
-        supplier_name,
-        ariba_question_label=question_label,
-        ariba_qa_answers=qa_answers,
-        qa_data_title=qa_data_title,
-    )
+    # 2. Deterministic rules verdict per certificate, aggregated worst-wins (no LLM judge)
+    def _rule_payload(r):
+        return {
+            "verdict": r.verdict,
+            "region": r.region,
+            "category": r.category,
+            "intercept_type": r.intercept_type,
+            "expiry_status": r.expiry_status,
+            "reasons": r.reasons[:10],
+            "comparison_rows": r.comparison_rows,
+        }
+
+    per_cert = []
+    for idx, cert in enumerate(certs, start=1):
+        rule = verify_document(
+            cert,
+            supplier_name,
+            ariba_question_label=question_label,
+            ariba_qa_answers=qa_answers,
+            qa_data_title=qa_data_title,
+        )
+        per_cert.append({
+            "index": idx,
+            "status": _derive_status_from_rules(rule),
+            "rule_result": _rule_payload(rule),
+            "reasons": rule.reasons[:8],
+        })
+
+    statuses = [pc["status"] for pc in per_cert]
+    if "FAIL" in statuses:
+        status = "FAIL"
+    elif "REQUIRES_HUMAN_REVIEW" in statuses:
+        status = "REQUIRES_HUMAN_REVIEW"
+    else:
+        status = "PASS"
+
+    trace_parts = ["Deterministic rules only."]
+    for pc in per_cert:
+        trace_parts.append(f"Certificate {pc['index']}: " + "; ".join(pc["reasons"]))
+    reasoning_trace = " ".join(trace_parts)
+    confidence = 0.9 if status == "PASS" else 0.7
+    rule_payload = {"overall": status, "certificates": [pc["rule_result"] for pc in per_cert]}
 
     # 3. Persist
     record_id = None
@@ -608,19 +683,18 @@ async def verify_certificate(
         record = await repo.create(
             file_url=file_url or "",
             file_hash=file_hash,
-            extracted_data={**extracted_data, "confidence": verdict["confidence"]},
-            status=verdict["status"],
-            judge_reasoning=verdict["reasoning_trace"],
+            extracted_data={**extracted_data, "confidence": confidence},
+            status=status,
+            reasoning_trace=reasoning_trace,
         )
         record_id = str(record.id)
 
     return CertificateVerifyResult(
-        status=verdict["status"],
+        status=status,
         extracted_data=extracted_data,
-        reasoning_trace=verdict["reasoning_trace"],
-        confidence=verdict["confidence"],
-        judge_source=verdict["judge_source"],
-        rule_result=verdict["rule_result"],
+        reasoning_trace=reasoning_trace,
+        confidence=confidence,
+        rule_result=rule_payload,
         record_id=record_id,
     )
 
@@ -648,9 +722,9 @@ async def list_certificates(limit: int = 50, offset: int = 0):
             file_url=r.file_url,
             extracted_data=r.extracted_data,
             status=r.status,
-            judge_reasoning=r.judge_reasoning,
+            reasoning_trace=r.reasoning_trace,
             confidence=float(confidence) if confidence is not None else None,
-            created_at=r.created_at.isoformat() if r.created_at else None,
+            created_at=to_malaysia(r.created_at).strftime("%d/%m/%Y, %H:%M:%S") if r.created_at else None,
         ))
     return results
 
@@ -700,7 +774,7 @@ async def list_documents(limit: int = 50, offset: int = 0):
                 file_url=doc.file_url,
                 parent_count=counts["parent_chunks"],
                 child_count=counts["child_chunks"],
-                created_at=doc.created_at.isoformat() if doc.created_at else None,
+                created_at=to_malaysia(doc.created_at).strftime("%d/%m/%Y, %H:%M:%S") if doc.created_at else None,
             ))
     return summaries
 
@@ -708,7 +782,7 @@ async def list_documents(limit: int = 50, offset: int = 0):
 @app.post("/api/chat", response_model=ChatResponse, tags=["RAG Chatbot"])
 async def chat(payload: ChatRequest):
     """
-    Phase 6: RAG chatbot query. Semantic cache -> hybrid retrieval -> DeepSeek
+    Phase 6: RAG chatbot query. Semantic cache -> hybrid retrieval -> Gemini
     generation. Multi-turn aware via session_id. Set `stream: true` for an SSE
     streaming answer; otherwise returns the full JSON response.
     """
@@ -909,5 +983,42 @@ async def db_get_table(table_name: str, limit: int = 100, offset: int = 0):
     if table_name not in names:
         raise HTTPException(status_code=404, detail=f"Table '{table_name}' not found.")
     return await database_inspector.get_table_data(table_name, limit=limit, offset=offset)
+
+
+@app.delete("/api/db/tables/{table_name}", tags=["Database Browser"])
+async def db_delete_row(table_name: str, payload: dict):
+    """
+    Delete a single row identified by its primary key.
+
+    Body: ``{"pk": {"<primary_key_column>": "<value>", ...}}``. The table name is
+    validated against the whitelist. Fails with 400 when the row is referenced
+    by other records (foreign key) or the primary key values are incomplete.
+    """
+    from sqlalchemy.exc import IntegrityError
+    from app.services import database_inspector
+
+    valid = await database_inspector.list_tables()
+    names = {t["name"] for t in valid}
+    if table_name not in names:
+        raise HTTPException(status_code=404, detail=f"Table '{table_name}' not found.")
+
+    pk = (payload or {}).get("pk")
+    if not isinstance(pk, dict) or not pk:
+        raise HTTPException(status_code=400, detail="Body must include an object 'pk' with primary key values.")
+
+    try:
+        deleted = await database_inspector.delete_row(table_name, pk)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except IntegrityError as e:
+        logger.error(f"DB delete FK violation on {table_name}: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete this row — it is referenced by other records (foreign key). Delete those first.",
+        )
+
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Row not found.")
+    return {"deleted": deleted}
 
 

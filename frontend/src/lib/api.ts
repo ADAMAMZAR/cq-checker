@@ -278,6 +278,15 @@ export async function fetchDbTable(
   return res.json();
 }
 
+export async function deleteDbRow(table: string, pk: Record<string, string>): Promise<void> {
+  const res = await fetch(`${API_BASE}/db/tables/${encodeURIComponent(table)}`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pk }),
+  });
+  if (!res.ok) throw new Error(await errorDetail(res));
+}
+
 export async function fetchDbSchema(): Promise<DbSchema> {
   const res = await fetch(`${API_BASE}/db/schema`);
   if (!res.ok) throw new Error(await errorDetail(res));

@@ -106,7 +106,7 @@ class CertificateVerification(Base):
     file_hash = Column(String(64), nullable=True, unique=True, index=True)
     extracted_data = Column(JSONB, nullable=False)
     status = Column(String(50), nullable=False)  # PASS, FAIL, REQUIRES_HUMAN_REVIEW
-    judge_reasoning = Column(Text, nullable=True)
+    reasoning_trace = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
