@@ -19,12 +19,12 @@ from app.services.auditor import (
     check_expiry,
     check_special_rules,
     check_standard_equivalence,
+    clean_question_label,
     classify_document,
     match_flexible,
     match_supplier,
     parse_pl_amount,
 )
-from app.services.legacy_gemini_audit import clean_question_label
 
 logger = logging.getLogger(__name__)
 

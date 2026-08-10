@@ -268,11 +268,10 @@ export default function DatabasePreview() {
                     <li key={t.name}>
                       <button
                         onClick={() => handleSelectTable(t.name)}
-                        className={`w-full flex items-center justify-between px-3 py-2 text-left text-xs transition-colors cursor-pointer hover:bg-[var(--accent-primary-soft)] ${
-                          isActive
+                        className={`w-full flex items-center justify-between px-3 py-2 text-left text-xs transition-colors cursor-pointer hover:bg-[var(--accent-primary-soft)] ${isActive
                             ? "bg-[var(--accent-primary-soft)] text-[var(--accent-primary-text)] font-semibold border-l-2 border-[var(--accent-primary-border)]"
                             : "text-[var(--text-secondary)] border-l-2 border-transparent"
-                        }`}
+                          }`}
                       >
                         <span className="flex items-center gap-2 truncate">
                           <IconTable className="w-3.5 h-3.5 shrink-0" />
@@ -354,18 +353,18 @@ export default function DatabasePreview() {
                   <table className="w-full text-left text-xs font-sans text-[var(--text-primary)] border-collapse">
                     <thead className="sticky top-0 z-10 bg-[var(--bg-card)]">
                       <tr className="border-b border-[var(--border-subtle)]">
-                        <th className="py-2 px-3 uppercase tracking-wider text-[10px] text-[var(--text-tertiary)] font-bold w-10">
+                        <th className="py-2 px-3  tracking-wider text-[10px] text-[var(--text-tertiary)] font-bold w-10">
                           #
                         </th>
                         {data.columns.map((col) => (
                           <th
                             key={col}
-                            className="py-2 px-3 uppercase tracking-wider text-[10px] text-[var(--text-tertiary)] font-bold whitespace-nowrap"
+                            className="py-2 px-3  tracking-wider text-[10px] text-[var(--text-tertiary)] font-bold whitespace-nowrap"
                           >
                             {col}
                           </th>
                         ))}
-                        <th className="py-2 px-3 uppercase tracking-wider text-[10px] text-[var(--text-tertiary)] font-bold w-12">
+                        <th className="py-2 px-3  tracking-wider text-[10px] text-[var(--text-tertiary)] font-bold w-12">
                           <span className="sr-only">Actions</span>
                         </th>
                       </tr>

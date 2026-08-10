@@ -9,7 +9,6 @@ import {
   IconPlaylist,
   IconUpload,
   IconArrowLeft,
-  IconShield,
   IconMenu2,
   IconX,
   IconChevronRight,
@@ -87,12 +86,6 @@ export default function AdminSidebar({ active, onChange }: AdminSidebarProps) {
 
           {/* Admin console badge */}
           <div className="flex items-center gap-2.5 px-2.5 h-9">
-            <div
-              className="w-8 h-8 rounded-xl bg-[var(--accent-primary-soft)] text-[var(--accent-primary-text)] border border-[var(--accent-primary-border)] shadow-xs shrink-0 flex items-center justify-center"
-              title="Admin Console"
-            >
-              <IconShield className="w-4.5 h-4.5" />
-            </div>
             <div className={`transition-opacity duration-200 ${expanded ? "opacity-100" : "opacity-0 w-0 pointer-events-none"}`}>
               <h2 className="font-sans font-bold text-sm text-[var(--heading-color)] tracking-tight truncate whitespace-nowrap">
                 Admin Console

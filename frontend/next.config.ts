@@ -8,8 +8,8 @@ const isStaticExport = process.env.STATIC_EXPORT === "1";
 
 const nextConfig: NextConfig = {
   trailingSlash: true,
-  middlewareClientMaxBodySize: "100mb",
   experimental: {
+    middlewareClientMaxBodySize: "100mb",
     serverActions: {
       bodySizeLimit: "100mb",
     },

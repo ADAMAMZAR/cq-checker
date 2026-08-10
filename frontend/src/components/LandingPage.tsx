@@ -5,6 +5,7 @@ import {
   IconArrowRight,
   IconExternalLink,
 } from "@tabler/icons-react";
+import { useRouter } from "next/navigation";
 import type { MainTab } from "./SubNavTabs";
 
 interface LandingPageProps {
@@ -20,6 +21,7 @@ interface PageContainerItem {
   anchor: string;
   isExternal: boolean;
   targetTab?: MainTab;
+  routePath?: string;
 }
 
 const pageContainers: PageContainerItem[] = [
@@ -38,9 +40,10 @@ const pageContainers: PageContainerItem[] = [
     subtitle: "AI Assistant",
     description: "SAP Ariba Procurement Assistant for Vendor Onboarding and Sourcing.",
     iconClass: "fa-thin fa-robot fa-solid",
-    anchor: "#assistant",
+    anchor: "/assistant",
     isExternal: false,
     targetTab: "assistant",
+    routePath: "/assistant",
   },
   {
     id: "supplier-visibility",
@@ -57,13 +60,15 @@ const pageContainers: PageContainerItem[] = [
     subtitle: "Audit Registry Engine",
     description: "Manage, update, and resolve supplier certificate data and audit findings.",
     iconClass: "fa-thin fa-certificate fa-solid",
-    anchor: "#audit",
+    anchor: "/checker?tab=audit",
     isExternal: false,
     targetTab: "audit",
+    routePath: "/checker?tab=audit",
   },
 ];
 
 export default function LandingPage({ onNavigate }: LandingPageProps) {
+  const router = useRouter();
   const HERO_IMAGES = [
     "/hero/hero1.jpg",
     "/hero/hero2.jpg",
@@ -80,9 +85,13 @@ export default function LandingPage({ onNavigate }: LandingPageProps) {
   }, [HERO_IMAGES.length]);
 
   const handleContainerClick = (e: React.MouseEvent<HTMLAnchorElement>, item: PageContainerItem) => {
-    if (!item.isExternal && item.targetTab) {
+    if (!item.isExternal) {
       e.preventDefault();
-      onNavigate(item.targetTab);
+      if (item.routePath) {
+        router.push(item.routePath);
+      } else if (item.targetTab) {
+        onNavigate(item.targetTab);
+      }
     }
   };
 

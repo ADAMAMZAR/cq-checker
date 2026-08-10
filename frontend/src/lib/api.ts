@@ -42,7 +42,7 @@ function base64url(input: string): string {
 export function buildFileUrl(url?: string | null): string {
   if (!url) return "";
   if (url.startsWith("/api/")) return `${API_BASE}${url.slice("/api".length)}`;
-  if (/^https?:\/\//.test(url)) return `${API_BASE}/files/${base64url(url)}`;
+  if (/^https?:\/\//.test(url)) return url;
   return url;
 }
 

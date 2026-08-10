@@ -64,10 +64,7 @@ Grouped by function. Full reference: [`API-Endpoints.md`](../API-Endpoints.md). 
 | Method | Path | Group |
 |---|---|---|
 | `GET` | `/` | System / Health |
-| `POST` | `/api/extract` | Supplier Audit — Extraction |
-| `POST` | `/api/test/extract` | Supplier Audit — Extraction |
 | `POST` | `/api/audit` | Supplier Audit — Full Run |
-| `POST` | `/api/audit/comparison` | Supplier Audit — Comparison |
 | `GET` | `/api/logs` | Supplier Audit — Read |
 | `GET` | `/api/suppliers` | Supplier Audit — Read |
 | `GET` | `/api/audit-registry` | Supplier Audit — Read |
@@ -82,22 +79,15 @@ Grouped by function. Full reference: [`API-Endpoints.md`](../API-Endpoints.md). 
 | `POST` | `/api/chat` | RAG Chatbot |
 | `GET` | `/api/chat/history` | RAG Chatbot |
 | `POST` | `/api/chat/cache/clear` | RAG Chatbot |
-| `GET` | `/api/files/{encoded_url:path}` | File Serving — Legacy |
 | `GET` | `/api/files/local/{folder}/{filename}` | File Serving — Local |
 
 ### 🏷️ System / Health
 
 - **`GET /`** — Health check. Returns `{"status": "healthy", "service": "..."}`.
 
-### 📄 Supplier Audit — Extraction (legacy Gemini flow)
-
-- **`POST /api/extract`** — Phase 1 (Chrome Extension). Single-pass file processing (read → match QA label → hash → upload → Gemini extraction), saves `document_evidence`, returns `audit_id`. Form: `supplier_name`, `supplier_folder?`, `workspace_title`, `cert_type`, `qa_data` (JSON), `files[]`, `screenshot?`.
-- **`POST /api/test/extract`** — Dev helper. Upload one file, return raw Gemini OCR extraction JSON without persisting. Form: `file`.
-
 ### 📄 Supplier Audit — Full Run & Comparison
 
-- **`POST /api/audit`** — Main audit (Chrome Extension). Extraction + code-based `auditor.run_full_audit`, persists `audit_logs` + `document_evidence`. Form: same as `/api/extract`. Returns `AuditResultResponse`.
-- **`POST /api/audit/comparison`** — Phase 2. Runs comparison only from existing evidence by `audit_id`, saves audit log, returns verdict. Form: `audit_id`, `supplier_name`, `workspace_title`, `cert_type`, `qa_data`, `screenshot_url?`, `timestamp`.
+- **`POST /api/audit`** — Main audit (Chrome Extension). Extraction + code-based `auditor.run_full_audit`, persists `audit_logs` + `document_evidence`. Form: `supplier_name`, `supplier_folder?`, `workspace_title`, `cert_type`, `qa_data`, `files[]`, `screenshot?`. Returns `AuditResultResponse`.
 
 ### 📄 Supplier Audit — Read / Update
 

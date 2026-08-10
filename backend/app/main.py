@@ -25,9 +25,9 @@ from app.schemas import (
     DocumentIngestResult, DocumentSummary, ChatRequest, ChatResponse, ChatSource,
     ChatHistoryResponse,
 )
-from app.services import audit_data_access, extractor, legacy_gemini_audit, storage
+from app.services import audit_data_access, extractor, storage
 from app.services import auditor
-from app.services.legacy_gemini_audit import clean_question_label
+from app.services.auditor import clean_question_label
 from app.services.timezones import now_malaysia, to_malaysia
 
 logger = logging.getLogger(__name__)
@@ -73,7 +73,6 @@ def _questions_for_file(
 
 API_TAGS = [
     {"name": "System / Health", "description": "Service health check."},
-    {"name": "Supplier Audit — Extraction", "description": "Gemini extraction — Phase 1 file extraction (Chrome Extension, multi-certificate)."},
     {"name": "Supplier Audit — Full Run & Comparison", "description": "Gemini extraction — full audit run and comparison phase."},
     {"name": "Supplier Audit — Read / Update", "description": "Legacy audit logs, registry, evidence, and supplier assets."},
     {"name": "Cost Analytics", "description": "Aggregated cost/usage analytics across audits."},
@@ -245,7 +244,7 @@ async def update_evidence(payload: UpdateEvidenceRequest):
     for doc in matching_docs:
         file_contexts.append({
             "filename": doc.filename,
-            "ariba_question_label": legacy_gemini_audit.clean_question_label(doc.ariba_question_label),
+            "ariba_question_label": auditor.clean_question_label(doc.ariba_question_label),
             "ariba_qa_answers": doc.ariba_qa_answers,
         })
         if doc.filename == payload.filename:
@@ -294,174 +293,7 @@ async def update_evidence(payload: UpdateEvidenceRequest):
         "comparison_table": comparison_table,
     }
 
-@app.post("/api/test/extract", tags=["Supplier Audit — Extraction"])
-async def test_extract_file(file: UploadFile = File(...)):
-    """
-    Test endpoint to upload a file and return raw Gemini OCR extraction data (JSON).
-    """
-    file_bytes = await file.read()
-    mime_type = file.content_type or "application/pdf"
-    
-    extracted_data, in_t, out_t, cost = extractor.extract_certificate_data(file_bytes, mime_type)
-    return {
-        "extracted_data": extracted_data,
-        "usage": {
-            "input_tokens": in_t,
-            "output_tokens": out_t,
-            "estimated_cost_usd": cost
-        }
-    }
 
-@app.post("/api/extract", tags=["Supplier Audit — Extraction"])
-async def extract_documents(
-    supplier_name: str = Form(...),
-    supplier_folder: Optional[str] = Form(None),
-    workspace_title: str = Form(...),
-    cert_type: str = Form(...),
-    qa_data: str = Form(...),
-    files: List[UploadFile] = File(...),
-    screenshot: Optional[UploadFile] = File(None)
-):
-    """
-    Phase 1 endpoint called by the Chrome Extension.
-    Runs single-pass file processing (read -> match -> hash -> upload -> Gemini),
-    saves DocumentEvidence to database, and returns audit_id for the comparison phase.
-    """
-    safe_supplier_name = supplier_folder or "".join(c for c in supplier_name if c.isalnum() or c in (" ", "_", "-")).strip()
-
-    screenshot_url = None
-    if screenshot:
-        screenshot_filename = f"screenshot_{now_malaysia().strftime('%Y%m%d_%H%M%S')}.png"
-        screenshot_bytes = screenshot.file.read()
-        screenshot.file.seek(0)
-        screenshot_url = await storage.store_and_record(
-            screenshot_bytes, safe_supplier_name, screenshot_filename, "image/png"
-        )
-
-    temp_audit_id = f"TEMP_{uuid7()}"
-    timestamp = now_malaysia().strftime("%d/%m/%Y, %H:%M:%S")
-
-    try:
-        qa_list = json.loads(qa_data)
-        if isinstance(qa_list, dict):
-            qa_list = [qa_list]
-        elif not isinstance(qa_list, list):
-            qa_list = []
-    except Exception:
-        qa_list = []
-
-    doc_evidences, file_contexts, extracted_docs, total_extraction_cost = await _process_uploaded_files(
-        supplier_name, safe_supplier_name, files, qa_list, temp_audit_id, timestamp,
-    )
-
-    resolved_audit_id = await audit_data_access.log_audit_run(supplier_name, doc_evidences, None)
-    if not resolved_audit_id:
-        resolved_audit_id = temp_audit_id
-
-    return {
-        "audit_id": resolved_audit_id,
-        "supplier_name": supplier_name,
-        "workspace_title": workspace_title,
-        "cert_type": cert_type,
-        "qa_data": qa_data,
-        "screenshot_url": screenshot_url,
-        "timestamp": timestamp,
-        "file_count": len(doc_evidences),
-        "total_extraction_cost_usd": total_extraction_cost,
-    }
-
-
-@app.post("/api/audit/comparison", response_model=AuditResultResponse, tags=["Supplier Audit — Full Run & Comparison"])
-async def run_audit_comparison(
-    audit_id: str = Form(...),
-    supplier_name: str = Form(...),
-    workspace_title: str = Form(...),
-    cert_type: str = Form(...),
-    qa_data: str = Form(...),
-    screenshot_url: Optional[str] = Form(None),
-    timestamp: str = Form(...)
-):
-    """
-    Phase 2 endpoint called by the Chrome Extension after extraction.
-    Loads document evidence from DB by audit_id, runs the code-based auditor comparison,
-    saves the full audit log including results, and returns the verdict.
-    """
-    matching_docs = await audit_data_access.get_document_evidence_logs(audit_id=audit_id)
-
-    # Each evidence row is one (file, question) pair — audit it directly.
-    file_contexts = []
-    extracted_results = []
-
-    for doc in matching_docs:
-        file_contexts.append({
-            "filename": doc.filename,
-            "ariba_question_label": clean_question_label(doc.ariba_question_label),
-            "ariba_qa_answers": doc.ariba_qa_answers
-        })
-        try:
-            meta = json.loads(doc.gemini_extracted_metadata)
-        except Exception:
-            meta = {}
-        extracted_results.append(meta)
-
-    qa_data_title = f"{workspace_title} {cert_type}"
-    audit_result, suggested_comment, comparison_table_dict = auditor.run_full_audit(
-        supplier_name,
-        file_contexts,
-        extracted_results,
-        qa_data_title=qa_data_title,
-    )
-
-    total_run_cost = sum(
-        doc.input_tokens * 0.30 / 1_000_000 + doc.output_tokens * 2.50 / 1_000_000
-        for doc in matching_docs
-    )
-    compiled_data = json.dumps([
-        {"filename": fc["filename"], "extracted_data": er}
-        for fc, er in zip(file_contexts, extracted_results)
-    ])
-
-    audit_log = AuditLogEntry(
-        audit_id=audit_id,
-        supplier_id=0,
-        timestamp=timestamp,
-        supplier_name=supplier_name,
-        workspace_title=workspace_title,
-        cert_type=cert_type,
-        complete_qa_data_dump=qa_data,
-        compiled_extracted_data=compiled_data,
-        result=audit_result,
-        suggested_comment=suggested_comment,
-        screenshot_url=screenshot_url or None,
-        comparison_input_tokens=0,
-        comparison_output_tokens=0,
-        comparison_cost_usd=0.0,
-        total_run_cost_usd=total_run_cost,
-        comparison_table=comparison_table_dict
-    )
-
-    resolved_audit_id = await audit_data_access.log_audit_run(supplier_name, [], audit_log)
-    if not resolved_audit_id:
-        resolved_audit_id = audit_id
-
-    return AuditResultResponse(
-        audit_id=resolved_audit_id,
-        supplier_id=0,
-        supplier_name=supplier_name,
-        workspace_title=workspace_title,
-        cert_type=cert_type,
-        filename=", ".join(doc.filename for doc in matching_docs),
-        result=audit_result,
-        suggested_comment=suggested_comment,
-        screenshot_url=screenshot_url or None,
-        comparison_input_tokens=0,
-        comparison_output_tokens=0,
-        comparison_cost_usd=0.0,
-        comparison_cost_myr=0.0,
-        total_run_cost_usd=total_run_cost,
-        total_run_cost_myr=total_run_cost * 4.70,
-        comparison_table=comparison_table_dict
-    )
 
 
 @app.post("/api/audit", response_model=AuditResultResponse, tags=["Supplier Audit — Full Run & Comparison"])
@@ -844,64 +676,7 @@ async def get_supplier_evidence(supplier_id: int):
 MAX_PROXY_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
 
 
-def _build_proxy_url(raw_url: str) -> str:
-    import base64
-    padded = raw_url + "=" * ((4 - len(raw_url) % 4) % 4)
-    return base64.urlsafe_b64decode(padded).decode("utf-8")
 
-
-@app.get("/api/files/{encoded_url:path}", tags=["File Serving"])
-def proxy_supabase_file(encoded_url: str):
-    """
-    Legacy: proxies a file from Supabase Storage through the backend for
-    historical records. New uploads use /api/files/local/* instead.
-    Only allows URLs matching the configured SUPABASE_URL storage prefix.
-    """
-    try:
-        url = _build_proxy_url(encoded_url)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid URL encoding: {e}")
-
-    allowed_prefix = settings.supabase_url.rstrip("/") + "/storage/v1/object/public/certificates/"
-    if not url.startswith(allowed_prefix):
-        raise HTTPException(status_code=404, detail="Not found.")
-
-    try:
-        resp = requests.get(url, stream=True, timeout=30, headers={"User-Agent": "GPO-Auditor/1.0"})
-        if resp.status_code == 404:
-            raise HTTPException(status_code=404, detail="File not found in remote storage.")
-        resp.raise_for_status()
-
-        content_length = resp.headers.get("content-length")
-        if content_length and int(content_length) > MAX_PROXY_FILE_SIZE:
-            resp.close()
-            raise HTTPException(status_code=413, detail="File too large.")
-
-        chunks = []
-        total = 0
-        for chunk in resp.iter_content(65536):
-            total += len(chunk)
-            if total > MAX_PROXY_FILE_SIZE:
-                resp.close()
-                raise HTTPException(status_code=413, detail="File too large.")
-            chunks.append(chunk)
-        body = b"".join(chunks)
-
-        filename = url.split("/")[-1].split("?")[0]
-        from urllib.parse import unquote
-        filename = unquote(filename)
-        content_type = resp.headers.get("content-type", "application/octet-stream")
-        return Response(content=body, media_type=content_type,
-                        headers={
-                            "Content-Disposition": f'inline; filename="{filename}"',
-                            "Access-Control-Allow-Origin": "*",
-                        })
-    except HTTPException:
-        raise
-    except requests.HTTPError as e:
-        raise HTTPException(status_code=e.response.status_code if e.response is not None else 502, detail=f"Storage fetch failed: {e}")
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Failed to fetch file: {e}")
 
 
 @app.get("/api/files/local/{folder}/{filename}", tags=["File Serving"])

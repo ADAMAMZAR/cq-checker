@@ -9,25 +9,21 @@ Grouped by function. Source: `backend/app/main.py`
 | # | Method | Path | Group |
 |---|---|---|---|
 | 1 | `GET` | `/` | System / Health |
-| 2 | `POST` | `/api/extract` | Supplier Audit — Extraction |
-| 3 | `POST` | `/api/test/extract` | Supplier Audit — Extraction |
-| 4 | `POST` | `/api/audit` | Supplier Audit — Full Run |
-| 5 | `POST` | `/api/audit/comparison` | Supplier Audit — Comparison |
-| 6 | `GET` | `/api/logs` | Supplier Audit — Read |
-| 7 | `GET` | `/api/audit-registry` | Supplier Audit — Read |
-| 8 | `GET` | `/api/evidence` | Supplier Audit — Read |
-| 9 | `PUT` | `/api/evidence` | Supplier Audit — Update |
-| 10 | `GET` | `/api/logs/{supplier_id}/assets` | Supplier Audit — Read |
-| 11 | `GET` | `/api/costs` | Cost Analytics |
-| 12 | `POST` | `/api/certificates/verify` | Certificate Verification |
-| 13 | `GET` | `/api/certificates` | Certificate Verification |
-| 14 | `POST` | `/api/documents/upload` | Document Ingestion / RAG |
-| 15 | `GET` | `/api/documents` | Document Ingestion / RAG |
-| 16 | `POST` | `/api/chat` | RAG Chatbot |
-| 17 | `GET` | `/api/chat/history` | RAG Chatbot |
-| 18 | `POST` | `/api/chat/cache/clear` | RAG Chatbot |
-| 19 | `GET` | `/api/files/{encoded_url:path}` | File Serving — Legacy |
-| 20 | `GET` | `/api/files/local/{folder}/{filename}` | File Serving — Local |
+| 2 | `POST` | `/api/audit` | Supplier Audit — Full Run |
+| 3 | `GET` | `/api/logs` | Supplier Audit — Read |
+| 4 | `GET` | `/api/audit-registry` | Supplier Audit — Read |
+| 5 | `GET` | `/api/evidence` | Supplier Audit — Read |
+| 6 | `PUT` | `/api/evidence` | Supplier Audit — Update |
+| 7 | `GET` | `/api/logs/{supplier_id}/assets` | Supplier Audit — Read |
+| 8 | `GET` | `/api/costs` | Cost Analytics |
+| 9 | `POST` | `/api/certificates/verify` | Certificate Verification |
+| 10 | `GET` | `/api/certificates` | Certificate Verification |
+| 11 | `POST` | `/api/documents/upload` | Document Ingestion / RAG |
+| 12 | `GET` | `/api/documents` | Document Ingestion / RAG |
+| 13 | `POST` | `/api/chat` | RAG Chatbot |
+| 14 | `GET` | `/api/chat/history` | RAG Chatbot |
+| 15 | `POST` | `/api/chat/cache/clear` | RAG Chatbot |
+| 16 | `GET` | `/api/files/local/{folder}/{filename}` | File Serving — Local |
 
 ---
 
@@ -39,31 +35,12 @@ Grouped by function. Source: `backend/app/main.py`
 
 ---
 
-## 📄 Supplier Audit — Extraction (legacy Gemini flow)
-
-### `POST /api/extract`
-- **Purpose:** Phase 1 — Chrome Extension entry point. Single-pass file processing: read → match QA label → hash → upload → Gemini extraction. Saves `document_evidence` rows and returns an `audit_id` for the comparison phase.
-- **Form params:** `supplier_name`, `supplier_folder` (optional), `workspace_title`, `cert_type`, `qa_data` (JSON), `files` (multi), `screenshot` (optional).
-- **Returns:** `audit_id`, `supplier_name`, `file_count`, `total_extraction_cost_usd`, etc.
-
-### `POST /api/test/extract`
-- **Purpose:** Dev/test helper — upload one file and return raw Gemini OCR extraction JSON without persisting anything.
-- **Form params:** `file`.
-- **Returns:** `extracted_data` + token/cost `usage`.
-
----
-
 ## 📄 Supplier Audit — Full Run & Comparison
 
 ### `POST /api/audit`
 - **Purpose:** Main audit endpoint (Chrome Extension). Single-pass extraction **+** code-based `auditor.run_full_audit` comparison, then persists `audit_logs` + `document_evidence` to Neon.
 - **Form params:** `supplier_name`, `supplier_folder` (optional), `workspace_title`, `cert_type`, `qa_data` (JSON), `files` (multi), `screenshot` (optional).
 - **Returns:** full `AuditResultResponse` (result, expiration, comment, costs, `comparison_table`).
-
-### `POST /api/audit/comparison`
-- **Purpose:** Phase 2 — run only the comparison half. Loads evidence from DB by `audit_id`, runs the auditor, saves the audit log, returns the verdict.
-- **Form params:** `audit_id`, `supplier_name`, `workspace_title`, `cert_type`, `qa_data`, `screenshot_url` (optional), `timestamp`.
-- **Returns:** `AuditResultResponse` (includes MYR-cost fields).
 
 ---
 
@@ -151,11 +128,6 @@ Grouped by function. Source: `backend/app/main.py`
 
 ## 🗂️ File Serving
 
-### `GET /api/files/{encoded_url:path}`
-- **Purpose:** **Legacy** — proxy a file from Supabase Storage through the backend (historical records only). Restricts to the configured Supabase `certificates` bucket prefix; 50 MB cap.
-- **Path param:** base64url-encoded Supabase object URL.
-- **Errors:** 400 (bad encoding), 404 (disallowed URL), 413 (too large), 502 (storage fetch failed).
-
 ### `GET /api/files/local/{folder}/{filename}`
 - **Purpose:** Serve files uploaded to the local-disk storage provider (dev). Path traversal prevented by resolving inside `UPLOAD_DIR`; 50 MB cap.
 - **Path params:** `folder`, `filename` (URL-decoded).
@@ -165,7 +137,7 @@ Grouped by function. Source: `backend/app/main.py`
 
 ## 🧭 Workflow Map (which endpoints a flow calls)
 
-- **Supplier Audit (Chrome Extension):** `POST /api/audit` (or `/api/extract` → `/api/audit/comparison`) → `GET /api/audit-registry` / `/api/logs` / `/api/evidence` / `/api/costs` / `/api/logs/{id}/assets`.
+- **Supplier Audit (Chrome Extension):** `POST /api/audit` → `GET /api/audit-registry` / `/api/logs` / `/api/evidence` / `/api/costs` / `/api/logs/{id}/assets`.
 - **Certificate Verification:** `POST /api/certificates/verify` → `GET /api/certificates`.
 - **Document RAG:** `POST /api/documents/upload` → `GET /api/documents` → `POST /api/chat` (+ `GET /api/chat/history`, `POST /api/chat/cache/clear`).
-- **File rendering:** `GET /api/files/local/*` (new) or `GET /api/files/{b64}` (legacy Supabase).
+- **File rendering:** `GET /api/files/local/*`.

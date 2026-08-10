@@ -757,25 +757,89 @@ def clean_question_label(label: Optional[str]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _expected_cert_type(qa_answers_str: str) -> str:
-    """Extract the question's expected certificate type from its QA answers."""
+def _expected_cert_info(ctx: dict) -> tuple[str, str]:
+    """Extract expected (certificate_type, state_location) for a question context.
+    Reads from QA answers list or infers from the question label.
+    """
+    qa_answers_str = ctx.get("ariba_qa_answers", "[]")
+    q_label = ctx.get("ariba_question_label", "")
+
+    exp_type = ""
+    exp_state = ""
+
     try:
         qa_list = json.loads(qa_answers_str or "[]")
         if isinstance(qa_list, list):
             for item in qa_list:
-                label = str(item.get("label", "")).strip().lower()
-                if "certificate type" in label:
-                    return str(item.get("value", ""))
+                lbl = str(item.get("label", "")).strip().lower()
+                val = str(item.get("value", "")).strip()
+                if "certificate type" in lbl and val:
+                    exp_type = val
+                elif ("state" in lbl or "location" in lbl) and val:
+                    exp_state = val
     except Exception:
         pass
-    return ""
+
+    # Infer from question label if expected type/state are missing
+    q_label_lower = q_label.lower()
+
+    if not exp_type:
+        if "workers' compensation" in q_label_lower or "workers compensation" in q_label_lower:
+            exp_type = "Workers Compensation"
+        elif "public liability" in q_label_lower:
+            exp_type = "Public Liability"
+        elif "professional indemnity" in q_label_lower:
+            exp_type = "Professional Indemnity"
+        elif "motor vehicle" in q_label_lower:
+            exp_type = "Motor Vehicle"
+        elif "iso 9001" in q_label_lower:
+            exp_type = "ISO 9001"
+        elif "iso 14001" in q_label_lower:
+            exp_type = "ISO 14001"
+        elif "iso 45001" in q_label_lower or "ohsas 18001" in q_label_lower:
+            exp_type = "ISO 45001"
+        elif "cidb" in q_label_lower:
+            exp_type = "CIDB Certificate"
+        elif "ssm" in q_label_lower:
+            exp_type = "SSM Profile"
+
+    if not exp_state:
+        # Detect Australian state in parentheses or standalone word
+        au_states = ["NSW", "VIC", "QLD", "WA", "SA", "TAS", "ACT", "NT"]
+        for st in au_states:
+            if re.search(rf'\b{st}\b', q_label, re.IGNORECASE):
+                exp_state = st
+                break
+
+    return exp_type, exp_state
 
 
-def _cert_matches_expected(cert: dict, expected: str, region_config) -> bool:
+def _cert_matches_expected(cert: dict, expected_type: str, expected_state: str, region_config) -> bool:
     ev_ct = str(cert.get("certificateType", "") or "")
     if not ev_ct or ev_ct == "N/A":
         return False
-    return match_flexible(ev_ct, expected) or check_standard_equivalence(ev_ct, expected, region_config)
+
+    type_matched = True
+    if expected_type:
+        type_matched = match_flexible(ev_ct, expected_type) or check_standard_equivalence(ev_ct, expected_type, region_config)
+
+    if not type_matched:
+        return False
+
+    if expected_state:
+        ev_loc = str(cert.get("certificateLocation", "") or "")
+        cert_text = json.dumps(cert).upper()
+        st_upper = expected_state.upper()
+
+        # Check location or full cert text for state match
+        state_matched = (
+            re.search(rf'\b{st_upper}\b', ev_loc, re.IGNORECASE) is not None
+            or re.search(rf'\b{st_upper}\b', cert_text) is not None
+        )
+        if not state_matched:
+            return False
+
+    return True
 
 
 def run_full_audit(
@@ -799,17 +863,28 @@ def run_full_audit(
     # comparison entry per certificate. Flat single-cert dicts pass through
     # unchanged (cert_index stays None), preserving legacy behaviour.
     # When a merged file holds several certificates, only the ones matching the
-    # question's expected certificate type are audited against that question —
-    # an unrelated certificate in the same file must not fail it.
+    # question's expected certificate type and state are audited against that question.
     pairs = []
     for ctx, extracted in zip(file_contexts, extraction_results):
         certs = extracted.get("certificates") if isinstance(extracted, dict) else None
         if isinstance(certs, list) and len(certs) > 1:
-            expected = _expected_cert_type(ctx.get("ariba_qa_answers", "[]"))
-            selected = [c for c in certs if _cert_matches_expected(c, expected, region_config)] if expected else []
-            if not selected:
-                selected = certs
-            for i, cert in enumerate(selected, start=1):
+            exp_type, exp_state = _expected_cert_info(ctx)
+            selected_with_idx = [
+                (i, c) for i, c in enumerate(certs, start=1)
+                if _cert_matches_expected(c, exp_type, exp_state, region_config)
+            ]
+            if not selected_with_idx and exp_type:
+                # Fall back to type matching if state match is unavailable
+                selected_with_idx = [
+                    (i, c) for i, c in enumerate(certs, start=1)
+                    if match_flexible(str(c.get("certificateType", "")), exp_type)
+                    or check_standard_equivalence(str(c.get("certificateType", "")), exp_type, region_config)
+                ]
+            if not selected_with_idx:
+                # If no cert matches type or state, pick only the FIRST cert as single representative candidate
+                selected_with_idx = [(1, certs[0])]
+
+            for i, cert in selected_with_idx:
                 pairs.append((ctx, cert, i))
         elif isinstance(certs, list) and len(certs) == 1:
             # Single-cert nested output unwraps to the flat dict (legacy shape).
@@ -1016,6 +1091,17 @@ def run_full_audit(
             label = f"{entry['label']} ({entry['filename']})" if entry["filename"] else entry["label"]
             block = f"{label}:\n" + "\n".join(f"- {line}" for line in entry["lines"])
             all_comment_parts.append(block)
+
+    def _comment_sort_key(comment_block: str) -> list[int]:
+        m = re.search(r'(\d+(?:\.\d+)*)', comment_block)
+        if m:
+            try:
+                return [int(x) for x in m.group(1).split(".")]
+            except Exception:
+                pass
+        return [9999]
+
+    all_comment_parts.sort(key=_comment_sort_key)
 
     if not all_comment_parts:
         suggested_comment = "All match."

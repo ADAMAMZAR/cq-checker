@@ -21,7 +21,9 @@ interface CitationSidePanelProps {
   onClose: () => void;
 }
 
-export default function CitationSidePanel({ fileUrl, initialPage = 1, title, onClose }: CitationSidePanelProps) {
+import { memo } from "react";
+
+export default memo(function CitationSidePanel({ fileUrl, initialPage = 1, title, onClose }: CitationSidePanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(560);
   const [numPages, setNumPages] = useState<number | null>(null);
@@ -165,4 +167,4 @@ export default function CitationSidePanel({ fileUrl, initialPage = 1, title, onC
       </div>
     </div>
   );
-}
+});

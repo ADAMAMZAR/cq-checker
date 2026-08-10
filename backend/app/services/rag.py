@@ -48,13 +48,12 @@ OUTPUT_RATE = 2.50 / 1_000_000
 
 SYSTEM_PROMPT = (
     "You are CQ Assistant, an internal compliance assistant for GPO.\n"
-    "Answer thoroughly, accurately, and comprehensively from the provided source passages.\n"
-    "- When answering questions about procedures, self-registration, or forms, list ALL step-by-step instructions, "
-    "specific form fields, required fields (*), country registration examples, dropdown options, and primary contact fields "
-    "extracted from the slides/documents.\n"
-    "- Do not provide vague or brief summaries if the sources contain detailed form fields or UI instructions.\n"
+    "Answer accurately, directly, and concisely from the provided source passages.\n"
+    "- When answering questions about procedures, self-registration, or forms, list key step-by-step instructions "
+    "and required fields extracted from the slides/documents in clean, direct bullet points.\n"
+    "- Avoid conversational preambles, introductory filler, or repeating the user's question.\n"
     "- If the passages do not contain the answer, say so clearly.\n"
-    "- Cite source passages using page references like [1], [2]."
+    "- MANDATORY: You MUST cite the relevant source passage number in brackets like [1] or [2] after every key fact or step."
 )
 
 
@@ -91,49 +90,56 @@ def _sources(results: List[dict]) -> List[dict]:
 def _reindex_citations(answer: str, results: List[dict]) -> Tuple[str, List[dict]]:
     """Re-index citation numbers in Gemini's answer so every response starts cleanly at [1].
 
-    Returns (reindexed_answer, ordered_sources).
+    Guarantees that citation [N] in the text maps 1-to-1 with ordered_sources[N - 1].
     """
     import re
     if not results or not answer:
         return answer, _sources(results)
 
     bracket_matches = re.findall(r'\[([\d\s,]+)\]', answer)
-    cited_indices = []
+    raw_nums = []
     for match in bracket_matches:
-        nums = [int(n.strip()) for n in match.split(',') if n.strip().isdigit()]
-        for num in nums:
-            if 1 <= num <= len(results) and num not in cited_indices:
-                cited_indices.append(num)
+        for n_str in match.split(','):
+            if n_str.strip().isdigit():
+                num = int(n_str.strip())
+                if 1 <= num <= len(results) and num not in raw_nums:
+                    raw_nums.append(num)
 
-    if not cited_indices:
+    if not raw_nums:
         return answer, _sources(results)
 
-    old_to_new = {old_num: new_idx + 1 for new_idx, old_num in enumerate(cited_indices)}
-
-    def replace_bracket(match_obj):
-        raw_inside = match_obj.group(1)
-        nums = [int(n.strip()) for n in raw_inside.split(',') if n.strip().isdigit()]
-        if not nums:
-            return match_obj.group(0)
-        new_nums = [str(old_to_new[n]) if n in old_to_new else str(n) for n in nums]
-        return f"[{', '.join(new_nums)}]"
-
-    reindexed_answer = re.sub(r'\[([\d\s,]+)\]', replace_bracket, answer)
-
     ordered_sources = []
-    seen = set()
-    for old_num in cited_indices:
+    seen_keys = {}
+    old_to_new = {}
+
+    for old_num in raw_nums:
         r = results[old_num - 1]
         key = (r["title"], r["page_number"])
-        if key not in seen:
-            seen.add(key)
+        if key not in seen_keys:
+            new_idx = len(ordered_sources) + 1
+            seen_keys[key] = new_idx
             ordered_sources.append({
                 "title": r["title"],
                 "page_number": r["page_number"],
                 "snippet": (r["parent_content"] or "")[:300],
                 "file_url": r.get("file_url"),
             })
+        old_to_new[old_num] = seen_keys[key]
 
+    def replace_bracket(match_obj):
+        raw_inside = match_obj.group(1)
+        nums = [int(n.strip()) for n in raw_inside.split(',') if n.strip().isdigit()]
+        if not nums:
+            return match_obj.group(0)
+        valid_new_nums = []
+        for n in nums:
+            if n in old_to_new:
+                valid_new_nums.append(str(old_to_new[n]))
+        if not valid_new_nums:
+            return ""
+        return f"[{', '.join(valid_new_nums)}]"
+
+    reindexed_answer = re.sub(r'\[([\d\s,]+)\]', replace_bracket, answer)
     return reindexed_answer, ordered_sources
 
 
@@ -163,6 +169,7 @@ def _call_gemini(messages: List[dict]) -> tuple[str, int, int]:
         config=types.GenerateContentConfig(
             system_instruction=system,
             temperature=0.2,
+            max_output_tokens=768,
         ),
     )
     content = response.text.strip()
@@ -186,6 +193,7 @@ def _iter_gemini_stream(messages: List[dict]):
         config=types.GenerateContentConfig(
             system_instruction=system,
             temperature=0.2,
+            max_output_tokens=768,
         ),
     )
     parts = []
@@ -218,13 +226,33 @@ def _fallback_answer(results: List[dict]) -> str:
     return "\n".join(lines)
 
 
+def normalize_query(query: str) -> str:
+    """Clean conversational filler, lower-case, and trim whitespace/punctuation for cache matching."""
+    if not query:
+        return ""
+    text = query.lower().strip()
+    fillers = [
+        "can you please tell me", "can you tell me", "can you show me",
+        "could you please explain", "could you explain", "please tell me",
+        "please explain", "what is the process to", "how do i", "how to",
+        "show me", "tell me",
+    ]
+    for filler in fillers:
+        if text.startswith(filler):
+            text = text[len(filler):].strip()
+            break
+    text = text.rstrip("?!.,;:")
+    return text or query.strip()
+
+
 async def _prepare(query: str, session_id: Optional[str]):
     """Shared front-half: embed -> cache check -> retrieval -> build LLM messages.
 
     Returns ``(cached_info_or_None, results, messages, query_embedding)``.
     """
     factory = get_session_factory()
-    query_embedding = embeddings.embed_text(query)
+    norm_query = normalize_query(query)
+    query_embedding = embeddings.embed_text(norm_query)
     async with factory() as session:
         cache_repo = CacheRepository(session)
         cached = await cache_repo.find_cached(

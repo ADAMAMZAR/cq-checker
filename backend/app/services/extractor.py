@@ -49,7 +49,7 @@ SINGLE_CERT_SCHEMA = {
         "certificateOwnerName", "issuerName", "certificateType",
         "certificateNumber", "expirationDate", "effectiveDate",
         "certificateLocation", "yearOfPublication",
-        "confidence", "fieldConfidence",
+        "confidence",
     ],
     "properties": {
         "certificateOwnerName": {"type": "string"},
@@ -67,30 +67,6 @@ SINGLE_CERT_SCHEMA = {
         "isPermanent": {"type": "boolean"},
         "recertificationLetter": {"type": "boolean"},
         "confidence": {"type": "number"},
-        "fieldConfidence": {
-            "type": "object",
-            "properties": {
-                "certificateOwnerName": {"type": "number"},
-                "issuerName": {"type": "number"},
-                "certificateType": {"type": "number"},
-                "certificateNumber": {"type": "number"},
-                "expirationDate": {"type": "number"},
-                "effectiveDate": {"type": "number"},
-                "certificateLocation": {"type": "number"},
-                "yearOfPublication": {"type": "number"},
-                "publicLiabilityAmount": {"type": "number"},
-                "currency": {"type": "number"},
-                "hasMultipleCertificates": {"type": "number"},
-                "additionalCertificateType": {"type": "number"},
-                "isPermanent": {"type": "number"},
-                "recertificationLetter": {"type": "number"},
-            },
-            "required": [
-                "certificateOwnerName", "issuerName", "certificateType",
-                "certificateNumber", "expirationDate", "effectiveDate",
-                "certificateLocation", "yearOfPublication",
-            ],
-        },
     },
 }
 
@@ -116,16 +92,6 @@ MOCK_EXTRACTION = {
         "certificateLocation": "Selangor, Malaysia",
         "yearOfPublication": "2026",
         "confidence": 0.9,
-        "fieldConfidence": {
-            "certificateOwnerName": 0.9,
-            "issuerName": 0.9,
-            "certificateType": 0.9,
-            "certificateNumber": 0.9,
-            "expirationDate": 0.9,
-            "effectiveDate": 0.9,
-            "certificateLocation": 0.9,
-            "yearOfPublication": 0.9,
-        },
     }],
 }
 
@@ -139,16 +105,6 @@ FAILED_EXTRACTION = {
         "effectiveDate": "N/A",
         "certificateLocation": "N/A",
         "confidence": 0.0,
-        "fieldConfidence": {
-            "certificateOwnerName": 0.0,
-            "issuerName": 0.0,
-            "certificateType": 0.0,
-            "certificateNumber": 0.0,
-            "expirationDate": 0.0,
-            "effectiveDate": 0.0,
-            "certificateLocation": 0.0,
-            "yearOfPublication": 0.0,
-        },
     }],
 }
 
@@ -173,8 +129,7 @@ def _build_prompt(question_label: Optional[str]) -> str:
         "(e.g. '20,000,000', '20M'). Extract the currency under currency ('$' alone -> 'AUD'). "
         "If the certificate is permanent/non-expiring (e.g. 'KEKAL SAH', 'NO EXPIRY'), set isPermanent to true. "
         "If it is a recertification/renewal letter (not a full certificate), set recertificationLetter to true. "
-        "For each extracted field, output a confidence score between 0 and 1 under 'fieldConfidence', "
-        "and output an overall 'confidence' score (0-1) for the whole certificate."
+        "Output an overall 'confidence' score (0-1) for the whole certificate."
     )
 
 

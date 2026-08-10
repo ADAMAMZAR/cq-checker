@@ -56,7 +56,6 @@ def test_extract_success_parses_json(mock_gemini_model):
             "certificateLocation": "Selangor, Malaysia",
             "yearOfPublication": "2026",
             "confidence": 0.95,
-            "fieldConfidence": {"certificateOwnerName": 0.99},
         }],
     }
     mock_response = MagicMock()
@@ -71,7 +70,6 @@ def test_extract_success_parses_json(mock_gemini_model):
         data, in_t, out_t, cost = extractor.extract_certificate_data(b"%PDF-x", "application/pdf")
     assert data["certificates"][0]["certificateOwnerName"] == "ACME"
     assert data["certificates"][0]["confidence"] == 0.95
-    assert data["certificates"][0]["fieldConfidence"]["certificateOwnerName"] == 0.99
     assert in_t == 500
     assert out_t == 200
     assert cost > 0
