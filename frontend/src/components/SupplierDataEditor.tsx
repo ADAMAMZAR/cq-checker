@@ -8,7 +8,7 @@ import {
 import type { DocumentEvidence } from "@/types";
 import { INITIAL_FORM_FIELDS } from "@/types";
 import { updateEvidenceMetadata, buildFileUrl } from "@/lib/api";
-import { cleanQuestionLabel, parseEvidenceMetadata } from "@/lib/utils";
+import { cleanQuestionLabel, parseEvidenceMetadata, compareQuestionLabels } from "@/lib/utils";
 
 interface SupplierDataEditorProps {
   evidenceLogs: DocumentEvidence[];
@@ -32,7 +32,9 @@ export default function SupplierDataEditor({ evidenceLogs, isEvidenceLoading, on
     name.toLowerCase().includes(supplierSearchQuery.toLowerCase())
   );
   const supplierFiles = selectedSupplierName
-    ? evidenceLogs.filter(e => e.supplier_name === selectedSupplierName)
+    ? evidenceLogs
+        .filter(e => e.supplier_name === selectedSupplierName)
+        .sort((a, b) => compareQuestionLabels(a.ariba_question_label, b.ariba_question_label))
     : [];
 
   const handleSelectEvidence = useCallback((ev: DocumentEvidence) => {

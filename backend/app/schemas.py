@@ -4,8 +4,9 @@ from typing import Optional, List
 class SupplierEntry(BaseModel):
     supplier_id: int = Field(..., description="Unique sequential integer ID of the supplier")
     supplier_name: str = Field(..., description="Cleaned supplier name")
-    created_at: str = Field(..., description="Timestamp of when the supplier was first audited")
+    created_at: str = Field(default="", description="Timestamp of when the supplier was first audited")
     date_added: Optional[str] = Field(None, description="Legacy alias for created_at")
+    sm_vendor_id: Optional[str] = Field(None, description="Ariba SM Vendor ID")
 
 class DocumentEvidence(BaseModel):
     audit_id: str = Field(..., description="Unique UUID for the audit run")

@@ -9,7 +9,7 @@ import {
 import type { AuditRegistryEntry, DocumentEvidence, SupplierAssets, ComparisonTable } from "@/types";
 import { FIELD_NAME_TO_META_KEY } from "@/types";
 import { fetchAuditRegistry, fetchSupplierAssets, updateEvidenceMetadata, buildFileUrl } from "@/lib/api";
-import { getCommentAndTable, formatSuggestedComment, cleanQuestionLabel, getLabelSortKey } from "@/lib/utils";
+import { getCommentAndTable, formatSuggestedComment, cleanQuestionLabel, getLabelSortKey, parseEvidenceMetadata } from "@/lib/utils";
 import ScreenshotLightbox from "./ScreenshotLightbox";
 
 interface AuditRegistryProps {
@@ -139,8 +139,7 @@ export default function AuditRegistry({ evidenceLogs, isEvidenceLoading, onRefre
         e.filename.toLowerCase() === filename.toLowerCase()
       );
       if (!evRecord) throw new Error("No matching evidence record found for this file.");
-      let metadata: Record<string, string> = {};
-      try { metadata = JSON.parse(evRecord.gemini_extracted_metadata); } catch { metadata = {}; }
+      let metadata: Record<string, string> = parseEvidenceMetadata(evRecord);
       const edits = tableEditValues[tIdx] || {};
       table.comparison_rows.forEach((row: any, rIdx: number) => {
         if (edits[rIdx] !== undefined && edits[rIdx] !== row.value_evidence) {
@@ -332,7 +331,7 @@ function LogListPanel({
                     : "bg-[var(--bg-surface)] border-[var(--border-subtle)] hover:border-[var(--accent-success)] hover:bg-[var(--accent-success-soft)]"
                     }`}
                 >
-                  <div className="flex justify-between items-start mb-2">
+                  <div className="flex justify-between items-center">
                     <h4 className="font-semibold text-sm text-[var(--heading-color)] group-hover:text-[var(--match-text)] transition-colors">{log.supplier_name}</h4>
                     <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wider uppercase shrink-0 ${isMatch
                       ? "bg-[var(--match-bg)] text-[var(--match-text)] border border-[var(--match-border)]"
@@ -857,8 +856,7 @@ function EvidenceTab({ log, assets, assetsLoading, isEvidenceLoading, evidenceLo
               ev.filename.toLowerCase().includes(d.name.toLowerCase()) ||
               d.name.toLowerCase().includes(ev.filename.toLowerCase())
             );
-            let geminiData = null;
-            try { geminiData = JSON.parse(ev.gemini_extracted_metadata || "{}"); } catch { }
+            const geminiData = parseEvidenceMetadata(ev);
 
             return (
               <div key={idx} className="p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-input)] space-y-4">

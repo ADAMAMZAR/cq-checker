@@ -9,7 +9,8 @@ import {
   IconCheck,
   IconBuildingStore,
 } from "@tabler/icons-react";
-import { fetchSuppliers } from "@/lib/api";
+import { fetchAribaSuppliers, auditAribaSupplier } from "@/lib/api";
+import type { SupplierEntry } from "@/types";
 
 interface SupplierAuditProps {
   onNavigateToRegistry?: (supplierName: string) => void;
@@ -22,9 +23,9 @@ const STAGES = [
 ];
 
 export default function SupplierAudit({ onNavigateToRegistry }: SupplierAuditProps = {}) {
-  const [suppliers, setSuppliers] = useState<string[]>([]);
+  const [suppliers, setSuppliers] = useState<SupplierEntry[]>([]);
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selectedSupplier, setSelectedSupplier] = useState<SupplierEntry | null>(null);
   const [open, setOpen] = useState(false);
   const [highlighted, setHighlighted] = useState(0);
   const [running, setRunning] = useState(false);
@@ -35,12 +36,11 @@ export default function SupplierAudit({ onNavigateToRegistry }: SupplierAuditPro
 
   const loadSuppliers = useCallback(async () => {
     try {
-      const supplierList = await fetchSuppliers();
-      const names = Array.from(new Set(supplierList.map((s) => s.supplier_name).filter(Boolean)));
-      names.sort((a, b) => a.localeCompare(b));
-      setSuppliers(names);
+      const supplierList = await fetchAribaSuppliers();
+      supplierList.sort((a, b) => a.supplier_name.localeCompare(b.supplier_name));
+      setSuppliers(supplierList);
     } catch {
-      setError("Could not load supplier list. Make sure the backend is running.");
+      setError("Could not load Ariba supplier list. Make sure the backend and Ariba credentials are set.");
     }
   }, []);
 
@@ -61,12 +61,12 @@ export default function SupplierAudit({ onNavigateToRegistry }: SupplierAuditPro
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return suppliers;
-    return suppliers.filter((s) => s.toLowerCase().includes(q));
+    return suppliers.filter((s) => s.supplier_name.toLowerCase().includes(q));
   }, [suppliers, query]);
 
-  const selectSupplier = (name: string) => {
-    setSelected(name);
-    setQuery(name);
+  const selectSupplier = (sup: SupplierEntry) => {
+    setSelectedSupplier(sup);
+    setQuery(sup.supplier_name);
     setOpen(false);
   };
 
@@ -92,21 +92,31 @@ export default function SupplierAudit({ onNavigateToRegistry }: SupplierAuditPro
     }
   };
 
-  const runVerification = (e: React.FormEvent) => {
+  const runVerification = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selected || running) return;
+    if (!selectedSupplier || running) return;
     setError(null);
     setRunning(true);
     setStage(0);
+
     timersRef.current.forEach(clearTimeout);
     timersRef.current = [];
     STAGES.forEach((_, i) => {
       timersRef.current.push(setTimeout(() => setStage(i), i * 1800));
     });
+
+    if (selectedSupplier.sm_vendor_id) {
+      try {
+        await auditAribaSupplier(selectedSupplier.sm_vendor_id);
+      } catch (err: any) {
+        console.warn("Ariba live audit failed, proceeding with DB audit fallback:", err);
+      }
+    }
+
     timersRef.current.push(
       setTimeout(() => {
         setRunning(false);
-        onNavigateToRegistry?.(selected);
+        onNavigateToRegistry?.(selectedSupplier.supplier_name);
       }, STAGES.length * 1800 + 600)
     );
   };
@@ -145,7 +155,7 @@ export default function SupplierAudit({ onNavigateToRegistry }: SupplierAuditPro
                   setQuery(e.target.value);
                   setOpen(true);
                   setHighlighted(0);
-                  if (selected && e.target.value !== selected) setSelected(null);
+                  if (selectedSupplier && e.target.value !== selectedSupplier.supplier_name) setSelectedSupplier(null);
                 }}
                 onFocus={() => setOpen(true)}
                 onBlur={() => setTimeout(() => setOpen(false), 150)}
@@ -170,25 +180,32 @@ export default function SupplierAudit({ onNavigateToRegistry }: SupplierAuditPro
                   {filtered.length === 0 ? (
                     <li className="px-4 py-3 text-sm text-[var(--text-tertiary)] italic">No suppliers found.</li>
                   ) : (
-                    filtered.map((name, idx) => (
-                      <li key={name}>
+                    filtered.map((sup, idx) => (
+                      <li key={`${sup.supplier_name}-${idx}`}>
                         <button
                           type="button"
                           role="option"
-                          aria-selected={selected === name}
+                          aria-selected={selectedSupplier?.supplier_name === sup.supplier_name}
                           onMouseDown={(e) => {
                             e.preventDefault();
-                            selectSupplier(name);
+                            selectSupplier(sup);
                           }}
                           onMouseEnter={() => setHighlighted(idx)}
-                          className={`w-full flex items-center gap-2.5 px-4 py-2.5 text-left text-sm transition-colors cursor-pointer ${highlighted === idx
+                          className={`w-full flex items-center justify-between gap-2.5 px-4 py-2.5 text-left text-sm transition-colors cursor-pointer ${highlighted === idx
                             ? "bg-[var(--accent-success-soft)] text-[var(--heading-color)]"
                             : "text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)]"
                             }`}
                         >
-                          <IconBuildingStore className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
-                          <span className="truncate">{name}</span>
-                          {selected === name && (
+                          <div className="flex items-center gap-2.5 truncate">
+                            <IconBuildingStore className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
+                            <span className="truncate">{sup.supplier_name}</span>
+                          </div>
+                          {sup.sm_vendor_id && (
+                            <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-[var(--accent-primary-soft)] text-[var(--accent-primary-text)] border border-[var(--accent-primary-border)] shrink-0">
+                              Ariba: {sup.sm_vendor_id}
+                            </span>
+                          )}
+                          {selectedSupplier?.supplier_name === sup.supplier_name && (
                             <IconCheck className="ml-auto h-4 w-4 shrink-0 text-[var(--match-text)]" />
                           )}
                         </button>
@@ -202,7 +219,7 @@ export default function SupplierAudit({ onNavigateToRegistry }: SupplierAuditPro
 
           <button
             type="submit"
-            disabled={!selected || running}
+            disabled={!selectedSupplier || running}
             className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-[var(--accent-success)] hover:bg-[var(--accent-success-hover)] text-white font-bold text-sm transition-all shadow-md shadow-[var(--accent-success-shadow)] active:scale-[0.98] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <IconCertificate className="w-4 h-4" />
@@ -217,13 +234,13 @@ export default function SupplierAudit({ onNavigateToRegistry }: SupplierAuditPro
         )}
 
         {/* Demo loading animation */}
-        {running && selected && (
+        {running && selectedSupplier && (
           <div className="mt-6 rounded-xl border border-[var(--border-visible)] bg-[var(--bg-surface)] p-5 space-y-4">
             <div className="flex items-center gap-3">
               <IconLoader2 className="h-5 w-5 animate-spin text-[var(--accent-success-text)]" />
               <div>
                 <p className="text-sm font-bold text-[var(--heading-color)]">Running Supplier Audit</p>
-                <p className="text-xs text-[var(--text-tertiary)] truncate">Supplier: {selected}</p>
+                <p className="text-xs text-[var(--text-tertiary)] truncate">Supplier: {selectedSupplier.supplier_name}</p>
               </div>
             </div>
             <div className="space-y-2">

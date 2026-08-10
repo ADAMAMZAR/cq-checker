@@ -91,6 +91,18 @@ export function getLabelSortKey(label: string): number[] {
   return match ? match[1].split('.').map(Number) : [999];
 }
 
+export function compareQuestionLabels(aLabel: string, bLabel: string): number {
+  const aKey = getLabelSortKey(aLabel);
+  const bKey = getLabelSortKey(bLabel);
+  const len = Math.max(aKey.length, bKey.length);
+  for (let i = 0; i < len; i++) {
+    const aVal = aKey[i] ?? 0;
+    const bVal = bKey[i] ?? 0;
+    if (aVal !== bVal) return aVal - bVal;
+  }
+  return aLabel.localeCompare(bLabel);
+}
+
 export function parseEvidenceMetadata(ev: DocumentEvidence): Record<string, string> {
   try {
     const parsed = JSON.parse(ev.gemini_extracted_metadata);

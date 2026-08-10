@@ -25,7 +25,7 @@ from app.schemas import (
     DocumentIngestResult, DocumentSummary, ChatRequest, ChatResponse, ChatSource,
     ChatHistoryResponse,
 )
-from app.services import audit_data_access, extractor, storage
+from app.services import audit_data_access, extractor, storage, supplier_search
 from app.services import auditor
 from app.services.auditor import clean_question_label
 from app.services.timezones import now_malaysia, to_malaysia
@@ -196,9 +196,52 @@ async def get_logs():
 @app.get("/api/suppliers", response_model=List[SupplierEntry], tags=["Supplier Audit — Read / Update"])
 async def get_suppliers():
     """
-    Fetches the list of all registered suppliers.
+    Fetches the list of all registered suppliers from DB.
     """
     return await audit_data_access.list_suppliers()
+
+
+@app.get("/api/ariba/suppliers", response_model=List[SupplierEntry], tags=["Supplier Audit — Single Phase Waterfall"])
+async def get_ariba_suppliers_endpoint():
+    """
+    Fetches live Ariba Step 1 suppliers ('InQualification' status) via app.services.supplier_search.
+    Excludes suppliers that have already been audited and saved to DB.
+    """
+    try:
+        ariba_suppliers = await asyncio.to_thread(supplier_search.get_ariba_suppliers)
+        db_suppliers = await audit_data_access.list_suppliers()
+        existing_names = {s.supplier_name.strip().lower() for s in db_suppliers}
+
+        results = []
+        for idx, a_sup in enumerate(ariba_suppliers, start=1):
+            s_name = a_sup.get("supplier_name", "")
+            sm_id = a_sup.get("sm_vendor_id", "")
+            if s_name and s_name.lower() not in existing_names:
+                results.append(SupplierEntry(
+                    supplier_id=idx,
+                    supplier_name=s_name,
+                    sm_vendor_id=sm_id,
+                    created_at=now_malaysia().strftime("%Y-%m-%d %H:%M:%S"),
+                ))
+                existing_names.add(s_name.lower())
+        return results
+    except Exception as e:
+        logger.error(f"Error fetching Ariba suppliers: {e}")
+        return []
+
+
+@app.post("/api/audit/ariba-supplier", tags=["Supplier Audit — Single Phase Waterfall"])
+async def audit_ariba_supplier_endpoint(sm_vendor_id: str):
+    """
+    Executes Ariba Step 2 (get docId) and Step 3 (extract Q&A answers).
+    Triggered when the user selects an Ariba supplier and clicks 'Audit' in the Audit Tab.
+    """
+    try:
+        res = await asyncio.to_thread(supplier_search.audit_ariba_supplier, sm_vendor_id)
+        return res
+    except Exception as e:
+        logger.error(f"Error auditing Ariba supplier {sm_vendor_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/audit-registry", response_model=List[AuditRegistryEntry], tags=["Supplier Audit — Read / Update"])
 async def get_audit_registry():

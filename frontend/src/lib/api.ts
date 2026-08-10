@@ -68,6 +68,12 @@ export async function fetchSuppliers(): Promise<SupplierEntry[]> {
   return res.json();
 }
 
+export async function fetchAribaSuppliers(): Promise<SupplierEntry[]> {
+  const res = await fetch(`${API_BASE}/ariba/suppliers`);
+  if (!res.ok) throw new Error(`Failed to load Ariba suppliers: HTTP ${res.status}`);
+  return res.json();
+}
+
 export async function fetchAuditRegistry(): Promise<AuditRegistryEntry[]> {
   const res = await fetch(`${API_BASE}/audit-registry`);
   if (!res.ok) throw new Error(`Failed to load audit registry: HTTP ${res.status}`);
@@ -294,6 +300,14 @@ export async function deleteDbRow(table: string, pk: Record<string, string>): Pr
 
 export async function fetchDbSchema(): Promise<DbSchema> {
   const res = await fetch(`${API_BASE}/db/schema`);
+  if (!res.ok) throw new Error(await errorDetail(res));
+  return res.json();
+}
+
+export async function auditAribaSupplier(smVendorId: string): Promise<any> {
+  const res = await fetch(`${API_BASE}/audit/ariba-supplier?sm_vendor_id=${encodeURIComponent(smVendorId)}`, {
+    method: "POST",
+  });
   if (!res.ok) throw new Error(await errorDetail(res));
   return res.json();
 }
