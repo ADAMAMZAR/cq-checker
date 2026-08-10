@@ -14,7 +14,7 @@ import {
   IconArrowLeft,
   IconSourceCode,
 } from "@tabler/icons-react";
-import { sendChat, fetchChatHistory, buildFileUrl } from "@/lib/api";
+import { sendChat, fetchChatHistory, fetchDocuments, buildFileUrl } from "@/lib/api";
 import type { ChatSource } from "@/types";
 
 const CitationSidePanel = dynamic(() => import("@/components/CitationSidePanel"), { ssr: false });
@@ -40,6 +40,25 @@ const SUGGESTIONS = [
   "What are the QA checklist items?",
   "List key compliance steps for suppliers",
 ];
+
+function formatCitationLinks(text: string): string {
+  if (!text) return "";
+  return text.replace(/\[(\d+(?:[\s,–-]+\d+)*)\]/g, (match, p1) => {
+    if (p1.includes("-") || p1.includes("–")) {
+      const parts = p1.split(/[-–]/).map((s: string) => parseInt(s.trim(), 10));
+      if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+        const nums = [];
+        for (let i = parts[0]; i <= parts[1]; i++) nums.push(i);
+        return nums.map((n) => `[${n}](#cite-${n})`).join(" ");
+      }
+    }
+    const nums = p1.split(",").map((s: string) => s.trim()).filter((s: string) => /^\d+$/.test(s));
+    if (nums.length > 0) {
+      return nums.map((n: string) => `[${n}](#cite-${n})`).join(" ");
+    }
+    return match;
+  });
+}
 
 function nowLabel(): string {
   return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -187,8 +206,19 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
     ]);
   };
 
-  const openCitation = (source: ChatSource) => {
-    const url = buildFileUrl(source.file_url);
+  const openCitation = async (source?: ChatSource) => {
+    if (!source) return;
+    let rawUrl = source.file_url;
+    if (!rawUrl && source.title) {
+      try {
+        const docs = await fetchDocuments();
+        const found = docs.find((d) => d.title === source.title || d.title.includes(source.title));
+        if (found) rawUrl = found.file_url;
+      } catch {
+        /* fallback */
+      }
+    }
+    const url = buildFileUrl(rawUrl);
     if (!url) return;
     setPdfView({
       fileUrl: url,
@@ -197,7 +227,7 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
     });
   };
   return (
-    <Group orientation="horizontal" className="flex-1 min-h-0" id="chat-citation-panels">
+    <Group key={pdfView ? "split" : "single"} orientation="horizontal" className="flex-1 min-h-0" id="chat-citation-panels">
       <Panel defaultSize={pdfView ? 50 : 100} minSize={30}>
         <div className="flex flex-col h-[calc(100vh-140px)] min-h-[550px] rounded-2xl border border-[var(--border-visible)] bg-[var(--bg-card)] shadow-2xl backdrop-blur-2xl overflow-hidden animate-fade-in">
           {/* ── Top Header ── */}
@@ -276,28 +306,70 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
                         </div>
                       ) : (
                         <div className="prose prose-sm max-w-none font-sans">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.text}</ReactMarkdown>
+                          <ReactMarkdown
+                            remarkPlugins={[remarkGfm]}
+                            components={{
+                              a({ href, children, ...props }: any) {
+                                if (href?.startsWith("#cite-")) {
+                                  const idx = parseInt(href.replace("#cite-", ""), 10) - 1;
+                                  const src = msg.sources?.[idx];
+                                  return (
+                                    <button
+                                      onClick={() => src && openCitation(src)}
+                                      disabled={!src}
+                                      className="inline-flex items-center justify-center px-1.5 py-0.5 mx-0.5 text-[10px] font-black rounded-full bg-[var(--accent-primary-soft)] text-[var(--accent-primary-text)] border border-[var(--accent-primary-border)] hover:bg-[var(--accent-primary)] hover:text-white hover:border-[var(--accent-primary-border-strong)] transition-all transform hover:scale-110 cursor-pointer shadow-xs align-middle inline-block select-none"
+                                      title={src ? `${src.title || "Source"} (Page ${src.page_number ?? "?"})` : `Citation [${idx + 1}]`}
+                                      type="button"
+                                    >
+                                      {children}
+                                    </button>
+                                  );
+                                }
+                                return (
+                                  <a
+                                    href={href}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="text-[var(--accent-primary-text)] underline font-medium hover:opacity-80"
+                                    {...props}
+                                  >
+                                    {children}
+                                  </a>
+                                );
+                              },
+                            }}
+                          >
+                            {formatCitationLinks(msg.text)}
+                          </ReactMarkdown>
                         </div>
                       )}
                     </div>
                     {msg.sources && msg.sources.length > 0 && (
-                      <div className="flex flex-wrap gap-2 mt-1 max-w-2xl">
-                        {msg.sources.map((src, idx) => (
-                          <button
-                            key={`${msg.id}-src-${idx}`}
-                            onClick={() => openCitation(src)}
-                            disabled={!buildFileUrl(src.file_url)}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] hover:border-[var(--accent-primary-border-hover)] text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--accent-primary-text)] transition-all cursor-pointer active:scale-95 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
-                            title={`${src.title || "Source"} — page ${src.page_number ?? "?"}`}
-                          >
-                            <IconSourceCode className="w-3.5 h-3.5 text-[var(--accent-primary-text)] shrink-0" />
-                            <span className="font-bold">[{idx + 1}]</span>
-                            <span className="truncate max-w-[220px]">{src.title || "Source"}</span>
-                            {src.page_number ? (
-                              <span className="text-[10px] text-[var(--text-tertiary)]">p.{src.page_number}</span>
-                            ) : null}
-                          </button>
-                        ))}
+                      <div className="flex flex-col gap-1.5 mt-2 max-w-2xl">
+                        <span className="text-[10px] font-bold tracking-wider text-[var(--text-tertiary)] uppercase flex items-center gap-1">
+                          <IconSourceCode className="w-3.5 h-3.5 text-[var(--accent-primary-text)]" /> Sources & References ({msg.sources.length})
+                        </span>
+                        <div className="flex flex-wrap gap-2">
+                          {msg.sources.map((src, idx) => (
+                            <button
+                              key={`${msg.id}-src-${idx}`}
+                              onClick={() => openCitation(src)}
+                              disabled={!buildFileUrl(src.file_url)}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-subtle)] hover:border-[var(--accent-primary-border)] hover:bg-[var(--accent-primary-soft)] text-xs font-semibold text-[var(--heading-color)] hover:text-[var(--accent-primary-text)] transition-all cursor-pointer shadow-xs disabled:opacity-40 disabled:cursor-not-allowed"
+                              title={`${src.title || "Source"} — Page ${src.page_number ?? "?"}`}
+                            >
+                              <span className="w-4 h-4 rounded-full bg-[var(--accent-primary-soft)] text-[var(--accent-primary-text)] text-[10px] font-black flex items-center justify-center border border-[var(--accent-primary-border)] shrink-0">
+                                {idx + 1}
+                              </span>
+                              <span className="truncate max-w-[200px]">{src.title || "Source"}</span>
+                              {src.page_number ? (
+                                <span className="px-1.5 py-0.5 rounded bg-[var(--bg-input)] text-[10px] font-mono text-[var(--text-tertiary)] font-bold">
+                                  p.{src.page_number}
+                                </span>
+                              ) : null}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     )}
                   </div>

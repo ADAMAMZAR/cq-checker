@@ -490,16 +490,16 @@ def test_upload_document_endpoint_failure(mock_ingest):
 
 
 @patch("app.repositories.documents.DocumentRepository")
-@patch("app.repositories.documents.ChunkRepository")
-def test_list_documents_endpoint(mock_chunk_repo, mock_doc_repo):
+@patch("app.repositories.documents.PageRepository")
+def test_list_documents_endpoint(mock_page_repo, mock_doc_repo):
     doc = MagicMock()
     doc.id = "doc-123"
     doc.title = "Manual"
     doc.file_url = "/api/files/local/manual.pdf"
     doc.created_at = None
     mock_doc_repo.return_value.list_all = AsyncMock(return_value=[doc])
-    mock_chunk_repo.return_value.count_by_document = AsyncMock(
-        return_value={"parent_chunks": 2, "child_chunks": 5}
+    mock_page_repo.return_value.count_by_document = AsyncMock(
+        return_value={"page_count": 2}
     )
 
     with patch("app.db.session.get_session_factory") as mock_factory:
@@ -511,8 +511,7 @@ def test_list_documents_endpoint(mock_chunk_repo, mock_doc_repo):
     body = response.json()
     assert len(body) == 1
     assert body[0]["title"] == "Manual"
-    assert body[0]["parent_count"] == 2
-    assert body[0]["child_count"] == 5
+    assert body[0]["page_count"] == 2
 
 
 @patch("app.services.rag.answer_query")

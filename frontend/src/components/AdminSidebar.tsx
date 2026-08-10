@@ -13,6 +13,7 @@ import {
   IconMenu2,
   IconX,
   IconChevronRight,
+  IconTable,
 } from "@tabler/icons-react";
 import type { AdminTab } from "./AdminTabs";
 
@@ -23,6 +24,7 @@ interface AdminSidebarProps {
 
 const tabs: { key: AdminTab; label: string; icon: typeof IconDatabase }[] = [
   { key: "database", label: "Database", icon: IconDatabase },
+  { key: "matrix", label: "Comparison Matrix", icon: IconTable },
   { key: "costs", label: "Cost Analytics", icon: IconCoin },
   { key: "schema", label: "Schema", icon: IconSchema },
   { key: "playground", label: "Playground", icon: IconPlaylist },

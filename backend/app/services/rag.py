@@ -47,10 +47,14 @@ INPUT_RATE = 0.10 / 1_000_000
 OUTPUT_RATE = 0.40 / 1_000_000
 
 SYSTEM_PROMPT = (
-    "You are CQ Assistant, an internal compliance assistant for GPO. "
-    "Answer strictly from the provided source passages. If the passages do not "
-    "contain the answer, say so clearly. Cite passages by their page numbers. "
-    "Keep answers concise and grounded."
+    "You are CQ Assistant, an internal compliance assistant for GPO.\n"
+    "Answer thoroughly, accurately, and comprehensively from the provided source passages.\n"
+    "- When answering questions about procedures, self-registration, or forms, list ALL step-by-step instructions, "
+    "specific form fields, required fields (*), country registration examples, dropdown options, and primary contact fields "
+    "extracted from the slides/documents.\n"
+    "- Do not provide vague or brief summaries if the sources contain detailed form fields or UI instructions.\n"
+    "- If the passages do not contain the answer, say so clearly.\n"
+    "- Cite source passages using page references like [1], [2]."
 )
 
 
@@ -177,9 +181,9 @@ async def _prepare(query: str, session_id: Optional[str]):
         cached = await cache_repo.find_cached(
             query_embedding, threshold=0.93, ttl_days=settings.query_cache_ttl_days,
         )
+        results = await hybrid_search(session, query_embedding, query, k=5)
         if cached:
-            return cached.cached_response, [], None, query_embedding
-        results = await hybrid_search(session, query_embedding, query, k=3)
+            return cached.cached_response, results, None, query_embedding
 
     messages = None
     if settings.gemini_api_key and results:
@@ -243,7 +247,7 @@ async def answer_query(query: str, session_id: Optional[str] = None) -> dict:
                         cache_hit=True, start=start, session_id=session_id)
         return {
             "answer": cached,
-            "sources": [],
+            "sources": _sources(results),
             "cost_usd": 0.0,
             "cache_hit": True,
             "session_id": session_id,
@@ -277,7 +281,7 @@ async def answer_query_stream(query: str, session_id: Optional[str] = None):
         await _finalize(factory, query, cached, query_embedding, 0, 0, 0.0,
                         cache_hit=True, start=start, session_id=session_id)
         yield {"delta": cached}
-        yield {"done": True, "sources": [], "cost_usd": 0.0,
+        yield {"done": True, "sources": _sources(results), "cost_usd": 0.0,
                "cache_hit": True, "session_id": session_id}
         return
 

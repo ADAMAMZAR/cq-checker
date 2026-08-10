@@ -1,13 +1,12 @@
-"""Repository for document ingestion and chunk management."""
+"""Repository for document ingestion and page management."""
 
 from typing import List, Optional
 from uuid import UUID
 
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
-from app.models.tables import Document, ParentChunk, ChildChunk
+from app.models.tables import Document, DocumentPage
 
 
 class DocumentRepository:
@@ -46,42 +45,44 @@ class DocumentRepository:
         return result.scalar() > 0
 
 
-class ChunkRepository:
+class PageRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def create_parent(self, document_id: UUID, content: str, page_number: Optional[int] = None) -> ParentChunk:
-        chunk = ParentChunk(document_id=document_id, content=content, page_number=page_number)
-        self.session.add(chunk)
-        await self.session.commit()
-        await self.session.refresh(chunk)
-        return chunk
-
-    async def create_child(self, parent_id: UUID, content: str, embedding: Optional[List[float]] = None) -> ChildChunk:
-        chunk = ChildChunk(parent_id=parent_id, content=content, embedding=embedding)
-        self.session.add(chunk)
-        await self.session.commit()
-        await self.session.refresh(chunk)
-        return chunk
-
-    async def get_parent_with_children(self, parent_id: UUID) -> Optional[ParentChunk]:
-        result = await self.session.execute(
-            select(ParentChunk)
-            .options(selectinload(ParentChunk.child_chunks))
-            .where(ParentChunk.id == parent_id)
+    async def create_page(
+        self,
+        document_id: UUID,
+        page_number: int,
+        content: str,
+        embedding: Optional[List[float]] = None,
+    ) -> DocumentPage:
+        page = DocumentPage(
+            document_id=document_id,
+            page_number=page_number,
+            content=content,
+            embedding=embedding,
         )
-        return result.scalar_one_or_none()
+        self.session.add(page)
+        await self.session.commit()
+        await self.session.refresh(page)
+        return page
+
+    async def list_pages(self, document_id: UUID) -> List[DocumentPage]:
+        result = await self.session.execute(
+            select(DocumentPage)
+            .where(DocumentPage.document_id == document_id)
+            .order_by(DocumentPage.page_number.asc())
+        )
+        return list(result.scalars().all())
 
     async def count_by_document(self, document_id: UUID) -> dict:
-        parent_count = await self.session.execute(
-            select(func.count(ParentChunk.id)).where(ParentChunk.document_id == document_id)
-        )
-        child_count = await self.session.execute(
-            select(func.count(ChildChunk.id))
-            .join(ParentChunk, ChildChunk.parent_id == ParentChunk.id)
-            .where(ParentChunk.document_id == document_id)
+        page_count = await self.session.execute(
+            select(func.count(DocumentPage.id)).where(DocumentPage.document_id == document_id)
         )
         return {
-            "parent_chunks": parent_count.scalar(),
-            "child_chunks": child_count.scalar(),
+            "page_count": page_count.scalar() or 0,
         }
+
+
+# Alias for backward compatibility
+ChunkRepository = PageRepository

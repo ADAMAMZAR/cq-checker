@@ -1,6 +1,6 @@
-"""Document ingestion orchestrator.
+"""Document ingestion orchestrator for Hybrid Page RAG.
 
-Flow: hash -> (skip if exists) -> upload -> parse -> chunk -> embed -> insert.
+Flow: hash -> (skip if exists) -> upload -> parse -> chunk pages -> embed pages -> insert document_pages.
 Runs blocking HTTP/CPU work in threads so it can be awaited from async routes.
 """
 
@@ -11,7 +11,7 @@ from typing import Optional
 from uuid import UUID
 
 from app.db.session import get_session_factory
-from app.repositories.documents import DocumentRepository, ChunkRepository
+from app.repositories.documents import DocumentRepository, PageRepository
 from app.services import chunker, embeddings, parser, storage
 
 logger = logging.getLogger(__name__)
@@ -19,23 +19,32 @@ logger = logging.getLogger(__name__)
 
 class IngestResult:
     def __init__(self, document_id: Optional[UUID], title: str, status: str,
-                 parent_count: int = 0, child_count: int = 0,
-                 cost_usd: float = 0.0, message: str = ""):
+                 page_count: int = 0, cost_usd: float = 0.0, message: str = ""):
         self.document_id = document_id
         self.title = title
         self.status = status          # "created" | "skipped" | "failed"
-        self.parent_count = parent_count
-        self.child_count = child_count
+        self.page_count = page_count
         self.cost_usd = cost_usd
         self.message = message
+
+    @property
+    def parent_count(self) -> int:
+        """Backward compatibility for legacy serializers."""
+        return self.page_count
+
+    @property
+    def child_count(self) -> int:
+        """Backward compatibility for legacy serializers."""
+        return self.page_count
 
     def to_dict(self) -> dict:
         return {
             "document_id": str(self.document_id) if self.document_id else None,
             "title": self.title,
             "status": self.status,
-            "parent_count": self.parent_count,
-            "child_count": self.child_count,
+            "page_count": self.page_count,
+            "parent_count": self.page_count,
+            "child_count": self.page_count,
             "cost_usd": round(self.cost_usd, 6),
             "message": self.message,
         }
@@ -76,57 +85,35 @@ async def _ingest_blocking(
         if not pages:
             return IngestResult(None, title, "failed", message="No parseable text found.")
 
-        # Chunk (pure CPU → thread)
-        parents = await asyncio.to_thread(_chunk_pages, pages)
-        if not parents:
-            return IngestResult(None, title, "failed", message="Chunking produced no parents.")
+        # Chunk into page objects (pure CPU → thread)
+        page_chunks = await asyncio.to_thread(chunker.chunk_pages, pages)
+        if not page_chunks:
+            return IngestResult(None, title, "failed", message="Page chunking produced no content.")
 
-        # Embed children (blocking HTTP → thread)
-        child_texts = [c for parent in parents for c in parent["children"]]
-        child_embeddings = await asyncio.to_thread(embeddings.embed_texts, child_texts)
-        if len(child_embeddings) != len(child_texts):
+        # Embed full page texts (blocking HTTP → thread)
+        page_texts = [p["content"] for p in page_chunks]
+        page_embeddings = await asyncio.to_thread(embeddings.embed_texts, page_texts)
+        if len(page_embeddings) != len(page_texts):
             return IngestResult(None, title, "failed", message="Embedding count mismatch.")
 
-        # Insert
+        # Insert Document and DocumentPage rows
         doc = await doc_repo.create(title=title, file_url=file_url, file_hash=file_hash)
-        chunk_repo = ChunkRepository(session)
+        page_repo = PageRepository(session)
 
-        child_index = 0
-        for parent in parents:
-            page_number = parent.get("page_number")
-            parent_content = parent["content"]
-            children = parent["children"]
-            parent_row = await chunk_repo.create_parent(doc.id, parent_content, page_number)
-            for child_text in children:
-                embedding = child_embeddings[child_index]
-                child_index += 1
-                await chunk_repo.create_child(parent_row.id, child_text, embedding)
+        for p_chunk, p_emb in zip(page_chunks, page_embeddings):
+            await page_repo.create_page(
+                document_id=doc.id,
+                page_number=p_chunk["page_number"],
+                content=p_chunk["content"],
+                embedding=p_emb,
+            )
 
-        counts = await chunk_repo.count_by_document(doc.id)
+        counts = await page_repo.count_by_document(doc.id)
         return IngestResult(
             document_id=doc.id, title=title, status="created",
-            parent_count=counts["parent_chunks"],
-            child_count=counts["child_chunks"],
+            page_count=counts["page_count"],
             cost_usd=parse_cost,
         )
-
-
-def _chunk_pages(pages: list) -> list:
-    """pages: [{"page_number", "text"}]. Returns [{"page_number", "content", "children"}].
-
-    Each parent dict carries its children so embedding order matches insert order.
-    """
-    result = []
-    for page in pages:
-        parents = chunker.chunk_into_parents(page.get("page_number", 1), page.get("text", ""))
-        for parent in parents:
-            children = chunker.split_parent(parent["content"])
-            result.append({
-                "page_number": parent["page_number"],
-                "content": parent["content"],
-                "children": children,
-            })
-    return result
 
 
 async def ingest_document(

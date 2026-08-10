@@ -97,47 +97,42 @@ class TestDocumentRepository:
         assert len(docs) >= 2
 
 
-# ── Chunk Repository Tests ───────────────────────────────────────────────
+# ── Page Repository Tests ───────────────────────────────────────────────
 
-class TestChunkRepository:
+class TestPageRepository:
     @pytest.mark.asyncio
-    async def test_create_parent_and_child(self, db_session):
+    async def test_create_page(self, db_session):
         doc_repo = DocumentRepository(db_session)
-        chunk_repo = ChunkRepository(db_session)
+        page_repo = PageRepository(db_session)
 
-        doc = await doc_repo.create(title="Chunk Test", file_url="https://example.com/chunk.pdf")
-        parent = await chunk_repo.create_parent(doc.id, content="Parent chunk content", page_number=1)
-        child = await chunk_repo.create_child(parent.id, content="Child chunk content")
+        doc = await doc_repo.create(title="Page Test", file_url="https://example.com/page.pdf")
+        page = await page_repo.create_page(doc.id, page_number=1, content="Page chunk content", embedding=[0.1] * 1536)
 
-        assert parent.document_id == doc.id
-        assert child.parent_id == parent.id
+        assert page.document_id == doc.id
+        assert page.page_number == 1
 
     @pytest.mark.asyncio
-    async def test_get_parent_with_children(self, db_session):
+    async def test_list_pages(self, db_session):
         doc_repo = DocumentRepository(db_session)
-        chunk_repo = ChunkRepository(db_session)
+        page_repo = PageRepository(db_session)
 
-        doc = await doc_repo.create(title="Parent-Child Test", file_url="https://example.com/pc.pdf")
-        parent = await chunk_repo.create_parent(doc.id, content="Parent")
-        await chunk_repo.create_child(parent.id, content="Child 1")
-        await chunk_repo.create_child(parent.id, content="Child 2")
+        doc = await doc_repo.create(title="List Pages Test", file_url="https://example.com/pages.pdf")
+        await page_repo.create_page(doc.id, page_number=1, content="Page 1")
+        await page_repo.create_page(doc.id, page_number=2, content="Page 2")
 
-        result = await chunk_repo.get_parent_with_children(parent.id)
-        assert result is not None
-        assert len(result.child_chunks) == 2
+        pages = await page_repo.list_pages(doc.id)
+        assert len(pages) == 2
 
     @pytest.mark.asyncio
     async def test_count_by_document(self, db_session):
         doc_repo = DocumentRepository(db_session)
-        chunk_repo = ChunkRepository(db_session)
+        page_repo = PageRepository(db_session)
 
         doc = await doc_repo.create(title="Count Test", file_url="https://example.com/count.pdf")
-        parent = await chunk_repo.create_parent(doc.id, content="Parent")
-        await chunk_repo.create_child(parent.id, content="Child")
+        await page_repo.create_page(doc.id, page_number=1, content="Page 1")
 
-        counts = await chunk_repo.count_by_document(doc.id)
-        assert counts["parent_chunks"] == 1
-        assert counts["child_chunks"] == 1
+        counts = await page_repo.count_by_document(doc.id)
+        assert counts["page_count"] == 1
 
 
 # ── Certificate Repository Tests ─────────────────────────────────────────

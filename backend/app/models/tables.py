@@ -62,27 +62,15 @@ class Document(Base):
     file_hash = Column(String(64), nullable=True, unique=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    parent_chunks = relationship("ParentChunk", back_populates="document", cascade="all, delete-orphan")
+    pages = relationship("DocumentPage", back_populates="document", cascade="all, delete-orphan")
 
 
-class ParentChunk(Base):
-    __tablename__ = "parent_chunks"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
-    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
-    content = Column(Text, nullable=False)
-    page_number = Column(Integer, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    document = relationship("Document", back_populates="parent_chunks")
-    child_chunks = relationship("ChildChunk", back_populates="parent", cascade="all, delete-orphan")
-
-
-class ChildChunk(Base):
-    __tablename__ = "child_chunks"
+class DocumentPage(Base):
+    __tablename__ = "document_pages"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
-    parent_id = Column(UUID(as_uuid=True), ForeignKey("parent_chunks.id", ondelete="CASCADE"), nullable=False)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True)
+    page_number = Column(Integer, nullable=False)
     content = Column(Text, nullable=False)
     embedding = Column(Vector(1536), nullable=True)
     tsv_content = Column(
@@ -93,7 +81,11 @@ class ChildChunk(Base):
     )
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    parent = relationship("ParentChunk", back_populates="child_chunks")
+    document = relationship("Document", back_populates="pages")
+
+    __table_args__ = (
+        CheckConstraint("page_number > 0", name="chk_document_pages_page_number"),
+    )
 
 
 # ── Certificate Verification ─────────────────────────────────────────────────

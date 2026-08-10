@@ -76,8 +76,8 @@ async def test_ingest_parse_failure_returns_failed():
 async def test_ingest_created_path():
     doc = MagicMock()
     doc.id = "22222222-2222-3333-4444-555555555555"
-    parent = MagicMock()
-    parent.id = "33333333-2222-3333-4444-555555555555"
+    page_row = MagicMock()
+    page_row.id = "33333333-2222-3333-4444-555555555555"
 
     mock_session = MagicMock()
     mock_factory = MagicMock()
@@ -90,27 +90,24 @@ async def test_ingest_created_path():
              patch("app.services.parser.parse_pdf_to_markdown") as m_parse, \
              patch("app.services.embeddings.embed_texts") as m_embed, \
              patch("app.repositories.documents.DocumentRepository.create", new_callable=AsyncMock) as m_create, \
-             patch("app.repositories.documents.ChunkRepository.create_parent", new_callable=AsyncMock) as m_cp, \
-             patch("app.repositories.documents.ChunkRepository.create_child", new_callable=AsyncMock) as m_cc, \
-             patch("app.repositories.documents.ChunkRepository.count_by_document", new_callable=AsyncMock) as m_count:
+             patch("app.repositories.documents.PageRepository.create_page", new_callable=AsyncMock) as m_cp, \
+             patch("app.repositories.documents.PageRepository.count_by_document", new_callable=AsyncMock) as m_count:
             m_get.return_value = None
             m_storage.return_value.upload.return_value = "/api/files/local/manual.pdf"
-            m_parse.return_value = ([{"page_number": 1, "text": "Some manual text here that is long enough for chunking." * 20}], 100, 50, 0.0001)
+            m_parse.return_value = ([{"page_number": 1, "text": "Some manual text here."}], 100, 50, 0.0001)
             m_embed.return_value = [[0.1] * 1536]
             m_create.return_value = doc
-            m_cp.return_value = parent
-            m_count.return_value = {"parent_chunks": 1, "child_chunks": 1}
+            m_cp.return_value = page_row
+            m_count.return_value = {"page_count": 1}
             result = await ingest_document(b"data", "Manual", "manual.pdf", "application/pdf")
 
     assert result.status == "created"
     assert result.document_id == doc.id
-    assert result.parent_count == 1
-    assert result.child_count == 1
+    assert result.page_count == 1
 
 
 def test_ingest_result_to_dict():
-    r = IngestResult("abc", "T", "created", parent_count=2, child_count=3, cost_usd=0.5)
+    r = IngestResult("abc", "T", "created", page_count=2, cost_usd=0.5)
     d = r.to_dict()
     assert d["document_id"] == "abc"
-    assert d["parent_count"] == 2
-    assert d["child_count"] == 3
+    assert d["page_count"] == 2

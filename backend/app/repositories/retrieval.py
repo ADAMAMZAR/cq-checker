@@ -1,7 +1,7 @@
 """Hybrid retrieval: pgvector cosine + tsvector full-text search.
 
-Single SQL query joins child_chunks -> parent_chunks -> documents, combines
-vector similarity and BM25-style text rank into one score, returns top-k.
+Single SQL query joins document_pages -> documents, combines vector similarity
+and BM25-style text rank into one score, returns top-k matching pages.
 """
 
 from typing import List
@@ -15,43 +15,40 @@ async def hybrid_search(
     query_text: str,
     k: int = 3,
 ) -> List[dict]:
-    """Return top-k matching children with parent + document context.
+    """Return top-k matching document pages.
 
     Each result:
       {
-        "child_id", "child_content", "parent_id", "parent_content",
-        "page_number", "document_id", "title", "file_url", "combined_score",
+        "page_id", "page_content", "parent_content", "page_number",
+        "document_id", "title", "file_url", "combined_score",
       }
     """
     embedding_str = "[" + ",".join(str(v) for v in query_embedding) + "]"
 
     sql = text(f"""
         SELECT
-            cc.id AS child_id,
-            cc.content AS child_content,
-            pc.id AS parent_id,
-            pc.content AS parent_content,
-            pc.page_number AS page_number,
+            dp.id AS page_id,
+            dp.content AS page_content,
+            dp.page_number AS page_number,
             d.id AS document_id,
             d.title AS title,
             d.file_url AS file_url,
-            (0.6 * (1 - (cc.embedding <=> '{embedding_str}'::vector(1536)))
-             + 0.4 * COALESCE(ts_rank_cd(cc.tsv_content, websearch_to_tsquery('english', :q)), 0)) AS combined_score
-        FROM child_chunks cc
-        JOIN parent_chunks pc ON pc.id = cc.parent_id
-        JOIN documents d ON d.id = pc.document_id
-        WHERE cc.embedding IS NOT NULL
+            (0.6 * (1 - (dp.embedding <=> '{embedding_str}'::vector(1536)))
+             + 0.4 * COALESCE(ts_rank_cd(dp.tsv_content, websearch_to_tsquery('english', :q)), 0)) AS combined_score
+        FROM document_pages dp
+        JOIN documents d ON d.id = dp.document_id
+        WHERE dp.embedding IS NOT NULL
         ORDER BY combined_score DESC
         LIMIT :k
     """)
     result = await session.execute(sql, {"q": query_text, "k": k})
     rows = []
     for r in result:
+        content = r.page_content or ""
         rows.append({
-            "child_id": r.child_id,
-            "child_content": r.child_content,
-            "parent_id": r.parent_id,
-            "parent_content": r.parent_content,
+            "page_id": r.page_id,
+            "page_content": content,
+            "parent_content": content,  # For backward-compatibility with rag.py context formatting
             "page_number": r.page_number,
             "document_id": r.document_id,
             "title": r.title,

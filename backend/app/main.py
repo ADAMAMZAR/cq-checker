@@ -754,26 +754,28 @@ async def upload_document(
 @app.get("/api/documents", response_model=List[DocumentSummary], tags=["Document Ingestion / RAG"])
 async def list_documents(limit: int = 50, offset: int = 0):
     """
-    List ingested documents with parent/child chunk counts.
+    List ingested documents with page counts.
     """
     from app.db.session import get_session_factory
-    from app.repositories.documents import DocumentRepository, ChunkRepository
+    from app.repositories.documents import DocumentRepository, PageRepository
 
     factory = get_session_factory()
     async with factory() as session:
         doc_repo = DocumentRepository(session)
-        chunk_repo = ChunkRepository(session)
+        page_repo = PageRepository(session)
         docs = await doc_repo.list_all(limit=limit, offset=offset)
 
         summaries = []
         for doc in docs:
-            counts = await chunk_repo.count_by_document(doc.id)
+            counts = await page_repo.count_by_document(doc.id)
+            p_cnt = counts.get("page_count", 0)
             summaries.append(DocumentSummary(
                 id=str(doc.id),
                 title=doc.title,
                 file_url=doc.file_url,
-                parent_count=counts["parent_chunks"],
-                child_count=counts["child_chunks"],
+                page_count=p_cnt,
+                parent_count=p_cnt,
+                child_count=p_cnt,
                 created_at=to_malaysia(doc.created_at).strftime("%d/%m/%Y, %H:%M:%S") if doc.created_at else None,
             ))
     return summaries

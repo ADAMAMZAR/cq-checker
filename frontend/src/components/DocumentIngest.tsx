@@ -198,9 +198,8 @@ export default function DocumentIngest() {
             {result.status === "failed" ? (
               <p className="text-xs text-[var(--accent-danger-text)]">{result.message || "Ingestion failed."}</p>
             ) : (
-              <div className="grid grid-cols-3 gap-3">
-                <Stat label="Parent chunks" value={String(result.parent_count)} />
-                <Stat label="Child chunks" value={String(result.child_count)} />
+              <div className="grid grid-cols-2 gap-3">
+                <Stat label="Total Pages" value={String(result.page_count ?? result.parent_count ?? 0)} />
                 <Stat label="Cost" value={`$${result.cost_usd.toFixed(6)}`} />
               </div>
             )}
@@ -233,8 +232,7 @@ export default function DocumentIngest() {
               <thead>
                 <tr className="border-b border-[var(--border-subtle)] font-bold text-[var(--text-tertiary)]">
                   <th className="py-3 px-4 uppercase tracking-wider text-[10px]">Title</th>
-                  <th className="py-3 px-4 text-center uppercase tracking-wider text-[10px]">Parents</th>
-                  <th className="py-3 px-4 text-center uppercase tracking-wider text-[10px]">Children</th>
+                  <th className="py-3 px-4 text-center uppercase tracking-wider text-[10px]">Pages</th>
                   <th className="py-3 px-4 text-right uppercase tracking-wider text-[10px]">Added</th>
                 </tr>
               </thead>
@@ -253,8 +251,7 @@ export default function DocumentIngest() {
                         <IconExternalLink className="w-3 h-3 text-[var(--text-tertiary)]" />
                       </a>
                     </td>
-                    <td className="py-3 px-4 text-center font-mono tabular-nums">{doc.parent_count}</td>
-                    <td className="py-3 px-4 text-center font-mono tabular-nums">{doc.child_count}</td>
+                    <td className="py-3 px-4 text-center font-mono tabular-nums">{doc.page_count ?? doc.parent_count ?? 0}</td>
                     <td className="py-3 px-4 text-right text-[var(--text-tertiary)]">
                       {doc.created_at ? new Date(doc.created_at).toLocaleString() : "—"}
                     </td>

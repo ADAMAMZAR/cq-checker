@@ -156,8 +156,9 @@ export interface DocumentIngestResult {
   document_id?: string | null;
   title: string;
   status: IngestStatus;
-  parent_count: number;
-  child_count: number;
+  page_count?: number;
+  parent_count?: number;
+  child_count?: number;
   cost_usd: number;
   message: string;
 }
@@ -166,8 +167,9 @@ export interface DocumentSummary {
   id: string;
   title: string;
   file_url: string;
-  parent_count: number;
-  child_count: number;
+  page_count?: number;
+  parent_count?: number;
+  child_count?: number;
   created_at?: string | null;
 }
 

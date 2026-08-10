@@ -1,14 +1,14 @@
-"""PDF → Markdown parser.
+"""PDF → Markdown parser using Gemini Multimodal Vision OCR.
 
-Primary: calls MiniMax M3 to convert a PDF into structured Markdown with
-page tracking. Fallback: local PyMuPDF text extraction (page.get_text()) so the
-pipeline works without a MiniMax key and never hard-fails.
+Primary: Renders PDF pages to high-resolution PNG images and calls Gemini 3.5 Flash Vision
+to extract selectable text, screenshot form fields, required asterisk (*) inputs,
+button callouts, and diagrams into rich Markdown.
+
+Fallback: PyMuPDF local text extraction so the pipeline works offline.
 """
 
 import logging
-from typing import List, Optional, Tuple
-
-import requests
+from typing import List, Tuple
 
 from app.config import settings
 
@@ -16,9 +16,8 @@ logger = logging.getLogger(__name__)
 
 MAX_PAGES = 200  # generous cap for manuals
 
-# MiniMax pricing (approx, USD per 1M tokens)
-INPUT_RATE = 0.20 / 1_000_000
-OUTPUT_RATE = 1.00 / 1_000_000
+GEMINI_INPUT_RATE = 0.10 / 1_000_000
+GEMINI_OUTPUT_RATE = 0.40 / 1_000_000
 
 
 def _pyMuPDF_pages(file_bytes: bytes) -> List[dict]:
@@ -44,89 +43,86 @@ def _pyMuPDF_pages(file_bytes: bytes) -> List[dict]:
     return pages
 
 
-def parse_pdf_to_markdown(file_bytes: bytes) -> Tuple[List[dict], int, int, float]:
-    """Parse a PDF into per-page markdown blocks.
+def _parse_pdf_with_gemini_vision(file_bytes: bytes) -> Tuple[List[dict], int, int, float]:
+    """Render each PDF page to a PNG image and call Gemini Flash Vision to extract
 
-    Returns (pages, in_tokens, out_tokens, cost). Each page:
-        {"page_number": int, "text": str}
+    all text, UI form fields, screenshot labels, asterisk required marks (*), and step instructions.
     """
-    if not settings.minimax_api_key:
-        logger.warning("MINIMAX_API_KEY not set — using PyMuPDF text fallback.")
+    try:
+        import fitz
+        from google import genai
+        from google.genai import types
+    except ImportError as e:
+        logger.warning(f"Vision OCR dependency missing ({e}) — falling back to PyMuPDF text.")
         return _pyMuPDF_pages(file_bytes), 0, 0, 0.0
 
     try:
-        import base64
-        b64 = base64.b64encode(file_bytes).decode("ascii")
-
-        url = settings.minimax_base_url.rstrip("/") + "/v1/text/chatcompletion_v2"
-        headers = {
-            "Authorization": f"Bearer {settings.minimax_api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": settings.minimax_model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "file",
-                            "file": b64,
-                            "file_type": "pdf",
-                        },
-                        {
-                            "type": "text",
-                            "text": (
-                                "Convert this PDF document into clean Markdown. "
-                                "Preserve tables, headings, and structure. "
-                                "Prefix each page's content with a line: <!-- PAGE N --> "
-                                "where N is the page number."
-                            ),
-                        },
-                    ],
-                }
-            ],
-            "temperature": 0,
-        }
-        resp = requests.post(url, headers=headers, json=payload, timeout=120)
-        resp.raise_for_status()
-        body = resp.json()
-
-        content = body["choices"][0]["message"]["content"]
-        usage = body.get("usage", {})
-        in_tokens = int(usage.get("total_tokens", 0))
-        out_tokens = 0
-        cost = calculate_cost(in_tokens, out_tokens)
-
-        pages = _split_markdown_by_page(content)
-        return pages, in_tokens, out_tokens, cost
+        doc = fitz.open(stream=file_bytes, filetype="pdf")
     except Exception as e:
-        logger.error(f"MiniMax parse failed ({e}) — using PyMuPDF text fallback.")
+        logger.error(f"PyMuPDF open failed: {e}")
+        return [], 0, 0, 0.0
+
+    client = genai.Client(api_key=settings.gemini_api_key)
+    pages = []
+    total_in = 0
+    total_out = 0
+
+    prompt = (
+        "You are an expert Document, Slide, and UI Form OCR Parser.\n"
+        "Transcribe ALL content from this page/slide into detailed, structured Markdown.\n\n"
+        "CRITICAL INSTRUCTIONS FOR IMAGES & SCREENSHOTS:\n"
+        "1. If the page contains a form, screenshot, UI panel, or diagram:\n"
+        "   - Extract and list EVERY SINGLE form field name, label, asterisk required symbol (*), input placeholder, and dropdown selection option visible in the screenshot.\n"
+        "   - Group form fields clearly (e.g., 'Form Fields in Screenshot: Registered Company Name *, Registration Number e.g. * (Malaysia: SSM..., Australia: ABN...), Primary Contact (First Name *, Last Name *, Designation *)...').\n"
+        "2. Transcribe all text boxes, step descriptions, arrows, callouts, and button instructions.\n"
+        "3. Do NOT summarize or skip any form fields. Be 100% exhaustive so all form requirements are searchable."
+    )
+
+    for i, page in enumerate(doc):
+        if i >= MAX_PAGES:
+            break
+        page_num = i + 1
+        try:
+            pix = page.get_pixmap(dpi=150)
+            png_bytes = pix.tobytes("png")
+
+            response = client.models.generate_content(
+                model=settings.gemini_chat_model,
+                contents=[
+                    prompt,
+                    types.Part.from_bytes(data=png_bytes, mime_type="image/png"),
+                ],
+            )
+            text = response.text.strip() if response.text else ""
+            if not text:
+                text = page.get_text().strip()
+
+            if text:
+                pages.append({"page_number": page_num, "text": text})
+
+            um = getattr(response, "usage_metadata", None)
+            if um:
+                total_in += getattr(um, "prompt_token_count", 0) or 0
+                total_out += getattr(um, "candidates_token_count", 0) or 0
+        except Exception as err:
+            logger.error(f"Gemini vision parse failed on page {page_num}: {err}")
+            raw_text = page.get_text().strip()
+            if raw_text:
+                pages.append({"page_number": page_num, "text": raw_text})
+
+    doc.close()
+    cost = (total_in * GEMINI_INPUT_RATE) + (total_out * GEMINI_OUTPUT_RATE)
+    return pages, total_in, total_out, cost
+
+
+def parse_pdf_to_markdown(file_bytes: bytes) -> Tuple[List[dict], int, int, float]:
+    """Parse a PDF into per-page markdown blocks.
+
+    Uses Gemini 3.5 Flash Vision OCR when GEMINI_API_KEY is present,
+    else falls back to PyMuPDF local text extraction.
+    """
+    if settings.gemini_api_key:
+        return _parse_pdf_with_gemini_vision(file_bytes)
+    else:
+        logger.warning("GEMINI_API_KEY not set — using PyMuPDF text fallback.")
         return _pyMuPDF_pages(file_bytes), 0, 0, 0.0
-
-
-def _split_markdown_by_page(markdown: str) -> List[dict]:
-    """Split a MiniMax markdown response into per-page blocks."""
-    import re
-    pages: List[dict] = []
-    blocks = re.split(r"<!--\s*PAGE\s+(\d+)\s*-->", markdown)
-    # blocks = [pre, pageno, content, pageno, content, ...]
-    if len(blocks) < 2:
-        # No page markers — treat whole doc as page 1
-        if markdown.strip():
-            return [{"page_number": 1, "text": markdown.strip()}]
-        return []
-    i = 1
-    while i + 1 < len(blocks):
-        page_no = int(blocks[i])
-        text = blocks[i + 1].strip()
-        if text:
-            pages.append({"page_number": page_no, "text": text})
-        i += 2
-    return pages
-
-
-def calculate_cost(prompt_tokens: int, output_tokens: int,
-                   input_rate: float = INPUT_RATE,
-                   output_rate: float = OUTPUT_RATE) -> float:
-    return (prompt_tokens * input_rate) + (output_tokens * output_rate)

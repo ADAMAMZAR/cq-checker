@@ -122,6 +122,7 @@ class DocumentIngestResult(BaseModel):
     document_id: Optional[str] = None
     title: str
     status: str
+    page_count: int = 0
     parent_count: int = 0
     child_count: int = 0
     cost_usd: float = 0.0
@@ -132,6 +133,7 @@ class DocumentSummary(BaseModel):
     id: str
     title: str
     file_url: str
+    page_count: int = 0
     parent_count: int = 0
     child_count: int = 0
     created_at: Optional[str] = None
