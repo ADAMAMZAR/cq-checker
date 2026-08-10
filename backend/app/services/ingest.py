@@ -79,7 +79,7 @@ async def _ingest_blocking(
             return IngestResult(None, title, "failed", message="Upload failed.")
 
         # Parse (blocking HTTP/CPU → thread)
-        pages, _, _, parse_cost = await asyncio.to_thread(
+        pages, in_t, out_t, parse_cost = await asyncio.to_thread(
             parser.parse_pdf_to_markdown, file_bytes,
         )
         if not pages:
@@ -97,7 +97,14 @@ async def _ingest_blocking(
             return IngestResult(None, title, "failed", message="Embedding count mismatch.")
 
         # Insert Document and DocumentPage rows
-        doc = await doc_repo.create(title=title, file_url=file_url, file_hash=file_hash)
+        doc = await doc_repo.create(
+            title=title,
+            file_url=file_url,
+            file_hash=file_hash,
+            input_tokens=in_t,
+            output_tokens=out_t,
+            cost_usd=parse_cost,
+        )
         page_repo = PageRepository(session)
 
         for p_chunk, p_emb in zip(page_chunks, page_embeddings):

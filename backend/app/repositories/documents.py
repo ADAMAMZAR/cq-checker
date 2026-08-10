@@ -13,8 +13,23 @@ class DocumentRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def create(self, title: str, file_url: str, file_hash: Optional[str] = None) -> Document:
-        doc = Document(title=title, file_url=file_url, file_hash=file_hash)
+    async def create(
+        self,
+        title: str,
+        file_url: str,
+        file_hash: Optional[str] = None,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        cost_usd: float = 0.0,
+    ) -> Document:
+        doc = Document(
+            title=title,
+            file_url=file_url,
+            file_hash=file_hash,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cost_usd=round(float(cost_usd), 6),
+        )
         self.session.add(doc)
         await self.session.commit()
         await self.session.refresh(doc)

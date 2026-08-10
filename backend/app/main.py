@@ -404,10 +404,6 @@ async def run_audit_comparison(
             meta = {}
         extracted_results.append(meta)
 
-    expiration_date = "N/A"
-    if extracted_results:
-        expiration_date = _first_cert(extracted_results[0]).get("expirationDate", "N/A")
-
     qa_data_title = f"{workspace_title} {cert_type}"
     audit_result, suggested_comment, comparison_table_dict = auditor.run_full_audit(
         supplier_name,
@@ -435,7 +431,6 @@ async def run_audit_comparison(
         complete_qa_data_dump=qa_data,
         compiled_extracted_data=compiled_data,
         result=audit_result,
-        expiration_date=expiration_date,
         suggested_comment=suggested_comment,
         screenshot_url=screenshot_url or None,
         comparison_input_tokens=0,
@@ -457,7 +452,6 @@ async def run_audit_comparison(
         cert_type=cert_type,
         filename=", ".join(doc.filename for doc in matching_docs),
         result=audit_result,
-        expiration_date=expiration_date,
         suggested_comment=suggested_comment,
         screenshot_url=screenshot_url or None,
         comparison_input_tokens=0,
@@ -514,10 +508,6 @@ async def run_audit(
 
     all_filenames = [d.filename for d in doc_evidences]
 
-    expiration_date = "N/A"
-    if extracted_docs:
-        expiration_date = _first_cert(extracted_docs[0]["extracted_data"]).get("expirationDate", "N/A")
-
     qa_data_title = f"{workspace_title} {cert_type}"
     audit_result, suggested_comment, comparison_table_dict = auditor.run_full_audit(
         supplier_name,
@@ -542,7 +532,6 @@ async def run_audit(
         complete_qa_data_dump=qa_data,
         compiled_extracted_data=json.dumps(extracted_docs),
         result=audit_result,
-        expiration_date=expiration_date,
         suggested_comment=suggested_comment,
         screenshot_url=screenshot_url,
         comparison_input_tokens=0,
@@ -567,7 +556,6 @@ async def run_audit(
         cert_type=cert_type,
         filename=", ".join(all_filenames),
         result=audit_result,
-        expiration_date=expiration_date,
         suggested_comment=suggested_comment,
         screenshot_url=screenshot_url,
         comparison_input_tokens=comp_in_t,

@@ -6,6 +6,18 @@ export function cleanQuestionLabel(label?: string): string {
   return parts[0] ? parts[0].trim() : label.trim();
 }
 
+export function formatSuggestedComment(rawComment?: string): string {
+  if (!rawComment) return "";
+  const trimmed = rawComment.trim();
+  if (trimmed === "All match." || trimmed === "All match" || !trimmed) {
+    return trimmed;
+  }
+  if (trimmed.startsWith("Dear Sir/Madam")) {
+    return trimmed;
+  }
+  return `Dear Sir/Madam,\n\nWe seek for your resubmission for the following in Part 2: Modular Certificates Questionnaire:\n\n${trimmed}\n\nThank you.`;
+}
+
 export function getCommentAndTable(fullComment: string): {
   comment: string;
   table: { headers: string[]; rows: string[][] } | null;

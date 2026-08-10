@@ -190,7 +190,7 @@ export async function sendChat(
   }
 
   return {
-    answer,
+    answer: (done as any).answer || answer,
     sources: done.sources ?? [],
     cost_usd: done.cost_usd ?? 0,
     cache_hit: !!done.cache_hit,

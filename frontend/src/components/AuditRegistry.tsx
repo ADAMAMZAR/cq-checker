@@ -9,7 +9,7 @@ import {
 import type { AuditRegistryEntry, DocumentEvidence, SupplierAssets, ComparisonTable } from "@/types";
 import { FIELD_NAME_TO_META_KEY } from "@/types";
 import { fetchAuditRegistry, fetchSupplierAssets, updateEvidenceMetadata, buildFileUrl } from "@/lib/api";
-import { getCommentAndTable, cleanQuestionLabel, getLabelSortKey } from "@/lib/utils";
+import { getCommentAndTable, formatSuggestedComment, cleanQuestionLabel, getLabelSortKey } from "@/lib/utils";
 import ScreenshotLightbox from "./ScreenshotLightbox";
 
 interface AuditRegistryProps {
@@ -97,7 +97,7 @@ export default function AuditRegistry({ evidenceLogs, isEvidenceLoading, onRefre
   };
 
   const handleCopyComment = (comment: string) => {
-    navigator.clipboard.writeText(comment);
+    navigator.clipboard.writeText(formatSuggestedComment(comment));
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -451,6 +451,8 @@ function ComparisonTab({
   const { comment, table, tables } = getCommentAndTable(log.suggested_comment);
   const hasJsonTable = log.comparison_table && Array.isArray(log.comparison_table.tables);
 
+  const fullFormattedComment = formatSuggestedComment(comment);
+
   return (
     <div className="flex-1 flex flex-col gap-6 overflow-y-auto max-h-none lg:max-h-[620px] pr-2">
       <div className="p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-input)]">
@@ -471,7 +473,7 @@ function ComparisonTab({
       <div className="p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-input)] relative">
         <h4 className="text-[10px] font-bold text-[var(--text-tertiary)] uppercase tracking-wider mb-2">Suggested comment</h4>
         <p className="text-sm text-[var(--text-primary)] italic font-medium pr-10 leading-relaxed whitespace-pre-wrap">
-          &ldquo;{comment || "No detailed comments provided."}&rdquo;
+          &ldquo;{fullFormattedComment || "No detailed comments provided."}&rdquo;
         </p>
         <button onClick={() => onCopyComment(comment)}
           className="icon-action absolute right-4 top-4 p-2 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-visible)] hover:bg-[var(--bg-surface-hover)] transition-all duration-300 cursor-pointer active:scale-95 text-[var(--text-secondary)] hover:text-[var(--heading-color)]"

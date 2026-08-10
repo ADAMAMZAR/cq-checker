@@ -1,12 +1,13 @@
-"""PDF → Markdown parser using Gemini Multimodal Vision OCR.
+"""PDF → Markdown parser using Gemini Multimodal Vision OCR (Parallelized).
 
 Primary: Renders PDF pages to high-resolution PNG images and calls Gemini 3.5 Flash Vision
-to extract selectable text, screenshot form fields, required asterisk (*) inputs,
+in parallel threads to extract selectable text, screenshot form fields, required asterisk (*) inputs,
 button callouts, and diagrams into rich Markdown.
 
 Fallback: PyMuPDF local text extraction so the pipeline works offline.
 """
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 from typing import List, Tuple
 
@@ -43,11 +44,35 @@ def _pyMuPDF_pages(file_bytes: bytes) -> List[dict]:
     return pages
 
 
-def _parse_pdf_with_gemini_vision(file_bytes: bytes) -> Tuple[List[dict], int, int, float]:
-    """Render each PDF page to a PNG image and call Gemini Flash Vision to extract
+def _parse_single_page_vision(client, model: str, prompt: str, png_bytes: bytes, page_num: int, raw_text: str, types_module) -> Tuple[int, str, int, int]:
+    """Parse 1 page image with Gemini Flash Vision."""
+    try:
+        response = client.models.generate_content(
+            model=model,
+            contents=[
+                prompt,
+                types_module.Part.from_bytes(data=png_bytes, mime_type="image/png"),
+            ],
+        )
+        text = response.text.strip() if response.text else ""
+        if not text:
+            text = raw_text
 
-    all text, UI form fields, screenshot labels, asterisk required marks (*), and step instructions.
-    """
+        in_tok = 0
+        out_tok = 0
+        um = getattr(response, "usage_metadata", None)
+        if um:
+            in_tok = getattr(um, "prompt_token_count", 0) or 0
+            out_tok = getattr(um, "candidates_token_count", 0) or 0
+
+        return page_num, text, in_tok, out_tok
+    except Exception as err:
+        logger.error(f"Gemini vision parse failed on page {page_num}: {err}")
+        return page_num, raw_text, 0, 0
+
+
+def _parse_pdf_with_gemini_vision(file_bytes: bytes) -> Tuple[List[dict], int, int, float]:
+    """Render PDF pages to PNG images and call Gemini Flash Vision in parallel threads."""
     try:
         import fitz
         from google import genai
@@ -63,10 +88,6 @@ def _parse_pdf_with_gemini_vision(file_bytes: bytes) -> Tuple[List[dict], int, i
         return [], 0, 0, 0.0
 
     client = genai.Client(api_key=settings.gemini_api_key)
-    pages = []
-    total_in = 0
-    total_out = 0
-
     prompt = (
         "You are an expert Document, Slide, and UI Form OCR Parser.\n"
         "Transcribe ALL content from this page/slide into detailed, structured Markdown.\n\n"
@@ -78,6 +99,7 @@ def _parse_pdf_with_gemini_vision(file_bytes: bytes) -> Tuple[List[dict], int, i
         "3. Do NOT summarize or skip any form fields. Be 100% exhaustive so all form requirements are searchable."
     )
 
+    page_tasks = []
     for i, page in enumerate(doc):
         if i >= MAX_PAGES:
             break
@@ -85,32 +107,43 @@ def _parse_pdf_with_gemini_vision(file_bytes: bytes) -> Tuple[List[dict], int, i
         try:
             pix = page.get_pixmap(dpi=150)
             png_bytes = pix.tobytes("png")
-
-            response = client.models.generate_content(
-                model=settings.gemini_chat_model,
-                contents=[
-                    prompt,
-                    types.Part.from_bytes(data=png_bytes, mime_type="image/png"),
-                ],
-            )
-            text = response.text.strip() if response.text else ""
-            if not text:
-                text = page.get_text().strip()
-
-            if text:
-                pages.append({"page_number": page_num, "text": text})
-
-            um = getattr(response, "usage_metadata", None)
-            if um:
-                total_in += getattr(um, "prompt_token_count", 0) or 0
-                total_out += getattr(um, "candidates_token_count", 0) or 0
-        except Exception as err:
-            logger.error(f"Gemini vision parse failed on page {page_num}: {err}")
             raw_text = page.get_text().strip()
-            if raw_text:
-                pages.append({"page_number": page_num, "text": raw_text})
+            page_tasks.append((page_num, png_bytes, raw_text))
+        except Exception as pe:
+            logger.error(f"Failed rendering page {page_num}: {pe}")
 
     doc.close()
+
+    if not page_tasks:
+        return [], 0, 0, 0.0
+
+    parsed_map = {}
+    total_in = 0
+    total_out = 0
+
+    max_workers = min(10, len(page_tasks))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [
+            executor.submit(
+                _parse_single_page_vision,
+                client,
+                settings.gemini_chat_model,
+                prompt,
+                png_bytes,
+                p_num,
+                raw_txt,
+                types,
+            )
+            for p_num, png_bytes, raw_txt in page_tasks
+        ]
+        for f in as_completed(futures):
+            p_num, text, in_tok, out_tok = f.result()
+            if text:
+                parsed_map[p_num] = text
+            total_in += in_tok
+            total_out += out_tok
+
+    pages = [{"page_number": p, "text": parsed_map[p]} for p in sorted(parsed_map.keys())]
     cost = (total_in * GEMINI_INPUT_RATE) + (total_out * GEMINI_OUTPUT_RATE)
     return pages, total_in, total_out, cost
 
@@ -118,7 +151,7 @@ def _parse_pdf_with_gemini_vision(file_bytes: bytes) -> Tuple[List[dict], int, i
 def parse_pdf_to_markdown(file_bytes: bytes) -> Tuple[List[dict], int, int, float]:
     """Parse a PDF into per-page markdown blocks.
 
-    Uses Gemini 3.5 Flash Vision OCR when GEMINI_API_KEY is present,
+    Uses Gemini 3.5 Flash Vision OCR in parallel threads when GEMINI_API_KEY is present,
     else falls back to PyMuPDF local text extraction.
     """
     if settings.gemini_api_key:

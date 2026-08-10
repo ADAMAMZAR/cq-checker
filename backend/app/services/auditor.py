@@ -1020,12 +1020,6 @@ def run_full_audit(
     if not all_comment_parts:
         suggested_comment = "All match."
     else:
-        body = "\n\n".join(all_comment_parts)
-        suggested_comment = (
-            "Dear Sir/Madam,\n\n"
-            "We seek for your resubmission for the following in Part 2: Modular Certificates Questionnaire:\n\n"
-            f"{body}\n\n"
-            "Thank you."
-        )
+        suggested_comment = "\n\n".join(all_comment_parts)
 
     return overall_verdict, suggested_comment, comparison_table

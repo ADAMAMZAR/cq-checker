@@ -276,12 +276,7 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
                     <div className="flex items-center gap-2 text-[11px] text-[var(--text-tertiary)] px-1">
                       <span className="font-semibold">{msg.sender === "user" ? "You" : "CQ Assistant"}</span>
                       <span>{msg.timestamp}</span>
-                      {msg.cacheHit && (
-                        <span className="px-2 py-0.5 rounded-full text-[9px] font-bold border bg-[var(--accent-success-soft)] text-[var(--accent-success-text)] border-[var(--accent-success-border)]">
-                          CACHE HIT · $0
-                        </span>
-                      )}
-                      {!msg.cacheHit && msg.costUsd !== undefined && msg.sender === "ai" && !msg.isStreaming && (
+                      {msg.costUsd !== undefined && msg.sender === "ai" && !msg.isStreaming && (
                         <span className="px-2 py-0.5 rounded-full text-[9px] font-bold border bg-[var(--accent-primary-soft)] text-[var(--accent-primary-text)] border-[var(--accent-primary-border)]">
                           ${msg.costUsd.toFixed(6)}
                         </span>

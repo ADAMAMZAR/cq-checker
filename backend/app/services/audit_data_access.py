@@ -112,7 +112,6 @@ async def get_next_audit_id() -> str:
 # ── Audit logs ───────────────────────────────────────────────────────────────
 
 def _to_audit_log_entry(r: AuditLog) -> AuditLogEntry:
-    expiration_date = "N/A"
     cert_type = "Relational evidence"
     compiled = r.compiled_extracted_data or ""
     try:
@@ -120,7 +119,6 @@ def _to_audit_log_entry(r: AuditLog) -> AuditLogEntry:
         extracted_docs = json.loads(compiled)
         if isinstance(extracted_docs, list) and extracted_docs:
             first = extracted_docs[0].get("extracted_data", {})
-            expiration_date = first.get("expirationDate", "N/A")
             cert_type = first.get("certificateType", "Relational evidence")
     except Exception:
         pass
@@ -137,7 +135,6 @@ def _to_audit_log_entry(r: AuditLog) -> AuditLogEntry:
         complete_qa_data_dump=r.complete_qa_data_dump or "[]",
         compiled_extracted_data=compiled,
         result=r.result or "Mismatch",
-        expiration_date=expiration_date,
         suggested_comment=r.suggested_comment or "",
         screenshot_url=r.screenshot_url,
         comparison_input_tokens=r.comparison_input_tokens or 0,
@@ -318,25 +315,125 @@ async def get_screenshot_urls_by_supplier_id(supplier_id: int) -> List[str]:
 async def get_cost_analytics() -> dict:
     factory = get_session_factory()
     async with factory() as session:
-        repo = DocumentEvidenceRepository(session)
-        records = await repo.list_all(limit=100000)
-    total_cost_myr = 0.0
-    supplier_map: dict = {}
-    for r in records:
-        name = r.supplier_name or "Unknown"
-        cost_myr = float(r.cost_usd or 0.0) * MYR_RATE
-        total_cost_myr += cost_myr
-        if name not in supplier_map:
-            supplier_map[name] = {"supplier_name": name, "document_count": 0, "cost_myr": 0.0}
-        supplier_map[name]["document_count"] += 1
-        supplier_map[name]["cost_myr"] += cost_myr
-    breakdown = sorted(supplier_map.values(), key=lambda s: s["cost_myr"], reverse=True)
-    total_documents = len(records)
+        # 1. CQ Checker (Supplier Audits)
+        ev_repo = DocumentEvidenceRepository(session)
+        evidence_records = await ev_repo.list_all(limit=100000)
+
+        cq_total_cost_usd = 0.0
+        supplier_map: dict = {}
+        for r in evidence_records:
+            name = r.supplier_name or "Unknown"
+            c_usd = float(r.cost_usd or 0.0)
+            cq_total_cost_usd += c_usd
+            if name not in supplier_map:
+                supplier_map[name] = {"supplier_name": name, "document_count": 0, "cost_usd": 0.0, "cost_myr": 0.0}
+            supplier_map[name]["document_count"] += 1
+            supplier_map[name]["cost_usd"] += c_usd
+            supplier_map[name]["cost_myr"] += c_usd * MYR_RATE
+
+        cq_breakdown = sorted(supplier_map.values(), key=lambda s: s["cost_usd"], reverse=True)
+        cq_total_documents = len(evidence_records)
+        cq_total_cost_myr = cq_total_cost_usd * MYR_RATE
+
+        # 2. Chatbot RAG
+        from app.models.tables import ChatLog, Document, DocumentPage
+        from sqlalchemy import select, func
+
+        chat_res = await session.execute(
+            select(ChatLog).order_by(ChatLog.created_at.desc()).limit(1000)
+        )
+        chat_records = list(chat_res.scalars().all())
+
+        chat_total_cost_usd = sum(float(c.cost_usd or 0.0) for c in chat_records)
+        chat_total_cost_myr = chat_total_cost_usd * MYR_RATE
+        chat_in_tokens = sum(c.input_tokens or 0 for c in chat_records)
+        chat_out_tokens = sum(c.output_tokens or 0 for c in chat_records)
+        chat_cache_hits = sum(1 for c in chat_records if c.cache_hit == 1)
+
+        chat_logs_list = [
+            {
+                "id": str(c.id),
+                "query_text": c.query_text,
+                "input_tokens": c.input_tokens or 0,
+                "output_tokens": c.output_tokens or 0,
+                "cost_usd": float(c.cost_usd or 0.0),
+                "cost_myr": round(float(c.cost_usd or 0.0) * MYR_RATE, 4),
+                "cache_hit": c.cache_hit == 1,
+                "latency_ms": c.latency_ms or 0,
+                "cached_query_text": c.cached_query_text,
+                "created_at": _display_timestamp(c.created_at),
+            }
+            for c in chat_records
+        ]
+
+        # 3. Document Ingestion
+        doc_res = await session.execute(
+            select(Document).order_by(Document.created_at.desc()).limit(1000)
+        )
+        doc_records = list(doc_res.scalars().all())
+
+        ingest_total_cost_usd = sum(float(d.cost_usd or 0.0) for d in doc_records)
+        ingest_total_cost_myr = ingest_total_cost_usd * MYR_RATE
+        ingest_in_tokens = sum(d.input_tokens or 0 for d in doc_records)
+        ingest_out_tokens = sum(d.output_tokens or 0 for d in doc_records)
+
+        pages_res = await session.execute(select(func.count(DocumentPage.id)))
+        ingest_total_pages = pages_res.scalar() or 0
+
+        doc_list = []
+        for d in doc_records:
+            p_res = await session.execute(
+                select(func.count(DocumentPage.id)).where(DocumentPage.document_id == d.id)
+            )
+            p_cnt = p_res.scalar() or 0
+            doc_list.append({
+                "id": str(d.id),
+                "title": d.title,
+                "file_url": d.file_url,
+                "page_count": p_cnt,
+                "input_tokens": d.input_tokens or 0,
+                "output_tokens": d.output_tokens or 0,
+                "cost_usd": float(d.cost_usd or 0.0),
+                "cost_myr": round(float(d.cost_usd or 0.0) * MYR_RATE, 4),
+                "created_at": _display_timestamp(d.created_at),
+            })
+
+    master_cost_usd = cq_total_cost_usd + chat_total_cost_usd + ingest_total_cost_usd
+    master_cost_myr = master_cost_usd * MYR_RATE
+
     return {
-        "total_cost_myr": round(total_cost_myr, 4),
-        "total_documents": total_documents,
-        "average_cost_myr": round(total_cost_myr / total_documents, 4) if total_documents else 0.0,
-        "breakdown": [{**s, "cost_myr": round(s["cost_myr"], 4)} for s in breakdown],
+        "master_cost_usd": round(master_cost_usd, 6),
+        "master_cost_myr": round(master_cost_myr, 4),
+        "total_cost_myr": round(cq_total_cost_myr, 4),
+        "total_documents": cq_total_documents,
+        "average_cost_myr": round(cq_total_cost_myr / cq_total_documents, 4) if cq_total_documents else 0.0,
+        "breakdown": [{**s, "cost_usd": round(s["cost_usd"], 6), "cost_myr": round(s["cost_myr"], 4)} for s in cq_breakdown],
+        "cq_checker": {
+            "total_cost_usd": round(cq_total_cost_usd, 6),
+            "total_cost_myr": round(cq_total_cost_myr, 4),
+            "total_documents": cq_total_documents,
+            "average_cost_myr": round(cq_total_cost_myr / cq_total_documents, 4) if cq_total_documents else 0.0,
+            "breakdown": [{**s, "cost_usd": round(s["cost_usd"], 6), "cost_myr": round(s["cost_myr"], 4)} for s in cq_breakdown],
+        },
+        "chatbot": {
+            "total_cost_usd": round(chat_total_cost_usd, 6),
+            "total_cost_myr": round(chat_total_cost_myr, 4),
+            "total_queries": len(chat_records),
+            "cache_hits": chat_cache_hits,
+            "cache_hit_rate_pct": round((chat_cache_hits / len(chat_records) * 100), 1) if chat_records else 0.0,
+            "input_tokens": chat_in_tokens,
+            "output_tokens": chat_out_tokens,
+            "logs": chat_logs_list,
+        },
+        "ingestion": {
+            "total_cost_usd": round(ingest_total_cost_usd, 6),
+            "total_cost_myr": round(ingest_total_cost_myr, 4),
+            "total_documents": len(doc_records),
+            "total_pages": ingest_total_pages,
+            "input_tokens": ingest_in_tokens,
+            "output_tokens": ingest_out_tokens,
+            "documents": doc_list,
+        },
     }
 
 
@@ -390,7 +487,6 @@ async def log_audit_run(
                     existing_log.complete_qa_data_dump = audit_log.complete_qa_data_dump or "[]"
                     existing_log.compiled_extracted_data = audit_log.compiled_extracted_data or ""
                     existing_log.result = audit_log.result or "Mismatch"
-                    existing_log.expiration_date = audit_log.expiration_date or "N/A"
                     existing_log.suggested_comment = audit_log.suggested_comment or ""
                     existing_log.screenshot_url = audit_log.screenshot_url
                     existing_log.comparison_input_tokens = audit_log.comparison_input_tokens or 0
@@ -410,7 +506,6 @@ async def log_audit_run(
                         complete_qa_data_dump=audit_log.complete_qa_data_dump or "[]",
                         compiled_extracted_data=audit_log.compiled_extracted_data or "",
                         result=audit_log.result or "Mismatch",
-                        expiration_date=audit_log.expiration_date or "N/A",
                         suggested_comment=audit_log.suggested_comment or "",
                         screenshot_url=audit_log.screenshot_url,
                         comparison_input_tokens=audit_log.comparison_input_tokens or 0,

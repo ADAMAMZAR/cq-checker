@@ -189,10 +189,7 @@ def test_run_programmatic_audit_mismatch():
     verdict, comment, comp_table = gemini.run_programmatic_audit(supplier_name, file_contexts, extraction_results)
 
     assert verdict == "Mismatch"
-    assert "Dear Sir/Madam," in comment
-    assert "We seek for your resubmission for the following in Part 2: Modular Certificates Questionnaire:" in comment
     assert "1.3 Board of Engineers Malaysia (BEM) (cert_bem.pdf)" in comment
     assert '- Please revise the certificate type to "Board of Engineers Malaysia (BEM)"' in comment
     assert '- Please revise the certificate number to "2611-BC-9999"' in comment
-    assert "Thank you." in comment
 

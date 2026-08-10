@@ -63,6 +63,8 @@ class ChatLogRepository:
         output_tokens: int = 0,
         cost_usd: float = 0.0,
         cache_hit: bool = False,
+        cached_query_id: Optional[UUID] = None,
+        cached_query_text: Optional[str] = None,
         latency_ms: int = 0,
     ) -> ChatLog:
         record = ChatLog(
@@ -71,6 +73,8 @@ class ChatLogRepository:
             output_tokens=output_tokens,
             cost_usd=round(float(cost_usd), 6),
             cache_hit=1 if cache_hit else 0,
+            cached_query_id=cached_query_id,
+            cached_query_text=cached_query_text,
             latency_ms=latency_ms,
         )
         self.session.add(record)

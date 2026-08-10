@@ -9,7 +9,6 @@ export interface AuditLog {
   complete_qa_data_dump: string;
   compiled_extracted_data: string;
   result: string;
-  expiration_date: string;
   suggested_comment: string;
   comparison_table?: any;
   comparison_input_tokens?: number;
@@ -71,14 +70,68 @@ export interface FormFields {
 export interface CostBreakdownItem {
   supplier_name: string;
   document_count: number;
+  cost_usd?: number;
   cost_myr: number;
 }
 
+export interface ChatbotCostLog {
+  id: string;
+  query_text: string;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+  cost_myr: number;
+  cache_hit: boolean;
+  latency_ms: number;
+  cached_query_text?: string;
+  created_at: string;
+}
+
+export interface IngestionCostDoc {
+  id: string;
+  title: string;
+  file_url: string;
+  page_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+  cost_myr: number;
+  created_at: string;
+}
+
 export interface CostAnalyticsData {
+  master_cost_usd?: number;
+  master_cost_myr?: number;
   total_cost_myr: number;
   total_documents: number;
   average_cost_myr: number;
   breakdown: CostBreakdownItem[];
+  cq_checker?: {
+    total_cost_usd: number;
+    total_cost_myr: number;
+    total_documents: number;
+    average_cost_myr: number;
+    breakdown: CostBreakdownItem[];
+  };
+  chatbot?: {
+    total_cost_usd: number;
+    total_cost_myr: number;
+    total_queries: number;
+    cache_hits: number;
+    cache_hit_rate_pct: number;
+    input_tokens: number;
+    output_tokens: number;
+    logs: ChatbotCostLog[];
+  };
+  ingestion?: {
+    total_cost_usd: number;
+    total_cost_myr: number;
+    total_documents: number;
+    total_pages: number;
+    input_tokens: number;
+    output_tokens: number;
+    documents: IngestionCostDoc[];
+  };
 }
 
 export interface AuditRegistryEntry {

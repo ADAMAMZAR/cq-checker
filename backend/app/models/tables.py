@@ -60,6 +60,9 @@ class Document(Base):
     title = Column(String(255), nullable=False)
     file_url = Column(Text, nullable=False)
     file_hash = Column(String(64), nullable=True, unique=True, index=True)
+    input_tokens = Column(Integer, nullable=False, default=0)
+    output_tokens = Column(Integer, nullable=False, default=0)
+    cost_usd = Column(Numeric(12, 6), nullable=False, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     pages = relationship("DocumentPage", back_populates="document", cascade="all, delete-orphan")
@@ -170,8 +173,12 @@ class ChatLog(Base):
     output_tokens = Column(Integer, nullable=False, default=0)
     cost_usd = Column(Numeric(12, 6), nullable=False, default=0)
     cache_hit = Column(Integer, nullable=False, default=0)  # 0/1
+    cached_query_id = Column(UUID(as_uuid=True), ForeignKey("query_cache.id", ondelete="SET NULL"), nullable=True, index=True)
+    cached_query_text = Column(Text, nullable=True)
     latency_ms = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    cached_query = relationship("QueryCache")
 
 
 # ── Object Storage Metadata (Phase 8 GCS migration readiness) ────────────────
@@ -213,7 +220,6 @@ class AuditLog(Base):
     complete_qa_data_dump = Column(Text, nullable=True, default="[]")
     compiled_extracted_data = Column(Text, nullable=False)
     result = Column(String(50), nullable=True, default="Mismatch")
-    expiration_date = Column(String(50), nullable=True, default="N/A")
     suggested_comment = Column(Text, nullable=False)
     screenshot_url = Column(Text, nullable=True)
     comparison_input_tokens = Column(Integer, nullable=False, default=0)

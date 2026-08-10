@@ -42,7 +42,6 @@ class AuditLogEntry(BaseModel):
     complete_qa_data_dump: Optional[str] = Field(default="[]", description="JSON string of all QA pairs scraped from the page")
     compiled_extracted_data: str = Field(..., description="JSON string of compiled metadata from all documents")
     result: Optional[str] = Field(default="Mismatch", description="Audit Result (Match/Mismatch)")
-    expiration_date: Optional[str] = Field(default="N/A", description="Expiration Date of the certificate")
     suggested_comment: str = Field(..., description="Suggested feedback or comments")
     screenshot_url: Optional[str] = Field(None, description="Hosting path for verification screenshot")
     comparison_input_tokens: int = Field(default=0, description="Gemini prompt input tokens for comparison audit")
@@ -65,7 +64,6 @@ class AuditResultResponse(BaseModel):
     cert_type: Optional[str] = "Relational evidence"
     filename: str
     result: Optional[str] = "Mismatch"
-    expiration_date: Optional[str] = "N/A"
     suggested_comment: str
     screenshot_url: Optional[str] = None
     comparison_input_tokens: int = 0

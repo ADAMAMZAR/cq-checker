@@ -88,6 +88,55 @@ def _sources(results: List[dict]) -> List[dict]:
     return out
 
 
+def _reindex_citations(answer: str, results: List[dict]) -> Tuple[str, List[dict]]:
+    """Re-index citation numbers in Gemini's answer so every response starts cleanly at [1].
+
+    Returns (reindexed_answer, ordered_sources).
+    """
+    import re
+    if not results or not answer:
+        return answer, _sources(results)
+
+    bracket_matches = re.findall(r'\[([\d\s,]+)\]', answer)
+    cited_indices = []
+    for match in bracket_matches:
+        nums = [int(n.strip()) for n in match.split(',') if n.strip().isdigit()]
+        for num in nums:
+            if 1 <= num <= len(results) and num not in cited_indices:
+                cited_indices.append(num)
+
+    if not cited_indices:
+        return answer, _sources(results)
+
+    old_to_new = {old_num: new_idx + 1 for new_idx, old_num in enumerate(cited_indices)}
+
+    def replace_bracket(match_obj):
+        raw_inside = match_obj.group(1)
+        nums = [int(n.strip()) for n in raw_inside.split(',') if n.strip().isdigit()]
+        if not nums:
+            return match_obj.group(0)
+        new_nums = [str(old_to_new[n]) if n in old_to_new else str(n) for n in nums]
+        return f"[{', '.join(new_nums)}]"
+
+    reindexed_answer = re.sub(r'\[([\d\s,]+)\]', replace_bracket, answer)
+
+    ordered_sources = []
+    seen = set()
+    for old_num in cited_indices:
+        r = results[old_num - 1]
+        key = (r["title"], r["page_number"])
+        if key not in seen:
+            seen.add(key)
+            ordered_sources.append({
+                "title": r["title"],
+                "page_number": r["page_number"],
+                "snippet": (r["parent_content"] or "")[:300],
+                "file_url": r.get("file_url"),
+            })
+
+    return reindexed_answer, ordered_sources
+
+
 def _split_messages(messages: List[dict]) -> tuple[Optional[str], List[dict]]:
     """Split OpenAI-style messages into Gemini system_instruction + contents."""
     system_parts = []
@@ -172,7 +221,7 @@ def _fallback_answer(results: List[dict]) -> str:
 async def _prepare(query: str, session_id: Optional[str]):
     """Shared front-half: embed -> cache check -> retrieval -> build LLM messages.
 
-    Returns ``(cached_answer_or_None, results, messages, query_embedding)``.
+    Returns ``(cached_info_or_None, results, messages, query_embedding)``.
     """
     factory = get_session_factory()
     query_embedding = embeddings.embed_text(query)
@@ -183,7 +232,11 @@ async def _prepare(query: str, session_id: Optional[str]):
         )
         results = await hybrid_search(session, query_embedding, query, k=5)
         if cached:
-            return cached.cached_response, results, None, query_embedding
+            return {
+                "response": cached.cached_response,
+                "id": cached.id,
+                "query_text": cached.query_text,
+            }, results, None, query_embedding
 
     messages = None
     if settings.gemini_api_key and results:
@@ -208,13 +261,16 @@ async def _finalize(
     cache_hit: bool,
     start: float,
     session_id: Optional[str],
+    cached_query_id=None,
+    cached_query_text=None,
 ) -> None:
     """Shared back-half: write cache (on miss), cost log, append history."""
     if not cache_hit:
         async with factory() as session:
             await CacheRepository(session).put(query, answer, query_embedding)
     await _log(factory, query, in_tokens, out_tokens, cost,
-               cache_hit=cache_hit, latency_ms=latency(start))
+               cache_hit=cache_hit, latency_ms=latency(start),
+               cached_query_id=cached_query_id, cached_query_text=cached_query_text)
     if session_id:
         await _append_history(factory, session_id, "user", query)
         await _append_history(factory, session_id, "assistant", answer)
@@ -240,26 +296,29 @@ async def answer_query(query: str, session_id: Optional[str] = None) -> dict:
     """Run the full RAG pipeline. Returns a dict for ChatResponse."""
     start = time.monotonic()
     factory = get_session_factory()
-    cached, results, messages, query_embedding = await _prepare(query, session_id)
+    cached_info, results, messages, query_embedding = await _prepare(query, session_id)
 
-    if cached is not None:
-        await _finalize(factory, query, cached, query_embedding, 0, 0, 0.0,
-                        cache_hit=True, start=start, session_id=session_id)
+    if cached_info is not None:
+        reindexed_answer, final_sources = _reindex_citations(cached_info["response"], results)
+        await _finalize(factory, query, reindexed_answer, query_embedding, 0, 0, 0.0,
+                        cache_hit=True, start=start, session_id=session_id,
+                        cached_query_id=cached_info["id"], cached_query_text=cached_info["query_text"])
         return {
-            "answer": cached,
-            "sources": _sources(results),
+            "answer": reindexed_answer,
+            "sources": final_sources,
             "cost_usd": 0.0,
             "cache_hit": True,
             "session_id": session_id,
         }
 
     answer, in_tokens, out_tokens, cost = await _generate(messages, results)
-    await _finalize(factory, query, answer, query_embedding, in_tokens, out_tokens,
+    reindexed_answer, final_sources = _reindex_citations(answer, results)
+    await _finalize(factory, query, reindexed_answer, query_embedding, in_tokens, out_tokens,
                     cost, cache_hit=False, start=start, session_id=session_id)
 
     return {
-        "answer": answer,
-        "sources": _sources(results),
+        "answer": reindexed_answer,
+        "sources": final_sources,
         "cost_usd": round(cost, 6),
         "cache_hit": False,
         "session_id": session_id,
@@ -270,18 +329,20 @@ async def answer_query_stream(query: str, session_id: Optional[str] = None):
     """Run the full RAG pipeline and yield SSE event dicts.
 
     Events: ``{"delta": str}`` chunks, then a final
-    ``{"done": true, "sources": [...], "cost_usd": float, "cache_hit": bool,
+    ``{"done": true, "answer": str, "sources": [...], "cost_usd": float, "cache_hit": bool,
     "session_id": str}`` event.
     """
     start = time.monotonic()
     factory = get_session_factory()
-    cached, results, messages, query_embedding = await _prepare(query, session_id)
+    cached_info, results, messages, query_embedding = await _prepare(query, session_id)
 
-    if cached is not None:
-        await _finalize(factory, query, cached, query_embedding, 0, 0, 0.0,
-                        cache_hit=True, start=start, session_id=session_id)
-        yield {"delta": cached}
-        yield {"done": True, "sources": _sources(results), "cost_usd": 0.0,
+    if cached_info is not None:
+        reindexed_answer, final_sources = _reindex_citations(cached_info["response"], results)
+        await _finalize(factory, query, reindexed_answer, query_embedding, 0, 0, 0.0,
+                        cache_hit=True, start=start, session_id=session_id,
+                        cached_query_id=cached_info["id"], cached_query_text=cached_info["query_text"])
+        yield {"delta": reindexed_answer}
+        yield {"done": True, "answer": reindexed_answer, "sources": final_sources, "cost_usd": 0.0,
                "cache_hit": True, "session_id": session_id}
         return
 
@@ -306,10 +367,11 @@ async def answer_query_stream(query: str, session_id: Optional[str] = None):
         answer = _fallback_answer(results)
         yield {"delta": answer}
 
+    reindexed_answer, final_sources = _reindex_citations(answer, results)
     cost = _calculate_cost(in_tokens, out_tokens)
-    await _finalize(factory, query, answer, query_embedding, in_tokens, out_tokens,
+    await _finalize(factory, query, reindexed_answer, query_embedding, in_tokens, out_tokens,
                     cost, cache_hit=False, start=start, session_id=session_id)
-    yield {"done": True, "sources": _sources(results), "cost_usd": round(cost, 6),
+    yield {"done": True, "answer": reindexed_answer, "sources": final_sources, "cost_usd": round(cost, 6),
            "cache_hit": False, "session_id": session_id}
 
 
@@ -331,11 +393,12 @@ async def _load_history(factory, session_id: str, limit: int = 6) -> List[dict]:
 
 
 async def _log(factory, query: str, in_t: int, out_t: int, cost: float,
-               cache_hit: bool, latency_ms: int) -> None:
+               cache_hit: bool, latency_ms: int, cached_query_id=None, cached_query_text=None) -> None:
     try:
         async with factory() as session:
             await ChatLogRepository(session).add(
                 query, in_t, out_t, cost, cache_hit=cache_hit, latency_ms=latency_ms,
+                cached_query_id=cached_query_id, cached_query_text=cached_query_text,
             )
     except Exception as e:
         logger.error(f"Failed to write chat log: {e}")

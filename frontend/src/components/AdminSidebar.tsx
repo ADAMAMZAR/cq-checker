@@ -49,9 +49,6 @@ export default function AdminSidebar({ active, onChange }: AdminSidebarProps) {
       {/* Mobile Top Bar */}
       <div className="md:hidden flex items-center justify-between p-4 bg-[var(--bg-elevated)] border-b border-[var(--border-subtle)] mb-4">
         <div className="flex items-center gap-2">
-          <div className="p-1.5 rounded-lg bg-[var(--accent-primary-soft)] text-[var(--accent-primary-text)] border border-[var(--accent-primary-border)]">
-            <IconShield className="w-4 h-4" />
-          </div>
           <span className="font-bold text-sm text-[var(--heading-color)]">Admin Console</span>
         </div>
         <button
@@ -68,11 +65,9 @@ export default function AdminSidebar({ active, onChange }: AdminSidebarProps) {
       <aside
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
-        className={`${
-          mobileOpen ? "block" : "hidden"
-        } md:flex flex-col shrink-0 bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded-2xl h-fit md:min-h-[calc(100vh-2rem)] md:sticky md:top-4 p-3 transition-all duration-300 ease-in-out shadow-sm z-30 overflow-hidden ${
-          expanded ? "w-full md:w-56" : "w-full md:w-[60px]"
-        }`}
+        className={`${mobileOpen ? "block" : "hidden"
+          } md:flex flex-col shrink-0 bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded-2xl h-fit md:min-h-[calc(100vh-2rem)] md:sticky md:top-4 p-3 transition-all duration-300 ease-in-out shadow-sm z-30 overflow-hidden ${expanded ? "w-full md:w-56" : "w-full md:w-[60px]"
+          }`}
       >
         {/* Top Header Section */}
         <div className="w-full flex flex-col gap-2 pb-3 mb-3 border-b border-[var(--border-subtle)]">
@@ -121,11 +116,10 @@ export default function AdminSidebar({ active, onChange }: AdminSidebarProps) {
                 type="button"
                 onClick={() => handleSelectTab(key)}
                 title={!expanded ? label : undefined}
-                className={`w-full flex items-center gap-2.5 px-2.5 h-10 rounded-xl text-left transition-all duration-200 cursor-pointer ${
-                  isActive
-                    ? "bg-[var(--accent-primary-soft)] text-[var(--heading-color)] font-semibold border border-[var(--accent-primary-border)] shadow-xs"
-                    : "text-[var(--text-secondary)] hover:text-[var(--heading-color)] hover:bg-[var(--bg-elevated-hover)] border border-transparent"
-                }`}
+                className={`w-full flex items-center gap-2.5 px-2.5 h-10 rounded-xl text-left transition-all duration-200 cursor-pointer ${isActive
+                  ? "bg-[var(--accent-primary-soft)] text-[var(--heading-color)] font-semibold border border-[var(--accent-primary-border)] shadow-xs"
+                  : "text-[var(--text-secondary)] hover:text-[var(--heading-color)] hover:bg-[var(--bg-elevated-hover)] border border-transparent"
+                  }`}
               >
                 <div className="w-5 h-5 shrink-0 flex items-center justify-center">
                   <Icon className={`w-4 h-4 ${isActive ? "text-[var(--accent-primary-text)]" : "text-[var(--text-tertiary)]"}`} />

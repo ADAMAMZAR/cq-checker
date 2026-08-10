@@ -81,14 +81,22 @@ async def store_and_record(
         factory = get_session_factory()
         async with factory() as session:
             repo = ObjectStorageRepository(session)
-            await repo.create(
-                file_url=file_url,
-                bucket=bucket,
-                object_key=file_url,
-                content_type=content_type or None,
-                size_bytes=len(file_bytes),
-                checksum=hashlib.sha256(file_bytes).hexdigest(),
-            )
+            existing = await repo.get_by_url(file_url)
+            if existing:
+                existing.size_bytes = len(file_bytes)
+                existing.checksum = hashlib.sha256(file_bytes).hexdigest()
+                if content_type:
+                    existing.content_type = content_type
+                await session.commit()
+            else:
+                await repo.create(
+                    file_url=file_url,
+                    bucket=bucket,
+                    object_key=file_url,
+                    content_type=content_type or None,
+                    size_bytes=len(file_bytes),
+                    checksum=hashlib.sha256(file_bytes).hexdigest(),
+                )
     except Exception as e:
         # Metadata recording is best-effort; do not fail the upload because of it.
         logger.warning(f"Failed to record object metadata for {file_url}: {e}")
