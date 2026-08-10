@@ -92,10 +92,11 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
       .then((res) => {
         if (!res.messages.length) return;
         setMessages(
-          res.messages.map((m) => ({
+          res.messages.map((m: any) => ({
             id: `${m.role}-${m.created_at ?? Date.now()}`,
             sender: m.role === "user" ? "user" : "ai",
             text: m.content,
+            sources: m.sources ?? [],
             timestamp: m.created_at ? new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : nowLabel(),
           }))
         );

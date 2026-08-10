@@ -43,8 +43,8 @@ def _get_client() -> genai.Client:
 
 # Gemini pricing (approx, USD per 1M tokens) — adjust when the published
 # gemini-3.5-flash-lite rates are confirmed.
-INPUT_RATE = 0.10 / 1_000_000
-OUTPUT_RATE = 0.40 / 1_000_000
+INPUT_RATE = 0.30 / 1_000_000
+OUTPUT_RATE = 2.50 / 1_000_000
 
 SYSTEM_PROMPT = (
     "You are CQ Assistant, an internal compliance assistant for GPO.\n"
@@ -263,6 +263,7 @@ async def _finalize(
     session_id: Optional[str],
     cached_query_id=None,
     cached_query_text=None,
+    sources: Optional[List[dict]] = None,
 ) -> None:
     """Shared back-half: write cache (on miss), cost log, append history."""
     if not cache_hit:
@@ -273,7 +274,7 @@ async def _finalize(
                cached_query_id=cached_query_id, cached_query_text=cached_query_text)
     if session_id:
         await _append_history(factory, session_id, "user", query)
-        await _append_history(factory, session_id, "assistant", answer)
+        await _append_history(factory, session_id, "assistant", answer, sources=sources)
 
 
 async def _generate(messages: Optional[List[dict]], results: List[dict]) -> tuple:
@@ -302,7 +303,8 @@ async def answer_query(query: str, session_id: Optional[str] = None) -> dict:
         reindexed_answer, final_sources = _reindex_citations(cached_info["response"], results)
         await _finalize(factory, query, reindexed_answer, query_embedding, 0, 0, 0.0,
                         cache_hit=True, start=start, session_id=session_id,
-                        cached_query_id=cached_info["id"], cached_query_text=cached_info["query_text"])
+                        cached_query_id=cached_info["id"], cached_query_text=cached_info["query_text"],
+                        sources=final_sources)
         return {
             "answer": reindexed_answer,
             "sources": final_sources,
@@ -314,7 +316,8 @@ async def answer_query(query: str, session_id: Optional[str] = None) -> dict:
     answer, in_tokens, out_tokens, cost = await _generate(messages, results)
     reindexed_answer, final_sources = _reindex_citations(answer, results)
     await _finalize(factory, query, reindexed_answer, query_embedding, in_tokens, out_tokens,
-                    cost, cache_hit=False, start=start, session_id=session_id)
+                    cost, cache_hit=False, start=start, session_id=session_id,
+                    sources=final_sources)
 
     return {
         "answer": reindexed_answer,
@@ -340,7 +343,8 @@ async def answer_query_stream(query: str, session_id: Optional[str] = None):
         reindexed_answer, final_sources = _reindex_citations(cached_info["response"], results)
         await _finalize(factory, query, reindexed_answer, query_embedding, 0, 0, 0.0,
                         cache_hit=True, start=start, session_id=session_id,
-                        cached_query_id=cached_info["id"], cached_query_text=cached_info["query_text"])
+                        cached_query_id=cached_info["id"], cached_query_text=cached_info["query_text"],
+                        sources=final_sources)
         yield {"delta": reindexed_answer}
         yield {"done": True, "answer": reindexed_answer, "sources": final_sources, "cost_usd": 0.0,
                "cache_hit": True, "session_id": session_id}
@@ -370,7 +374,8 @@ async def answer_query_stream(query: str, session_id: Optional[str] = None):
     reindexed_answer, final_sources = _reindex_citations(answer, results)
     cost = _calculate_cost(in_tokens, out_tokens)
     await _finalize(factory, query, reindexed_answer, query_embedding, in_tokens, out_tokens,
-                    cost, cache_hit=False, start=start, session_id=session_id)
+                    cost, cache_hit=False, start=start, session_id=session_id,
+                    sources=final_sources)
     yield {"done": True, "answer": reindexed_answer, "sources": final_sources, "cost_usd": round(cost, 6),
            "cache_hit": False, "session_id": session_id}
 
@@ -381,9 +386,9 @@ def latency(start: float) -> int:
     return int((time.monotonic() - start) * 1000)
 
 
-async def _append_history(factory, session_id: str, role: str, content: str) -> None:
+async def _append_history(factory, session_id: str, role: str, content: str, sources: Optional[List[dict]] = None) -> None:
     async with factory() as session:
-        await ChatMessageRepository(session).add(session_id, role, content)
+        await ChatMessageRepository(session).add(session_id, role, content, sources=sources)
 
 
 async def _load_history(factory, session_id: str, limit: int = 6) -> List[dict]:
@@ -414,5 +419,12 @@ async def get_history(session_id: str) -> List[dict]:
     factory = get_session_factory()
     async with factory() as session:
         msgs = await ChatMessageRepository(session).recent(session_id, limit=50)
-    return [{"role": m.role, "content": m.content, "created_at": to_malaysia(m.created_at).strftime("%d/%m/%Y, %H:%M:%S") if m.created_at else None}
-            for m in msgs]
+    return [
+        {
+            "role": m.role,
+            "content": m.content,
+            "sources": m.sources or [],
+            "created_at": to_malaysia(m.created_at).strftime("%d/%m/%Y, %H:%M:%S") if m.created_at else None,
+        }
+        for m in msgs
+    ]

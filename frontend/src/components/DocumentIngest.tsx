@@ -231,14 +231,16 @@ export default function DocumentIngest() {
             <table className="min-w-full text-left text-xs font-sans text-[var(--text-primary)]">
               <thead>
                 <tr className="border-b border-[var(--border-subtle)] font-bold text-[var(--text-tertiary)]">
+                  <th className="py-3 px-4 text-center uppercase tracking-wider text-[10px] w-12">#</th>
                   <th className="py-3 px-4 uppercase tracking-wider text-[10px]">Title</th>
                   <th className="py-3 px-4 text-center uppercase tracking-wider text-[10px]">Pages</th>
                   <th className="py-3 px-4 text-right uppercase tracking-wider text-[10px]">Added</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--border-subtle)]">
-                {documents.map((doc) => (
+                {documents.map((doc, idx) => (
                   <tr key={doc.id} className="hover:bg-[var(--bg-surface)] transition-colors">
+                    <td className="py-3 px-4 text-center font-mono font-bold text-[var(--text-tertiary)] tabular-nums">{idx + 1}</td>
                     <td className="py-3 px-4">
                       <a
                         href={buildFileUrl(doc.file_url)}

@@ -376,6 +376,7 @@ export default function CostAnalytics() {
                 <table className="min-w-full text-left text-xs font-sans text-[var(--text-primary)]">
                   <thead>
                     <tr className="border-b border-[var(--border-subtle)] font-bold text-[var(--text-tertiary)]">
+                      <th className="py-3 px-4 text-center uppercase tracking-wider text-[10px] w-12">#</th>
                       <th className="py-3 px-4 uppercase tracking-wider text-[10px]">Document Title</th>
                       <th className="py-3 px-4 uppercase tracking-wider text-[10px]">Ingested At</th>
                       <th className="py-3 px-4 text-center uppercase tracking-wider text-[10px]">Pages</th>
@@ -388,6 +389,7 @@ export default function CostAnalytics() {
                     {isLoading ? (
                       Array.from({ length: 3 }).map((_, idx) => (
                         <tr key={idx} className="animate-pulse">
+                          <td className="py-4 px-4 text-center"><div className="h-6 bg-[var(--bg-surface)] rounded-lg" /></td>
                           <td className="py-4 px-4"><div className="h-6 bg-[var(--bg-surface)] rounded-lg" /></td>
                           <td className="py-4 px-4"><div className="h-6 bg-[var(--bg-surface)] rounded-lg" /></td>
                           <td className="py-4 px-4 text-center"><div className="h-6 bg-[var(--bg-surface)] rounded-lg" /></td>
@@ -398,13 +400,14 @@ export default function CostAnalytics() {
                       ))
                     ) : ingestData.documents.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="text-center py-12 text-[var(--text-tertiary)] italic">No ingested document cost logs recorded yet.</td>
+                        <td colSpan={7} className="text-center py-12 text-[var(--text-tertiary)] italic">No ingested document cost logs recorded yet.</td>
                       </tr>
                     ) : (
                       ingestData.documents
                         .filter(d => d.title.toLowerCase().includes(searchQuery.toLowerCase()))
-                        .map(doc => (
+                        .map((doc, idx) => (
                           <tr key={doc.id} className="hover:bg-[var(--bg-surface)] transition-colors duration-200">
+                            <td className="py-3 px-4 text-center font-mono font-bold text-[var(--text-tertiary)] tabular-nums">{idx + 1}</td>
                             <td className="py-3 px-4 font-semibold text-[var(--heading-color)] max-w-sm truncate" title={doc.title}>
                               {doc.title}
                             </td>

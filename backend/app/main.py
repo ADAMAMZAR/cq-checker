@@ -413,7 +413,7 @@ async def run_audit_comparison(
     )
 
     total_run_cost = sum(
-        doc.input_tokens * 0.10 / 1_000_000 + doc.output_tokens * 0.40 / 1_000_000
+        doc.input_tokens * 0.30 / 1_000_000 + doc.output_tokens * 2.50 / 1_000_000
         for doc in matching_docs
     )
     compiled_data = json.dumps([

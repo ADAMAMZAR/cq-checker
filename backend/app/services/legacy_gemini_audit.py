@@ -29,8 +29,8 @@ _MODEL_NAME = "gemini-3.5-flash-lite"
 
 # Gemini API Pricing (USD per 1 Million tokens)
 # gemini-3.5-flash-lite  — used for OCR extraction
-EXTRACTION_INPUT_RATE  = 0.10 / 1_000_000
-EXTRACTION_OUTPUT_RATE = 0.40 / 1_000_000
+EXTRACTION_INPUT_RATE  = 0.30 / 1_000_000
+EXTRACTION_OUTPUT_RATE = 2.50 / 1_000_000
 # # gemini-3.5-flash — used for audit comparison (kept for accuracy)
 # COMPARISON_INPUT_RATE  = 1.50 / 1_000_000
 # COMPARISON_OUTPUT_RATE = 9.00 / 1_000_000

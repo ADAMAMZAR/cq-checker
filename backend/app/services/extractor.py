@@ -39,8 +39,8 @@ _MODEL_NAME = "gemini-3.5-flash-lite"
 
 # Gemini pricing (USD per 1M tokens) — approximate; adjust when the published
 # gemini-3.5-flash-lite rates are confirmed.
-INPUT_RATE = 0.10 / 1_000_000
-OUTPUT_RATE = 0.40 / 1_000_000
+INPUT_RATE = 0.30 / 1_000_000
+OUTPUT_RATE = 2.50 / 1_000_000
 
 # Schema for a single certificate within the `certificates` array.
 SINGLE_CERT_SCHEMA = {

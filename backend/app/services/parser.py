@@ -17,8 +17,8 @@ logger = logging.getLogger(__name__)
 
 MAX_PAGES = 200  # generous cap for manuals
 
-GEMINI_INPUT_RATE = 0.10 / 1_000_000
-GEMINI_OUTPUT_RATE = 0.40 / 1_000_000
+GEMINI_INPUT_RATE = 0.30 / 1_000_000
+GEMINI_OUTPUT_RATE = 2.50 / 1_000_000
 
 
 def _pyMuPDF_pages(file_bytes: bytes) -> List[dict]:
@@ -121,7 +121,7 @@ def _parse_pdf_with_gemini_vision(file_bytes: bytes) -> Tuple[List[dict], int, i
     total_in = 0
     total_out = 0
 
-    max_workers = min(10, len(page_tasks))
+    max_workers = min(20, len(page_tasks))
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [
             executor.submit(

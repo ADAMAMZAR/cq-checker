@@ -132,5 +132,5 @@ def test_year_of_publication_effective_date_fallback(mock_gemini_model):
 
 
 def test_calculate_cost():
-    # 1M input tokens * 0.10/M + 1M output * 0.40/M = 0.50
-    assert abs(extractor.calculate_cost(1_000_000, 1_000_000) - 0.50) < 1e-9
+    # 1M input tokens * 0.30/M + 1M output * 2.50/M = 2.80
+    assert abs(extractor.calculate_cost(1_000_000, 1_000_000) - 2.80) < 1e-9

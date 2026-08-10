@@ -34,9 +34,15 @@ class ChatMessageRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def add(self, session_id: str, role: str, content: str) -> ChatMessage:
+    async def add(
+        self,
+        session_id: str,
+        role: str,
+        content: str,
+        sources: Optional[List[dict]] = None,
+    ) -> ChatMessage:
         await ChatSessionRepository(self.session).get_or_create(session_id)
-        record = ChatMessage(session_id=session_id, role=role, content=content)
+        record = ChatMessage(session_id=session_id, role=role, content=content, sources=sources)
         self.session.add(record)
         await self.session.commit()
         await self.session.refresh(record)

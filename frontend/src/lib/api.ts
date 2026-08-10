@@ -22,6 +22,11 @@ import type {
 // - Local dev: defaults to same-origin "/api", proxied by next.config rewrites.
 // - Phase 8 static export: baked at build time to the Cloud Run URL via NEXT_PUBLIC_API_URL.
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "/api";
+export const UPLOAD_API_BASE =
+  process.env.NEXT_PUBLIC_API_URL ||
+  (typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
+    ? "http://127.0.0.1:8000/api"
+    : API_BASE);
 
 function base64url(input: string): string {
   const b64 = btoa(input);
@@ -217,7 +222,7 @@ export async function uploadDocument(file: File, title?: string): Promise<Docume
   const form = new FormData();
   form.append("file", file);
   if (title) form.append("title", title);
-  const res = await fetch(`${API_BASE}/documents/upload`, { method: "POST", body: form });
+  const res = await fetch(`${UPLOAD_API_BASE}/documents/upload`, { method: "POST", body: form });
   if (!res.ok) throw new Error(await errorDetail(res));
   return res.json();
 }
@@ -247,7 +252,7 @@ export async function verifyCertificate(
   if (opts.questionLabel) form.append("question_label", opts.questionLabel);
   if (opts.qaAnswers) form.append("qa_answers", opts.qaAnswers);
   if (opts.qaDataTitle) form.append("qa_data_title", opts.qaDataTitle);
-  const res = await fetch(`${API_BASE}/certificates/verify`, { method: "POST", body: form });
+  const res = await fetch(`${UPLOAD_API_BASE}/certificates/verify`, { method: "POST", body: form });
   if (!res.ok) throw new Error(await errorDetail(res));
   return res.json();
 }
