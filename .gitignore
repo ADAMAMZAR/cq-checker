@@ -12,6 +12,7 @@ htmlcov/
 
 # Local uploads and artifacts
 uploads/
+test/
 backend/uploads/
 backend/scripts/backups/
 

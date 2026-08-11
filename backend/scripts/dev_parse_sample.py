@@ -60,16 +60,22 @@ def main():
         file_bytes = f.read()
 
     start_time = time.time()
-    pages, cost, meta = docling_parser.parse_to_markdown(
-        file_bytes, mime_type=mime_type, filename=filename, max_pages=max_pages
-    )
+    try:
+        pages, cost, meta = docling_parser.parse_to_markdown(
+            file_bytes, mime_type=mime_type, filename=filename, max_pages=max_pages
+        )
+    except docling_parser.DoclingError as e:
+        print(f"PARSE FAILED [{e.stage}] recoverable={e.recoverable}: {e}")
+        sys.exit(2)
     elapsed = time.time() - start_time
 
     # Build combined markdown document
     md_content_lines = [
         f"# Docling Parsed Output: {filename}\n",
-        f"- **Pages Processed**: {meta['page_count']}",
+        f"- **Pages Processed**: {meta.get('page_count', len(pages))}",
         f"- **Parsing Duration**: {elapsed:.2f} seconds",
+        f"- **Pipeline**: {meta.get('pipeline_kind', 'unknown')}",
+        f"- **has_ocr**: {meta.get('has_ocr')}  **has_tables**: {meta.get('has_tables')}",
         f"- **Cost**: ${cost:.4f}\n",
         "---\n",
     ]
@@ -89,7 +95,8 @@ def main():
 
     print("-" * 60)
     print(f"SUCCESS: Parsing completed in {elapsed:.2f}s")
-    print(f"Total Pages : {meta['page_count']}")
+    print(f"Total Pages : {meta.get('page_count', len(pages))}")
+    print(f"Pipeline    : {meta.get('pipeline_kind', 'unknown')}")
     print(f"Output Saved: {abs_out_path}")
     print("=" * 60)
 

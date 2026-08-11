@@ -33,8 +33,11 @@ from app.services.legacy_gemini_audit import clean_question_label
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Pre-warm Docling converter model in background thread during startup
-    asyncio.create_task(asyncio.to_thread(docling_parser.warmup))
+    # Pre-warm Docling converters in a background thread during startup, but only
+    # on hosts that opt in (USE_DOCLING=true). Loading the layout/OCR model
+    # weights eagerly otherwise wastes ~2 GB RAM on hosts that don't use Docling.
+    if settings.use_docling:
+        asyncio.create_task(asyncio.to_thread(docling_parser.warmup))
     yield
 
 

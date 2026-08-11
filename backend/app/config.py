@@ -37,7 +37,13 @@ class Settings(BaseSettings):
     # ── Local Storage (dev-only, replaced by GCS in Phase 8) ─
     upload_dir: str = Field(default="uploads", validation_alias="UPLOAD_DIR")
 
-    # ── Query cache TTL (days) ────────────────────────────────────────
+    # ── Docling ─────────────────────────────────────────────────────────────
+    # When False (default), the Docling pipeline is NOT pre-warmed at startup.
+    # This avoids loading ~2 GB of layout/OCR model weights into RAM on hosts
+    # that don't use Docling yet (RAG ingest still uses MiniMax/PyMuPDF).
+    use_docling: bool = Field(default=False, validation_alias="USE_DOCLING")
+
+    # ── Query cache TTL (days) ────────────────────────────────────────────────
     query_cache_ttl_days: int = Field(default=30, validation_alias="QUERY_CACHE_TTL_DAYS")
 
     model_config = SettingsConfigDict(

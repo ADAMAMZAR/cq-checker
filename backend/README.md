@@ -69,6 +69,7 @@ Grouped by function. Full reference: [`API-Endpoints.md`](../API-Endpoints.md). 
 | Method | Path | Group |
 |---|---|---|
 | `GET` | `/` | System / Health |
+| `GET` | `/api/health/docling` | System / Health — Docling Warmup |
 | `POST` | `/api/extract` | Supplier Audit — Extraction |
 | `POST` | `/api/test/extract` | Supplier Audit — Extraction |
 | `POST` | `/api/audit` | Supplier Audit — Full Run |
@@ -93,6 +94,7 @@ Grouped by function. Full reference: [`API-Endpoints.md`](../API-Endpoints.md). 
 ### 🏷️ System / Health
 
 - **`GET /`** — Health check. Returns `{"status": "healthy", "service": "..."}`.
+- **`GET /api/health/docling`** — Docling parser warmup status. Returns `{"loaded": bool, "status": "ready"|"warming"}`.
 
 ### 📄 Supplier Audit — Extraction (legacy Gemini flow)
 
