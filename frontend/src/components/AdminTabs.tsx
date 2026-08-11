@@ -9,9 +9,10 @@ import {
   IconUpload,
   IconArrowLeft,
   IconTable,
+  IconFlask,
 } from "@tabler/icons-react";
 
-export type AdminTab = "costs" | "database" | "schema" | "playground" | "ingest" | "matrix";
+export type AdminTab = "costs" | "database" | "schema" | "playground" | "ingest" | "ingest-test" | "matrix";
 
 interface AdminTabsProps {
   active: AdminTab;
@@ -25,6 +26,7 @@ const tabs: { key: AdminTab; label: string; icon: typeof IconDatabase }[] = [
   { key: "schema", label: "Schema", icon: IconSchema },
   { key: "playground", label: "Playground", icon: IconPlaylist },
   { key: "ingest", label: "Document Ingest", icon: IconUpload },
+  { key: "ingest-test", label: "OCR Sandbox", icon: IconFlask },
 ];
 
 /**

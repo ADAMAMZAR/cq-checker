@@ -15,8 +15,8 @@ from app.services.timezones import to_malaysia
 
 logger = logging.getLogger(__name__)
 
-# Columns that are binary/huge and not useful to render (e.g. embeddings).
-SKIP_COLUMN_UDTS = {"vector", "tsvector"}
+# Columns that are binary/huge — we render truncated previews for them instead of skipping.
+SKIP_COLUMN_UDTS = set()
 
 # Cap on rows returned per table for the preview.
 MAX_PREVIEW_ROWS = 500
@@ -332,7 +332,7 @@ def _short_type(udt: str, data_type: str) -> str:
     return (udt or data_type or "?").upper()
 
 
-async def get_table_data(table: str, limit: int = 100, offset: int = 0) -> Dict[str, Any]:
+async def get_table_data(table: str, limit: int = 100, offset: int = 0, search: Optional[str] = None) -> Dict[str, Any]:
     """Return a page of rows for a validated table name.
 
     ``limit`` is clamped to ``MAX_PREVIEW_ROWS``. The table name must already be
@@ -350,13 +350,22 @@ async def get_table_data(table: str, limit: int = 100, offset: int = 0) -> Dict[
 
     factory = get_session_factory()
     async with factory() as session:
-        total_row = await session.execute(text(f'SELECT count(*) FROM "{table}"'))
+        where_clause = ""
+        params: Dict[str, Any] = {"lim": limit, "off": offset}
+        if search and search.strip():
+            text_cols = [c for c in columns if c not in ("embedding", "tsv_content", "id", "document_id", "created_at")]
+            if text_cols:
+                clauses = [f'CAST("{c}" AS TEXT) ILIKE :s' for c in text_cols]
+                where_clause = " WHERE " + " OR ".join(clauses)
+                params["s"] = f"%{search.strip()}%"
+
+        total_row = await session.execute(text(f'SELECT count(*) FROM "{table}"{where_clause}'), params)
         total = total_row.scalar() or 0
 
         col_sql = ", ".join(f'"{c}"' for c in columns)
         data = await session.execute(
-            text(f'SELECT {col_sql} FROM "{table}" ORDER BY 1 LIMIT :lim OFFSET :off'),
-            {"lim": limit, "off": offset},
+            text(f'SELECT {col_sql} FROM "{table}"{where_clause} ORDER BY 1 LIMIT :lim OFFSET :off'),
+            params,
         )
         rows = []
         for record in data:
@@ -404,10 +413,20 @@ async def delete_row(table: str, pk: Dict[str, Any]) -> int:
 
 
 def _stringify(value: Any) -> str:
-    """Render a cell value as a display string, flattening JSON/dates."""
+    """Render a cell value as a display string, flattening JSON/dates/vectors."""
     if value is None:
         return ""
-    if isinstance(value, (dict, list)):
+    # Vector handling: array of numbers
+    if isinstance(value, (list, tuple)):
+        if len(value) > 20 and all(isinstance(x, (float, int)) for x in value[:5]):
+            first_few = ", ".join(f"{x:.4f}" for x in value[:3])
+            return f"[{first_few}, ... ({len(value)} dims)]"
+        import json
+        try:
+            return json.dumps(value, ensure_ascii=False, default=str)
+        except Exception:
+            return str(value)
+    if isinstance(value, dict):
         import json
         try:
             return json.dumps(value, ensure_ascii=False, default=str)
@@ -415,4 +434,8 @@ def _stringify(value: Any) -> str:
             return str(value)
     if hasattr(value, "isoformat"):
         return to_malaysia(value).strftime("%Y-%m-%d %H:%M:%S")
-    return str(value)
+    val_str = str(value)
+    # Format tsvector display strings cleanly without truncating body text
+    if len(val_str) > 500 and "'english'" in val_str:
+        return val_str[:200] + "... (tsvector)"
+    return val_str

@@ -16,7 +16,7 @@ Supports both one-shot (``answer_query``) and SSE streaming
 
 import logging
 import time
-from typing import Dict, List, Optional
+from typing import List, Optional, Tuple
 
 from google import genai
 from google.genai import types
@@ -47,11 +47,11 @@ INPUT_RATE = 0.30 / 1_000_000
 OUTPUT_RATE = 2.50 / 1_000_000
 
 SYSTEM_PROMPT = (
-    "Role: Vendor Onboarding & Ariba Assistant. Guidance strictly from sources.\n"
+    "Role: Procurement, Vendor Onboarding & Ariba Assistant. Guidance strictly from sources.\n"
     "1. Format: Numbered steps for procedures. No greetings, filler, or closing offers. Mandatory citation brackets like [1] or [2].\n"
     "2. Workflows: Portal link -> https://supplier.ariba.com. Non-Ariba -> direct to GPO Business Partner Maintenance Form. Vendor completes own questionnaire; return errors to vendor. Payment requires verified bank details.\n"
     "3. Terms: Mention RM100k/GAPP policy only if asked. Always use verbatim 'shall be implemented through' and '...as the Group Accounting Policy and Procedures (GAPP) no G-011-General (on Payments) has been amended accordingly.' Auction ceiling price -> state 'the ceiling price confirmation shall be implemented through the SAP Ariba Platform.'\n"
-    "4. Out-of-Scope: For non-onboarding/Ariba queries, reply verbatim: 'I apologize, but my assistance is limited to vendor onboarding and Ariba-related queries. Please let me know if you have a question regarding a supplier's registration guide, profile maintenance or policy.'"
+    "4. Scope & Missing Info: For non-procurement/non-Ariba topics (e.g. weather, recipes, sports), reply verbatim: 'I apologize, but my assistance is limited to procurement, vendor onboarding, and Ariba-related queries.' For procurement topics not detailed in the passages, state clearly that the specific steps are not present in the internal manuals."
 )
 
 
@@ -69,8 +69,9 @@ def _check_fast_rule_interceptor(query_text: str) -> Optional[dict]:
 
     # 2. Obvious out-of-scope topics -> Return standard refusal immediately
     out_of_scope_patterns = [
-        r"\b(recipe|cook|bake|weather|forecast|movie|song|joke|sport|football|cricket)\b",
-        r"\bwho (is|was) (president|prime minister|actor|singer)\b",
+        r"\b(recipe|cook|bake|weather|forecast|movie|song|joke|sport|football|soccer|cricket|fifa|world cup|olympics|match|tournament|trophy)\b",
+        r"\bwho (is|was|will) (president|prime minister|actor|singer|coach|win|winner)\b",
+        r"\b(which|what) (team|country|player) (win|won|will win)\b",
         r"\bhow to (code|program|build a website|fix my car)\b",
     ]
     if any(re.search(p, q) for p in out_of_scope_patterns):
@@ -120,7 +121,11 @@ def _reindex_citations(answer: str, results: List[dict]) -> Tuple[str, List[dict
     """
     import re
     if not results or not answer:
-        return answer, _sources(results)
+        return answer, []
+
+    # If the response is an out-of-scope refusal or contains no citations, do not attach sources.
+    if answer.startswith("I apologize, but my assistance is limited to vendor onboarding and Ariba-related queries. Please let me know if you have a question regarding a supplier's registration guide, profile maintenance or policy."):
+        return answer, []
 
     bracket_matches = re.findall(r'\[([\d\s,]+)\]', answer)
     raw_nums = []
@@ -132,7 +137,7 @@ def _reindex_citations(answer: str, results: List[dict]) -> Tuple[str, List[dict
                     raw_nums.append(num)
 
     if not raw_nums:
-        return answer, _sources(results)
+        return answer, []
 
     ordered_sources = []
     seen_keys = {}
@@ -293,6 +298,9 @@ async def _prepare(query: str, session_id: Optional[str]):
             query_embedding, threshold=0.93, ttl_days=settings.query_cache_ttl_days,
         )
         results = await hybrid_search(session, query_embedding, query, k=5)
+        logger.info(f"RAG retrieved {len(results)} passages for '{query}': {[(r['title'], r['page_number']) for r in results]}")
+        for idx, r in enumerate(results):
+            logger.info(f"Passage {idx+1} ({r['title']} p.{r['page_number']}): {(r.get('parent_content') or '')[:150]}")
         if cached:
             return {
                 "response": cached.cached_response,

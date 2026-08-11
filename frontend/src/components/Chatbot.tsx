@@ -142,7 +142,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
             <p className="whitespace-pre-wrap break-words">{msg.text}</p>
           ) : msg.isStreaming && msg.text === "" ? (
             <div className="flex items-center gap-2 py-1">
-              <span className="text-xs text-[var(--text-secondary)]">Analyzing manuals…</span>
+              <span className="text-xs text-[var(--text-secondary)]">Thinking…</span>
               <span className="flex gap-1" aria-hidden="true">
                 <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-primary-text)] typing-dot" style={{ animationDelay: "0ms" }} />
                 <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-primary-text)] typing-dot" style={{ animationDelay: "150ms" }} />
@@ -252,9 +252,21 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
     }
   }, []);
 
+  // Force scroll to bottom once history finishes loading
   useEffect(() => {
+    if (!historyLoaded) return;
+    const timer = setTimeout(() => {
+      if (scrollContainerRef.current) {
+        scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+      }
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [historyLoaded]);
+
+  useEffect(() => {
+    if (!historyLoaded) return;
     scrollToBottom(isTyping);
-  }, [messages, isTyping, scrollToBottom]);
+  }, [messages, isTyping, historyLoaded, scrollToBottom]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 

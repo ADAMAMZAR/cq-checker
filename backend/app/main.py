@@ -14,7 +14,7 @@ import requests
 import uuid
 from app.models.tables import uuid7
 from typing import List, Optional
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, status
+from fastapi import FastAPI, UploadFile, File, Form, Query, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 
@@ -592,13 +592,14 @@ async def list_certificates(limit: int = 50, offset: int = 0):
 
 
 @app.post("/api/documents/upload", response_model=DocumentIngestResult, tags=["Document Ingestion / RAG"])
+@app.post("/api/documents/upload/", response_model=DocumentIngestResult, tags=["Document Ingestion / RAG"])
 async def upload_document(
     file: UploadFile = File(...),
     title: Optional[str] = Form(None),
+    overwrite: bool = Form(True),
 ):
     """
-    Phase 5: upload a manual PDF -> parse -> chunk -> embed -> store in Neon.
-    Returns document_id + parent/child counts. Idempotent by file hash.
+    Upload a manual PDF -> parse (Vision OCR) -> embed (gemini-embedding-2) -> store/overwrite in Postgres.
     """
     from app.services.ingest import ingest_document
 
@@ -607,10 +608,90 @@ async def upload_document(
     content_type = file.content_type or "application/pdf"
     doc_title = title or filename
 
-    result = await ingest_document(file_bytes, doc_title, filename, content_type)
+    result = await ingest_document(file_bytes, doc_title, filename, content_type, overwrite=overwrite)
     if result.status == "failed":
         raise HTTPException(status_code=502, detail=result.message)
     return DocumentIngestResult(**result.to_dict())
+
+
+@app.post("/api/documents/bulk-upload", tags=["Document Ingestion / RAG"])
+@app.post("/api/documents/bulk-upload/", tags=["Document Ingestion / RAG"])
+async def bulk_upload_documents(
+    files: List[UploadFile] = File(...),
+    overwrite: bool = Form(True),
+):
+    """
+    Bulk Upload multiple PDF manuals -> parse Vision OCR -> embed -> store/overwrite in Postgres.
+    """
+    from app.services.ingest import bulk_ingest_documents
+
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided for bulk upload.")
+
+    items = []
+    for f in files:
+        f_bytes = await f.read()
+        items.append({
+            "file_bytes": f_bytes,
+            "filename": f.filename or "document.pdf",
+            "title": f.filename or "document.pdf",
+            "content_type": f.content_type or "application/pdf",
+        })
+
+    results = await bulk_ingest_documents(items, overwrite=overwrite)
+    return [r.to_dict() for r in results]
+
+
+@app.post("/api/documents/test-ingest", tags=["Document Ingestion / RAG"])
+@app.post("/api/documents/test-ingest/", tags=["Document Ingestion / RAG"])
+async def test_upload_document(
+    file: UploadFile = File(...),
+    title: Optional[str] = Form(None),
+    mode: str = Form("single"),
+    page_number: int = Form(1),
+):
+    """
+    Test Document Ingestion (Vision OCR Sandbox).
+    Runs OCR on a whole PDF or specific page WITHOUT saving to database.
+    """
+    from app.services.ingest import test_ingest_document
+
+    file_bytes = await file.read()
+    filename = file.filename or "manual.pdf"
+    doc_title = title or filename
+
+    try:
+        res = await test_ingest_document(
+            file_bytes=file_bytes,
+            filename=filename,
+            title=doc_title,
+            mode=mode,
+            page_number=page_number,
+        )
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/documents/commit-pages", tags=["Document Ingestion / RAG"])
+@app.post("/api/documents/commit-pages/", tags=["Document Ingestion / RAG"])
+async def commit_document_pages(payload: dict):
+    """
+    Commit/Overwrite tested page OCR results into PostgreSQL document_pages table.
+    """
+    from app.services.ingest import commit_ingest_pages
+
+    filename = payload.get("filename", "manual.pdf")
+    title = payload.get("title", filename)
+    pages = payload.get("pages", [])
+    if not pages:
+        raise HTTPException(status_code=400, detail="No pages provided for commit.")
+
+    try:
+        res = await commit_ingest_pages(filename=filename, title=title, pages=pages)
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/documents", response_model=List[DocumentSummary], tags=["Document Ingestion / RAG"])
@@ -778,7 +859,7 @@ async def db_get_schema():
 
 
 @app.get("/api/db/tables/{table_name}", tags=["Database Browser"])
-async def db_get_table(table_name: str, limit: int = 100, offset: int = 0):
+async def db_get_table(table_name: str, limit: int = 100, offset: int = 0, q: Optional[str] = Query(None)):
     """
     Read-only: return a page of rows for a table (validated against the
     whitelist from information_schema). `limit` is clamped to 500.
@@ -789,7 +870,7 @@ async def db_get_table(table_name: str, limit: int = 100, offset: int = 0):
     names = {t["name"] for t in valid}
     if table_name not in names:
         raise HTTPException(status_code=404, detail=f"Table '{table_name}' not found.")
-    return await database_inspector.get_table_data(table_name, limit=limit, offset=offset)
+    return await database_inspector.get_table_data(table_name, limit=limit, offset=offset, search=q)
 
 
 @app.delete("/api/db/tables/{table_name}", tags=["Database Browser"])

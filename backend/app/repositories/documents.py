@@ -61,6 +61,14 @@ class DocumentRepository:
         )
         return list(result.scalars().all())
 
+    async def get_by_title(self, title: str) -> Optional[Document]:
+        result = await self.session.execute(
+            select(Document)
+            .options(joinedload(Document.object_storage))
+            .where(Document.title == title)
+        )
+        return result.scalar_one_or_none()
+
     async def exists_by_url(self, file_url: str) -> bool:
         result = await self.session.execute(
             select(func.count(Document.id))
@@ -73,6 +81,14 @@ class DocumentRepository:
 class PageRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
+
+    async def delete_pages_by_document(self, document_id: UUID) -> int:
+        from sqlalchemy import delete
+        result = await self.session.execute(
+            delete(DocumentPage).where(DocumentPage.document_id == document_id)
+        )
+        await self.session.commit()
+        return result.rowcount or 0
 
     async def create_page(
         self,
@@ -107,6 +123,30 @@ class PageRepository:
         return {
             "page_count": page_count.scalar() or 0,
         }
+
+    async def get_page_by_num(self, document_id: UUID, page_number: int) -> Optional[DocumentPage]:
+        result = await self.session.execute(
+            select(DocumentPage)
+            .where(DocumentPage.document_id == document_id, DocumentPage.page_number == page_number)
+        )
+        return result.scalar_one_or_none()
+
+    async def upsert_page(
+        self,
+        document_id: UUID,
+        page_number: int,
+        content: str,
+        embedding: Optional[List[float]] = None,
+    ) -> DocumentPage:
+        existing = await self.get_page_by_num(document_id, page_number)
+        if existing:
+            existing.content = content
+            existing.embedding = embedding
+            await self.session.commit()
+            await self.session.refresh(existing)
+            return existing
+        else:
+            return await self.create_page(document_id, page_number, content, embedding)
 
 
 # Alias for backward compatibility

@@ -224,11 +224,28 @@ export async function clearChatCache(): Promise<number> {
 
 // ── Document Ingestion ───────────────────────────────────────────────────────
 
-export async function uploadDocument(file: File, title?: string): Promise<DocumentIngestResult> {
+export async function uploadDocument(
+  file: File,
+  title?: string,
+  overwrite: boolean = true
+): Promise<DocumentIngestResult> {
   const form = new FormData();
   form.append("file", file);
   if (title) form.append("title", title);
+  form.append("overwrite", overwrite.toString());
   const res = await fetch(`${UPLOAD_API_BASE}/documents/upload`, { method: "POST", body: form });
+  if (!res.ok) throw new Error(await errorDetail(res));
+  return res.json();
+}
+
+export async function bulkUploadDocuments(
+  files: File[],
+  overwrite: boolean = true
+): Promise<DocumentIngestResult[]> {
+  const form = new FormData();
+  files.forEach((f) => form.append("files", f));
+  form.append("overwrite", overwrite.toString());
+  const res = await fetch(`${UPLOAD_API_BASE}/documents/bulk-upload`, { method: "POST", body: form });
   if (!res.ok) throw new Error(await errorDetail(res));
   return res.json();
 }
@@ -280,10 +297,12 @@ export async function fetchDbTables(): Promise<DbTableMeta[]> {
 export async function fetchDbTable(
   table: string,
   limit: number = 100,
-  offset: number = 0
+  offset: number = 0,
+  search?: string
 ): Promise<DbTableData> {
+  const qParam = search ? `&q=${encodeURIComponent(search)}` : "";
   const res = await fetch(
-    `${API_BASE}/db/tables/${encodeURIComponent(table)}?limit=${limit}&offset=${offset}`
+    `${API_BASE}/db/tables/${encodeURIComponent(table)}?limit=${limit}&offset=${offset}${qParam}`
   );
   if (!res.ok) throw new Error(await errorDetail(res));
   return res.json();
@@ -307,6 +326,40 @@ export async function fetchDbSchema(): Promise<DbSchema> {
 export async function auditAribaSupplier(smVendorId: string): Promise<any> {
   const res = await fetch(`${API_BASE}/audit/ariba-supplier?sm_vendor_id=${encodeURIComponent(smVendorId)}`, {
     method: "POST",
+  });
+  if (!res.ok) throw new Error(await errorDetail(res));
+  return res.json();
+}
+
+export async function testIngestDocument(
+  file: File,
+  mode: "single" | "all" = "single",
+  pageNumber: number = 1,
+  title?: string
+): Promise<any> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("mode", mode);
+  form.append("page_number", pageNumber.toString());
+  if (title) form.append("title", title);
+
+  const res = await fetch(`${UPLOAD_API_BASE}/documents/test-ingest`, {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) throw new Error(await errorDetail(res));
+  return res.json();
+}
+
+export async function commitIngestPages(
+  filename: string,
+  title: string,
+  pages: { page_number: number; markdown: string }[]
+): Promise<any> {
+  const res = await fetch(`${API_BASE}/documents/commit-pages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filename, title, pages }),
   });
   if (!res.ok) throw new Error(await errorDetail(res));
   return res.json();

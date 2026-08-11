@@ -87,17 +87,44 @@ def _parse_pdf_with_gemini_vision(file_bytes: bytes) -> Tuple[List[dict], int, i
         logger.error(f"PyMuPDF open failed: {e}")
         return [], 0, 0, 0.0
 
+VISION_OCR_PROMPT = (
+    "You are an expert Document, Slide, Manual, and UI Form OCR Parser.\n"
+    "Transcribe ALL text, workflows, and form fields from this page into clean, RAG-optimized Markdown.\n\n"
+    "STRICT NO-NOISE & ANTI-CLUTTER RULES:\n"
+    "1. Do NOT output base64 data URIs, SVG code, raw image strings, or fake '![icon](data:...)' tags.\n"
+    "2. Ignore decorative icons, company logos (e.g. GAMUDA header logos), corner branding, background graphics, or page watermarks.\n"
+    "3. Ignore email headers, timestamps, test email addresses (e.g. <s4system-prod+...>), and email navigation buttons (Reply / Reply All / Forward).\n"
+    "4. Do NOT add UI control descriptions like '[ Text Input ]', '[ Dropdown Selection ]', or '(Collapsible section)' for form fields. Only extract the clean field label and its required asterisk (*).\n\n"
+    "TEXT, DIAGRAM & FORM EXTRACTION INSTRUCTIONS:\n"
+    "1. Workflows & Step Cards: Transcribe multi-column or sequential step cards (e.g. Step 1 | Step 2 | Step 3) sequentially with clear '## Step X' headers, exact descriptions, and clickable link targets [here](#).\n"
+    "2. Sample Email Screenshots: Condense sample email screenshots, greetings, and company intro boilerplate into concise '## Step X', key instructions, validity notices (e.g. valid for 30 days), and action links.\n"
+    "3. Banners & Callouts: Explicitly transcribe all text inside highlighted/colored boxes, notices, footer banners, and button labels (e.g. 'Register your interest here ->').\n"
+    "4. UI Form Screenshots: Extract EVERY SINGLE form field name, label, and required asterisk symbol (*). Keep field numbers (e.g. 5.1 First Name *, 5.4 Office Telephone Number *).\n"
+    "5. FAQs & Q&A Pairs: Format each FAQ pair clearly as:\n"
+    "   ### Question: <exact question>\n"
+    "   **Answer:** <complete answer>\n"
+    "6. Be 100% exhaustive with all instructions, steps, rules, and required fields while omitting boilerplate filler text."
+)
+
+
+def _parse_pdf_with_gemini_vision(file_bytes: bytes) -> Tuple[List[dict], int, int, float]:
+    """Render PDF pages to PNG images and call Gemini Flash Vision in parallel threads."""
+    try:
+        import fitz
+        from google import genai
+        from google.genai import types
+    except ImportError as e:
+        logger.warning(f"Vision OCR dependency missing ({e}) — falling back to PyMuPDF text.")
+        return _pyMuPDF_pages(file_bytes), 0, 0, 0.0
+
+    try:
+        doc = fitz.open(stream=file_bytes, filetype="pdf")
+    except Exception as e:
+        logger.error(f"PyMuPDF open failed: {e}")
+        return [], 0, 0, 0.0
+
     client = genai.Client(api_key=settings.gemini_api_key)
-    prompt = (
-        "You are an expert Document, Slide, and UI Form OCR Parser.\n"
-        "Transcribe ALL content from this page/slide into detailed, structured Markdown.\n\n"
-        "CRITICAL INSTRUCTIONS FOR IMAGES & SCREENSHOTS:\n"
-        "1. If the page contains a form, screenshot, UI panel, or diagram:\n"
-        "   - Extract and list EVERY SINGLE form field name, label, asterisk required symbol (*), input placeholder, and dropdown selection option visible in the screenshot.\n"
-        "   - Group form fields clearly (e.g., 'Form Fields in Screenshot: Registered Company Name *, Registration Number e.g. * (Malaysia: SSM..., Australia: ABN...), Primary Contact (First Name *, Last Name *, Designation *)...').\n"
-        "2. Transcribe all text boxes, step descriptions, arrows, callouts, and button instructions.\n"
-        "3. Do NOT summarize or skip any form fields. Be 100% exhaustive so all form requirements are searchable."
-    )
+    prompt = VISION_OCR_PROMPT
 
     page_tasks = []
     for i, page in enumerate(doc):

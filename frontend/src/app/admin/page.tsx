@@ -15,9 +15,10 @@ const ComparisonPlayground = dynamic(
   { ssr: false }
 );
 const DocumentIngest = dynamic(() => import("@/components/DocumentIngest"), { ssr: false });
+const IngestTestPlayground = dynamic(() => import("@/components/IngestTestPlayground"), { ssr: false });
 const ComparisonMatrix = dynamic(() => import("@/components/ComparisonMatrix"), { ssr: false });
 
-const VALID_TABS: AdminTab[] = ["database", "matrix", "costs", "schema", "playground", "ingest"];
+const VALID_TABS: AdminTab[] = ["database", "matrix", "costs", "schema", "playground", "ingest", "ingest-test"];
 const STORAGE_KEY = "admin_active_tab";
 
 function AdminPageContent() {
@@ -86,6 +87,7 @@ function AdminPageContent() {
         {activeTab === "schema" && <SchemaViewer />}
         {activeTab === "playground" && <ComparisonPlayground />}
         {activeTab === "ingest" && <DocumentIngest />}
+        {activeTab === "ingest-test" && <IngestTestPlayground />}
       </main>
     </div>
   );

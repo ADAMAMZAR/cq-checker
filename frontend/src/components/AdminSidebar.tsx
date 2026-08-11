@@ -13,6 +13,7 @@ import {
   IconX,
   IconChevronRight,
   IconTable,
+  IconFlask,
 } from "@tabler/icons-react";
 import type { AdminTab } from "./AdminTabs";
 
@@ -28,6 +29,7 @@ const tabs: { key: AdminTab; label: string; icon: typeof IconDatabase }[] = [
   { key: "schema", label: "Schema", icon: IconSchema },
   { key: "playground", label: "Playground", icon: IconPlaylist },
   { key: "ingest", label: "Document Ingest", icon: IconUpload },
+  { key: "ingest-test", label: "OCR Sandbox", icon: IconFlask },
 ];
 
 export default function AdminSidebar({ active, onChange }: AdminSidebarProps) {

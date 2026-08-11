@@ -82,6 +82,7 @@ export default function DatabasePreview() {
   const [selectedTable, setSelectedTable] = useState<string | null>(null);
   const [tableFilter, setTableFilter] = useState("");
 
+  const [rowSearch, setRowSearch] = useState("");
   const [data, setData] = useState<DbTableData | null>(null);
   const [dataLoading, setDataLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -111,11 +112,11 @@ export default function DatabasePreview() {
     }
   }, [loadTables]);
 
-  const loadTableData = useCallback(async (table: string, offset: number) => {
+  const loadTableData = useCallback(async (table: string, offset: number, searchStr?: string) => {
     setDataLoading(true);
     setError(null);
     try {
-      const result = await fetchDbTable(table, PAGE_SIZE, offset);
+      const result = await fetchDbTable(table, PAGE_SIZE, offset, searchStr ?? rowSearch);
       setData(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load table data.");
@@ -123,18 +124,19 @@ export default function DatabasePreview() {
     } finally {
       setDataLoading(false);
     }
-  }, []);
+  }, [rowSearch]);
 
   const handleSelectTable = (table: string) => {
     setSelectedTable(table);
     setPage(0);
+    setRowSearch("");
     setData(null);
-    loadTableData(table, 0);
+    loadTableData(table, 0, "");
   };
 
   const handleRefresh = () => {
     loadTables();
-    if (selectedTable) loadTableData(selectedTable, page * PAGE_SIZE);
+    if (selectedTable) loadTableData(selectedTable, page * PAGE_SIZE, rowSearch);
   };
 
   const handleClearCache = async () => {
@@ -320,6 +322,21 @@ export default function DatabasePreview() {
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
+                  <div className="relative">
+                    <IconSearch className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" />
+                    <input
+                      type="text"
+                      value={rowSearch}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setRowSearch(val);
+                        setPage(0);
+                        if (selectedTable) loadTableData(selectedTable, 0, val);
+                      }}
+                      placeholder="Search rows..."
+                      className="pl-8 pr-3 py-1 rounded-lg bg-[var(--bg-input)] border border-[var(--border-subtle)] text-xs text-[var(--heading-color)] placeholder-[var(--text-tertiary)] outline-none focus:border-[var(--accent-primary-border)] w-36 sm:w-48"
+                    />
+                  </div>
                   <button
                     onClick={() => goToPage(page - 1)}
                     disabled={page === 0 || dataLoading}
@@ -378,24 +395,32 @@ export default function DatabasePreview() {
                           <td className="py-1.5 px-3 font-mono text-[10px] text-[var(--text-tertiary)] whitespace-nowrap">
                             {data.offset + rIdx + 1}
                           </td>
-                          {row.map((cell, cIdx) => (
-                            <td
-                              key={cIdx}
-                              onDoubleClick={() =>
-                                setExpandedCell({
-                                  column: data.columns[cIdx],
-                                  rowNumber: data.offset + rIdx + 1,
-                                  value: cell ?? "",
-                                })
-                              }
-                              title="Double-click to enlarge"
-                              className="py-1.5 px-3 align-top max-w-[360px] break-words cursor-zoom-in"
-                            >
-                              <span className="line-clamp-3">
-                                {cell === "" ? <span className="text-[var(--text-tertiary)]">NULL</span> : cell}
-                              </span>
-                            </td>
-                          ))}
+                          {row.map((cell, cIdx) => {
+                            const colName = data.columns[cIdx]?.toLowerCase() ?? "";
+                            const isLongText = colName.includes("content") || colName.includes("text") || colName.includes("snippet") || colName.includes("answer") || colName.includes("response");
+                            return (
+                              <td
+                                key={cIdx}
+                                onDoubleClick={() =>
+                                  setExpandedCell({
+                                    column: data.columns[cIdx],
+                                    rowNumber: data.offset + rIdx + 1,
+                                    value: cell ?? "",
+                                  })
+                                }
+                                title="Double-click to enlarged view"
+                                className={`py-2 px-3 align-top cursor-zoom-in ${
+                                  isLongText
+                                    ? "whitespace-pre-wrap break-words max-w-[500px] leading-relaxed text-xs"
+                                    : "whitespace-nowrap max-w-[260px] truncate text-xs"
+                                }`}
+                              >
+                                <span>
+                                  {cell === "" ? <span className="text-[var(--text-tertiary)]">NULL</span> : cell}
+                                </span>
+                              </td>
+                            );
+                          })}
                           <td className="py-1.5 px-3 text-center whitespace-nowrap">
                             <button
                               onClick={() => handleDeleteRow(rIdx)}
