@@ -370,8 +370,9 @@ async def get_cost_analytics() -> dict:
         ]
 
         # 3. Document Ingestion
+        from sqlalchemy.orm import joinedload
         doc_res = await session.execute(
-            select(Document).order_by(Document.created_at.desc()).limit(1000)
+            select(Document).options(joinedload(Document.object_storage)).order_by(Document.created_at.desc()).limit(1000)
         )
         doc_records = list(doc_res.scalars().all())
 

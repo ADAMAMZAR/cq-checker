@@ -605,7 +605,7 @@ async def upload_document(
 
     file_bytes = await file.read()
     filename = file.filename or "manual.pdf"
-    content_type = file.content_type or "application/pdf"
+    content_type = file.content_type or ("text/markdown" if filename.lower().endswith((".md", ".markdown", ".txt")) else "application/pdf")
     doc_title = title or filename
 
     result = await ingest_document(file_bytes, doc_title, filename, content_type, overwrite=overwrite)
@@ -621,7 +621,7 @@ async def bulk_upload_documents(
     overwrite: bool = Form(True),
 ):
     """
-    Bulk Upload multiple PDF manuals -> parse Vision OCR -> embed -> store/overwrite in Postgres.
+    Bulk Upload multiple PDF or Markdown manuals -> parse -> embed -> store/overwrite in Postgres.
     """
     from app.services.ingest import bulk_ingest_documents
 
@@ -631,11 +631,13 @@ async def bulk_upload_documents(
     items = []
     for f in files:
         f_bytes = await f.read()
+        fname = f.filename or "document.pdf"
+        ctype = f.content_type or ("text/markdown" if fname.lower().endswith((".md", ".markdown", ".txt")) else "application/pdf")
         items.append({
             "file_bytes": f_bytes,
-            "filename": f.filename or "document.pdf",
-            "title": f.filename or "document.pdf",
-            "content_type": f.content_type or "application/pdf",
+            "filename": fname,
+            "title": fname,
+            "content_type": ctype,
         })
 
     results = await bulk_ingest_documents(items, overwrite=overwrite)

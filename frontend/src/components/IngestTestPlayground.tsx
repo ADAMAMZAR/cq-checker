@@ -171,10 +171,10 @@ export default function IngestTestPlayground() {
         <div className="grid grid-cols-1 md:grid-cols-12 gap-5 items-end">
           {/* File input */}
           <div className="md:col-span-5 flex flex-col gap-2">
-            <label className="text-xs font-bold text-[var(--heading-color)]">Select PDF Document</label>
+            <label className="text-xs font-bold text-[var(--heading-color)]">Select PDF or Markdown Document</label>
             <input
               type="file"
-              accept=".pdf"
+              accept=".pdf,.md,.markdown,.txt,application/pdf,text/markdown,text/plain"
               onChange={handleFileChange}
               className="file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-[var(--accent-primary-soft)] file:text-[var(--accent-primary-text)] text-xs text-[var(--text-secondary)] bg-[var(--bg-input)] p-2 rounded-xl border border-[var(--border-subtle)] outline-none cursor-pointer"
             />

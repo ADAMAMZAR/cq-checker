@@ -9,7 +9,7 @@ import {
   IconRepeat,
   IconExternalLink,
 } from "@tabler/icons-react";
-import { uploadDocument, fetchDocuments, buildFileUrl } from "@/lib/api";
+import { uploadDocument, bulkUploadDocuments, fetchDocuments, buildFileUrl } from "@/lib/api";
 import type { DocumentIngestResult, DocumentSummary } from "@/types";
 
 const STAGES = ["Uploading", "Parsing", "Chunking", "Embedding"];
@@ -125,7 +125,7 @@ export default function DocumentIngest() {
           </div>
           <div>
             <h2 className="text-lg font-bold text-[var(--heading-color)] tracking-tight">Bulk Ingest Manuals</h2>
-            <p className="text-xs text-[var(--text-tertiary)]">Upload one or multiple PDF manuals — Vision OCR parsed, chunked, and embedded for RAG retrieval.</p>
+            <p className="text-xs text-[var(--text-tertiary)]">Upload single or multiple PDF or Markdown manuals — Vision OCR for PDFs, smart Q&A chunking for Markdown, embedded for RAG retrieval.</p>
           </div>
         </div>
 
@@ -142,12 +142,12 @@ export default function DocumentIngest() {
                 Selected {files.length} document(s): {files.map(f => f.name).join(", ")}
               </span>
             ) : (
-              <span className="text-sm text-[var(--text-secondary)]">Click to select single or multiple <span className="font-mono text-[var(--accent-primary-text)]">.pdf</span> manuals</span>
+              <span className="text-sm text-[var(--text-secondary)]">Click to select single or multiple <span className="font-mono text-[var(--accent-primary-text)]">.pdf</span> or <span className="font-mono text-[var(--accent-primary-text)]">.md</span> manuals</span>
             )}
             <input
               id="ingest-file-input"
               type="file"
-              accept="application/pdf"
+              accept=".pdf,.md,.markdown,.txt,application/pdf,text/markdown,text/plain"
               multiple
               className="hidden"
               onChange={handleFilesSelected}

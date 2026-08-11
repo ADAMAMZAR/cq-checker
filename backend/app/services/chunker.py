@@ -1,9 +1,11 @@
-"""Page-level chunking for Hybrid Page RAG.
+"""Page-level and Markdown-smart chunking for Hybrid Page RAG.
 
-Treats each PDF page as a single self-contained chunk to preserve visual
-callout context, button instructions, and diagram descriptions.
+Supports:
+1. PDF page-level chunking.
+2. Smart Markdown chunking by Q&A pairs, Mermaid diagram sections, and header blocks.
 """
 
+import re
 from typing import List, Optional
 
 CHARS_PER_TOKEN = 4.0
@@ -42,3 +44,97 @@ def chunk_pages(pages: List[dict]) -> List[dict]:
         if c:
             chunks.append(c)
     return chunks
+
+
+def _split_markdown_by_qa(markdown_text: str) -> List[str]:
+    """Split markdown text into distinct Q&A pairs if Q&A headers exist."""
+    # Pattern matching Q&A headers e.g.:
+    # ## **BU-Q1: ...**, ## **Q1: ...**, ## Q1: ..., ### Question: ..., ### Template 1: ...
+    qa_header_regex = re.compile(
+        r'^(?=(?:#{2,3}\s+(?:\*\*)?(?:BU-Q\d+|Q\d+|Question|Template\s+\d+):?))',
+        re.MULTILINE | re.IGNORECASE
+    )
+    parts = qa_header_regex.split(markdown_text)
+    cleaned = [p.strip() for p in parts if p and p.strip()]
+    return cleaned
+
+
+def _split_markdown_by_headers(markdown_text: str) -> List[str]:
+    """Split markdown text by #, ##, ### headers or --- dividers."""
+    # Split on headers (#, ##, ###) or horizontal rules (---)
+    header_regex = re.compile(
+        r'^(?=(?:#{1,3}\s+|---+\s*$))',
+        re.MULTILINE
+    )
+    sections = header_regex.split(markdown_text)
+    cleaned = [s.strip() for s in sections if s and s.strip() and s.strip() != '---']
+    return cleaned
+
+
+def chunk_markdown_document(markdown_text: str, max_chunk_tokens: int = 1200) -> List[dict]:
+    """Smartly chunk a Markdown document for RAG ingestion.
+
+    1. Preserves Q&A pairs (Question + Answer in 1 chunk).
+    2. Keeps Mermaid code blocks together with their step list narratives.
+    3. Splits narrative sections by Markdown headers (###, ##, #).
+    """
+    if not markdown_text or not markdown_text.strip():
+        return []
+
+    # First split by major structural headers (H1, H2, H3, or ---)
+    major_sections = _split_markdown_by_headers(markdown_text)
+    raw_chunks = []
+
+    for section in major_sections:
+        # Check if this section contains multiple Q&A pairs
+        qa_pairs = _split_markdown_by_qa(section)
+        if len(qa_pairs) > 1:
+            for pair in qa_pairs:
+                raw_chunks.append(pair)
+        else:
+            raw_chunks.append(section)
+
+    final_chunks = []
+    chunk_index = 1
+
+    for chunk_text in raw_chunks:
+        # If chunk contains Mermaid block, ensure it stays whole unless excessively large
+        has_mermaid = "```mermaid" in chunk_text
+
+        tokens = estimate_tokens(chunk_text)
+        if tokens <= max_chunk_tokens or has_mermaid:
+            final_chunks.append({
+                "page_number": chunk_index,
+                "content": chunk_text,
+            })
+            chunk_index += 1
+        else:
+            # Fallback: split long non-mermaid sections by paragraph breaks
+            paragraphs = [p.strip() for p in chunk_text.split("\n\n") if p.strip()]
+            current_buf = []
+            current_tokens = 0
+
+            for p in paragraphs:
+                p_tok = estimate_tokens(p)
+                if current_tokens + p_tok > max_chunk_tokens and current_buf:
+                    combined = "\n\n".join(current_buf)
+                    final_chunks.append({
+                        "page_number": chunk_index,
+                        "content": combined,
+                    })
+                    chunk_index += 1
+                    current_buf = [p]
+                    current_tokens = p_tok
+                else:
+                    current_buf.append(p)
+                    current_tokens += p_tok
+
+            if current_buf:
+                combined = "\n\n".join(current_buf)
+                final_chunks.append({
+                    "page_number": chunk_index,
+                    "content": combined,
+                })
+                chunk_index += 1
+
+    return final_chunks

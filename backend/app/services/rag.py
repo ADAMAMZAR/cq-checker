@@ -91,8 +91,11 @@ def _build_context(results: List[dict]) -> str:
     blocks = []
     for i, r in enumerate(results, 1):
         content = r.get("parent_content") or r.get("page_content") or ""
+        p_start = r.get("page_number_start", r.get("page_number"))
+        p_end = r.get("page_number_end", r.get("page_number"))
+        p_label = f"pages {p_start}-{p_end}" if p_start != p_end else f"page {p_start}"
         blocks.append(
-            f"[{i}] (source: {r['title']}, page {r['page_number']})\n{content}"
+            f"[{i}] (source: {r['title']}, {p_label})\n{content}"
         )
     return "\n\n".join(blocks)
 
@@ -297,8 +300,8 @@ async def _prepare(query: str, session_id: Optional[str]):
         cached = await cache_repo.find_cached(
             query_embedding, threshold=0.93, ttl_days=settings.query_cache_ttl_days,
         )
-        results = await hybrid_search(session, query_embedding, query, k=5)
-        logger.info(f"RAG retrieved {len(results)} passages for '{query}': {[(r['title'], r['page_number']) for r in results]}")
+        results = await hybrid_search(session, query_embedding, query, k=3, window_size=5)
+        logger.info(f"RAG retrieved {len(results)} windowed passages for '{query}': {[(r['title'], f'pages {r.get(\"page_number_start\")}-{r.get(\"page_number_end\")}') for r in results]}")
         for idx, r in enumerate(results):
             logger.info(f"Passage {idx+1} ({r['title']} p.{r['page_number']}): {(r.get('parent_content') or '')[:150]}")
         if cached:

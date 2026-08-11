@@ -85,17 +85,29 @@ async def _ingest_blocking(
         if not file_url:
             return IngestResult(None, title, "failed", message="Upload failed.")
 
-        # Parse (blocking HTTP/CPU → thread)
-        pages, in_t, out_t, parse_cost = await asyncio.to_thread(
-            parser.parse_pdf_to_markdown, file_bytes,
+        is_markdown = (
+            (content_type and content_type.lower() in ("text/markdown", "text/x-markdown", "text/plain")) or
+            filename.lower().endswith((".md", ".markdown", ".txt"))
         )
-        if not pages:
-            return IngestResult(None, title, "failed", message="No parseable text found.")
 
-        # Chunk into page objects (pure CPU → thread)
-        page_chunks = await asyncio.to_thread(chunker.chunk_pages, pages)
-        if not page_chunks:
-            return IngestResult(None, title, "failed", message="Page chunking produced no content.")
+        if is_markdown:
+            raw_text = file_bytes.decode("utf-8", errors="replace")
+            page_chunks = await asyncio.to_thread(chunker.chunk_markdown_document, raw_text)
+            in_t, out_t, parse_cost = 0, 0, 0.0
+            if not page_chunks:
+                return IngestResult(None, title, "failed", message="Markdown parsing produced no content.")
+        else:
+            # Parse PDF (blocking HTTP/CPU → thread)
+            pages, in_t, out_t, parse_cost = await asyncio.to_thread(
+                parser.parse_pdf_to_markdown, file_bytes,
+            )
+            if not pages:
+                return IngestResult(None, title, "failed", message="No parseable text found.")
+
+            # Chunk into page objects (pure CPU → thread)
+            page_chunks = await asyncio.to_thread(chunker.chunk_pages, pages)
+            if not page_chunks:
+                return IngestResult(None, title, "failed", message="Page chunking produced no content.")
 
         # Embed full page texts (blocking HTTP → thread)
         page_texts = [p["content"] for p in page_chunks]
