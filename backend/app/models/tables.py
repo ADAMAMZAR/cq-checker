@@ -57,15 +57,23 @@ class Document(Base):
     __tablename__ = "documents"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
+    object_id = Column(UUID(as_uuid=True), ForeignKey("object_storage.id", ondelete="SET NULL"), nullable=True, index=True)
     title = Column(String(255), nullable=False)
-    file_url = Column(Text, nullable=False)
-    file_hash = Column(String(64), nullable=True, unique=True, index=True)
     input_tokens = Column(Integer, nullable=False, default=0)
     output_tokens = Column(Integer, nullable=False, default=0)
     cost_usd = Column(Numeric(12, 6), nullable=False, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    object_storage = relationship("ObjectStorage")
     pages = relationship("DocumentPage", back_populates="document", cascade="all, delete-orphan")
+
+    @property
+    def file_url(self) -> str:
+        return self.object_storage.file_url if self.object_storage else ""
+
+    @property
+    def file_hash(self) -> Optional[str]:
+        return self.object_storage.checksum if self.object_storage else None
 
 
 class DocumentPage(Base):
@@ -97,12 +105,21 @@ class CertificateVerification(Base):
     __tablename__ = "certificate_verifications"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
-    file_url = Column(Text, nullable=False)
-    file_hash = Column(String(64), nullable=True, unique=True, index=True)
+    object_id = Column(UUID(as_uuid=True), ForeignKey("object_storage.id", ondelete="SET NULL"), nullable=True, index=True)
     extracted_data = Column(JSONB, nullable=False)
     status = Column(String(50), nullable=False)  # PASS, FAIL, REQUIRES_HUMAN_REVIEW
     reasoning_trace = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    object_storage = relationship("ObjectStorage")
+
+    @property
+    def file_url(self) -> str:
+        return self.object_storage.file_url if self.object_storage else ""
+
+    @property
+    def file_hash(self) -> Optional[str]:
+        return self.object_storage.checksum if self.object_storage else None
 
     __table_args__ = (
         CheckConstraint(
@@ -241,6 +258,7 @@ class DocumentEvidence(Base):
     __tablename__ = "document_evidence"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
+    object_id = Column(UUID(as_uuid=True), ForeignKey("object_storage.id", ondelete="SET NULL"), nullable=True, index=True)
     audit_id = Column(String(100), ForeignKey("audit_logs.audit_id", ondelete="CASCADE"), nullable=False, index=True)
     supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=False)
     supplier_name = Column(String(255), nullable=False)
@@ -253,8 +271,19 @@ class DocumentEvidence(Base):
     input_tokens = Column(Integer, nullable=False, default=0)
     output_tokens = Column(Integer, nullable=False, default=0)
     cost_usd = Column(Numeric(12, 6), nullable=False, default=0)
-    file_hash = Column(String(64), nullable=True)
-    file_url = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    object_storage = relationship("ObjectStorage")
+    supplier = relationship("Supplier")
+
+    @property
+    def file_url(self) -> str:
+        return self.object_storage.file_url if self.object_storage else ""
+
+    @property
+    def file_hash(self) -> Optional[str]:
+        return self.object_storage.checksum if self.object_storage else None
+
+
 
 

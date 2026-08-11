@@ -62,6 +62,8 @@ function nowLabel(): string {
   return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+const REMARK_PLUGINS = [remarkGfm];
+
 const ChatMessageItem = memo(function ChatMessageItem({
   msg,
   onOpenCitation,
@@ -70,6 +72,44 @@ const ChatMessageItem = memo(function ChatMessageItem({
   onOpenCitation: (src: ChatSource) => void;
 }) {
   const formattedText = useMemo(() => formatCitationLinks(msg.text), [msg.text]);
+
+  const markdownComponents = useMemo(
+    () => ({
+      a({ href, children, ...props }: any) {
+        if (href?.startsWith("#cite-")) {
+          const idx = parseInt(href.replace("#cite-", ""), 10) - 1;
+          const src = msg.sources?.[idx];
+          return (
+            <button
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (src) onOpenCitation(src);
+              }}
+              disabled={!src}
+              className="inline-flex items-center justify-center px-1.5 py-0.5 mx-0.5 text-[10px] font-black rounded-full bg-[var(--accent-primary-soft)] text-[var(--accent-primary-text)] border border-[var(--accent-primary-border)] hover:bg-[var(--accent-primary)] hover:text-white hover:border-[var(--accent-primary-border-strong)] transition-all transform hover:scale-110 cursor-pointer shadow-xs align-middle inline-block select-none disabled:opacity-40 disabled:cursor-not-allowed"
+              title={src ? `${src.title || "Source"} (Page ${src.page_number ?? "?"})` : `Citation [${idx + 1}]`}
+              type="button"
+            >
+              {children}
+            </button>
+          );
+        }
+        return (
+          <a
+            href={href}
+            target="_blank"
+            rel="noreferrer"
+            className="text-[var(--accent-primary-text)] underline font-medium hover:opacity-80"
+            {...props}
+          >
+            {children}
+          </a>
+        );
+      },
+    }),
+    [msg.sources, onOpenCitation]
+  );
 
   return (
     <div className={`flex items-start gap-3 max-w-3xl ${msg.sender === "user" ? "self-end flex-row-reverse" : "self-start"}`}>
@@ -86,11 +126,11 @@ const ChatMessageItem = memo(function ChatMessageItem({
         <div className="flex items-center gap-2 text-[11px] text-[var(--text-tertiary)] px-1">
           <span className="font-semibold">{msg.sender === "user" ? "You" : "Procurement Assistant"}</span>
           <span>{msg.timestamp}</span>
-          {msg.costUsd !== undefined && msg.sender === "ai" && !msg.isStreaming && (
+          {/* {msg.costUsd !== undefined && msg.sender === "ai" && !msg.isStreaming && (
             <span className="px-2 py-0.5 rounded-full text-[9px] font-bold border bg-[var(--accent-primary-soft)] text-[var(--accent-primary-text)] border-[var(--accent-primary-border)]">
               ${msg.costUsd.toFixed(6)}
             </span>
-          )}
+          )} */}
         </div>
         <div
           className={`p-4 rounded-2xl text-sm leading-relaxed ${msg.sender === "user"
@@ -112,41 +152,8 @@ const ChatMessageItem = memo(function ChatMessageItem({
           ) : (
             <div className="prose prose-sm max-w-none font-sans">
               <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                components={{
-                  a({ href, children, ...props }: any) {
-                    if (href?.startsWith("#cite-")) {
-                      const idx = parseInt(href.replace("#cite-", ""), 10) - 1;
-                      const src = msg.sources?.[idx];
-                      return (
-                        <button
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            if (src) onOpenCitation(src);
-                          }}
-                          disabled={!src}
-                          className="inline-flex items-center justify-center px-1.5 py-0.5 mx-0.5 text-[10px] font-black rounded-full bg-[var(--accent-primary-soft)] text-[var(--accent-primary-text)] border border-[var(--accent-primary-border)] hover:bg-[var(--accent-primary)] hover:text-white hover:border-[var(--accent-primary-border-strong)] transition-all transform hover:scale-110 cursor-pointer shadow-xs align-middle inline-block select-none disabled:opacity-40 disabled:cursor-not-allowed"
-                          title={src ? `${src.title || "Source"} (Page ${src.page_number ?? "?"})` : `Citation [${idx + 1}]`}
-                          type="button"
-                        >
-                          {children}
-                        </button>
-                      );
-                    }
-                    return (
-                      <a
-                        href={href}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-[var(--accent-primary-text)] underline font-medium hover:opacity-80"
-                        {...props}
-                      >
-                        {children}
-                      </a>
-                    );
-                  },
-                }}
+                remarkPlugins={REMARK_PLUGINS}
+                components={markdownComponents}
               >
                 {formattedText}
               </ReactMarkdown>
@@ -233,8 +240,16 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
       .finally(() => setHistoryLoaded(true));
   }, [getSessionId]);
 
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
   const scrollToBottom = useCallback((instant = false) => {
-    chatEndRef.current?.scrollIntoView({ behavior: instant ? "auto" : "smooth" });
+    if (scrollContainerRef.current) {
+      const el = scrollContainerRef.current;
+      const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 180;
+      if (instant || isNearBottom) {
+        el.scrollTop = el.scrollHeight;
+      }
+    }
   }, []);
 
   useEffect(() => {
@@ -298,9 +313,16 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
 
       const flush = () => {
         const fullText = partial.join("");
-        setMessages((prev) =>
-          prev.map((m) => (m.id === aiMsgId ? { ...m, text: fullText } : m))
-        );
+        setMessages((prev) => {
+          if (!prev.length) return prev;
+          const lastIdx = prev.length - 1;
+          if (prev[lastIdx].id === aiMsgId) {
+            const copy = [...prev];
+            copy[lastIdx] = { ...copy[lastIdx], text: fullText };
+            return copy;
+          }
+          return prev.map((m) => (m.id === aiMsgId ? { ...m, text: fullText } : m));
+        });
         lastFlush = Date.now();
       };
 
@@ -312,7 +334,7 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
             onDelta: (delta) => {
               partial.push(delta);
               const now = Date.now();
-              if (now - lastFlush > 80) {
+              if (now - lastFlush > 100) {
                 if (flushTimer) clearTimeout(flushTimer);
                 flushTimer = null;
                 flush();
@@ -320,7 +342,7 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
                 flushTimer = setTimeout(() => {
                   flushTimer = null;
                   flush();
-                }, 80);
+                }, 100);
               }
             },
           },
@@ -405,7 +427,7 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
             </div>
           </header>
           {/* ── Messages ── */}
-          <div className="flex-1 overflow-y-auto p-4 sm:p-6 flex flex-col gap-6">
+          <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-4 sm:p-6 flex flex-col gap-6">
             {!historyLoaded ? (
               <div className="flex justify-center pt-12">
                 <span className="text-xs text-[var(--text-tertiary)] animate-pulse">Loading conversation…</span>

@@ -46,3 +46,10 @@ class ObjectStorageRepository:
             select(ObjectStorage).where(ObjectStorage.id == record_id)
         )
         return result.scalar_one_or_none()
+
+    async def get_by_checksum(self, checksum: str) -> Optional[ObjectStorage]:
+        """Lookup an object_storage record by SHA-256 checksum."""
+        result = await self.session.execute(
+            select(ObjectStorage).where(ObjectStorage.checksum == checksum)
+        )
+        return result.scalar_one_or_none()

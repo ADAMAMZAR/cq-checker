@@ -32,11 +32,12 @@ async def hybrid_search(
             dp.page_number AS page_number,
             d.id AS document_id,
             d.title AS title,
-            d.file_url AS file_url,
+            COALESCE(os.file_url, '') AS file_url,
             (0.6 * (1 - (dp.embedding <=> '{embedding_str}'::vector(1536)))
              + 0.4 * COALESCE(ts_rank_cd(dp.tsv_content, websearch_to_tsquery('english', :q)), 0)) AS combined_score
         FROM document_pages dp
         JOIN documents d ON d.id = dp.document_id
+        LEFT JOIN object_storage os ON os.id = d.object_id
         WHERE dp.embedding IS NOT NULL
         ORDER BY combined_score DESC
         LIMIT :k

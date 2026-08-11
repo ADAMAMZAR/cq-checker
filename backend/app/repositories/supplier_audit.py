@@ -44,6 +44,9 @@ class SupplierRepository:
         return list(result.scalars().all())
 
 
+from sqlalchemy.orm import joinedload
+
+
 class AuditLogRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -59,19 +62,19 @@ class AuditLogRepository:
 
     async def get_by_id(self, audit_id: UUID) -> Optional[AuditLog]:
         result = await self.session.execute(
-            select(AuditLog).where(AuditLog.id == audit_id)
+            select(AuditLog).options(joinedload(AuditLog.supplier)).where(AuditLog.id == audit_id)
         )
         return result.scalar_one_or_none()
 
     async def get_by_audit_id(self, audit_id: str) -> Optional[AuditLog]:
         result = await self.session.execute(
-            select(AuditLog).where(AuditLog.audit_id == audit_id)
+            select(AuditLog).options(joinedload(AuditLog.supplier)).where(AuditLog.audit_id == audit_id)
         )
         return result.scalar_one_or_none()
 
     async def list_all(self, limit: int = 100, offset: int = 0) -> List[AuditLog]:
         result = await self.session.execute(
-            select(AuditLog).order_by(AuditLog.created_at.desc()).limit(limit).offset(offset)
+            select(AuditLog).options(joinedload(AuditLog.supplier)).order_by(AuditLog.created_at.desc()).limit(limit).offset(offset)
         )
         return list(result.scalars().all())
 
@@ -91,13 +94,17 @@ class DocumentEvidenceRepository:
 
     async def get_by_audit_id(self, audit_id: str) -> List[DocumentEvidence]:
         result = await self.session.execute(
-            select(DocumentEvidence).where(DocumentEvidence.audit_id == audit_id)
+            select(DocumentEvidence)
+            .options(joinedload(DocumentEvidence.supplier), joinedload(DocumentEvidence.object_storage))
+            .where(DocumentEvidence.audit_id == audit_id)
         )
         return list(result.scalars().all())
 
     async def get_by_filename(self, audit_id: str, filename: str) -> Optional[DocumentEvidence]:
         result = await self.session.execute(
-            select(DocumentEvidence).where(
+            select(DocumentEvidence)
+            .options(joinedload(DocumentEvidence.supplier), joinedload(DocumentEvidence.object_storage))
+            .where(
                 DocumentEvidence.audit_id == audit_id,
                 DocumentEvidence.filename == filename,
             )
@@ -106,6 +113,10 @@ class DocumentEvidenceRepository:
 
     async def list_all(self, limit: int = 100, offset: int = 0) -> List[DocumentEvidence]:
         result = await self.session.execute(
-            select(DocumentEvidence).order_by(DocumentEvidence.created_at.desc()).limit(limit).offset(offset)
+            select(DocumentEvidence)
+            .options(joinedload(DocumentEvidence.supplier), joinedload(DocumentEvidence.object_storage))
+            .order_by(DocumentEvidence.created_at.desc())
+            .limit(limit)
+            .offset(offset)
         )
         return list(result.scalars().all())

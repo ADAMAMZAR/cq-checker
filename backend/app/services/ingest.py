@@ -74,7 +74,7 @@ async def _ingest_blocking(
             )
 
         # Upload
-        file_url = await storage.store_and_record(file_bytes, "manuals", filename, content_type)
+        file_url, object_id = await storage.store_and_record(file_bytes, "manuals", filename, content_type)
         if not file_url:
             return IngestResult(None, title, "failed", message="Upload failed.")
 
@@ -99,8 +99,7 @@ async def _ingest_blocking(
         # Insert Document and DocumentPage rows
         doc = await doc_repo.create(
             title=title,
-            file_url=file_url,
-            file_hash=file_hash,
+            object_id=object_id,
             input_tokens=in_t,
             output_tokens=out_t,
             cost_usd=parse_cost,

@@ -124,12 +124,13 @@ def _to_audit_log_entry(r: AuditLog) -> AuditLogEntry:
         pass
     ts_val = getattr(r, "created_at", None) or getattr(r, "timestamp", None)
     disp_ts = _display_timestamp(ts_val)
+    sup_name = r.supplier.supplier_name if (hasattr(r, "supplier") and r.supplier) else r.supplier_name
     return AuditLogEntry(
         audit_id=r.audit_id,
         supplier_id=r.supplier_id,
         created_at=disp_ts,
         timestamp=disp_ts,
-        supplier_name=r.supplier_name,
+        supplier_name=sup_name,
         workspace_title=r.workspace_title or "Ariba Workspace",
         cert_type=cert_type,
         complete_qa_data_dump=r.complete_qa_data_dump or "[]",
@@ -169,10 +170,11 @@ async def get_audit_registry() -> List[dict]:
     for r in logs:
         ts_val = getattr(r, "created_at", None) or getattr(r, "timestamp", None)
         disp_ts = _display_timestamp(ts_val)
+        sup_name = r.supplier.supplier_name if (hasattr(r, "supplier") and r.supplier) else r.supplier_name
         result.append({
             "audit_id": r.audit_id,
             "supplier_id": r.supplier_id,
-            "supplier_name": r.supplier_name,
+            "supplier_name": sup_name,
             "result": r.result or "Mismatch",
             "created_at": disp_ts,
             "timestamp": disp_ts,
@@ -210,12 +212,13 @@ async def update_audit_result(
 def _to_document_evidence(r: NeonDocumentEvidence) -> DocumentEvidence:
     ts_val = getattr(r, "created_at", None) or getattr(r, "timestamp", None)
     disp_ts = _display_timestamp(ts_val)
+    sup_name = r.supplier.supplier_name if (hasattr(r, "supplier") and r.supplier) else r.supplier_name
     return DocumentEvidence(
         audit_id=r.audit_id,
         supplier_id=r.supplier_id,
         created_at=disp_ts,
         timestamp=disp_ts,
-        supplier_name=r.supplier_name,
+        supplier_name=sup_name,
         filename=r.filename,
         ariba_question_label=r.ariba_question_label,
         ariba_qa_answers=r.ariba_qa_answers or "[]",
@@ -528,9 +531,18 @@ async def log_audit_run(
                 ))
 
             ev_repo = DocumentEvidenceRepository(session)
+            from app.repositories.object_storage import ObjectStorageRepository
+            obj_repo = ObjectStorageRepository(session)
+
             for doc in doc_evidences:
                 import json
                 doc_ts = _to_db_timestamp(doc.created_at or doc.timestamp)
+                object_id = None
+                if doc.file_url:
+                    obj_rec = await obj_repo.get_by_url(doc.file_url)
+                    if obj_rec:
+                        object_id = obj_rec.id
+
                 await ev_repo.create(NeonDocumentEvidence(
                     audit_id=doc.audit_id,
                     supplier_id=doc.supplier_id,
@@ -545,8 +557,7 @@ async def log_audit_run(
                     input_tokens=doc.input_tokens or 0,
                     output_tokens=doc.output_tokens or 0,
                     cost_usd=float(doc.cost_usd or 0.0),
-                    file_hash=doc.file_hash,
-                    file_url=doc.file_url,
+                    object_id=object_id,
                 ))
         return audit_id
     except Exception as e:

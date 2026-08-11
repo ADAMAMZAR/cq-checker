@@ -469,7 +469,7 @@ async def verify_certificate(
     filename = file.filename or "certificate"
     file_hash = hashlib.sha256(file_bytes).hexdigest()
 
-    file_url = await storage.store_and_record(file_bytes, supplier_name, filename, mime_type)
+    file_url, object_id = await storage.store_and_record(file_bytes, supplier_name, filename, mime_type)
 
     # Dedup: if the exact same bytes were verified before, return the prior verdict.
     factory = get_session_factory()
@@ -544,11 +544,10 @@ async def verify_certificate(
     async with factory() as session:
         repo = CertificateRepository(session)
         record = await repo.create(
-            file_url=file_url or "",
-            file_hash=file_hash,
             extracted_data={**extracted_data, "confidence": confidence},
             status=status,
             reasoning_trace=reasoning_trace,
+            object_id=object_id,
         )
         record_id = str(record.id)
 

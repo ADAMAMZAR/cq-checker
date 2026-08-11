@@ -135,7 +135,7 @@ export default function SupplierAudit({ onNavigateToRegistry }: SupplierAuditPro
           <div>
             <h2 className="text-lg font-bold text-[var(--heading-color)] tracking-tight">CQ Check</h2>
             <p className="text-xs text-[var(--text-tertiary)]">
-              Pick a supplier from the database and run a demo verification flow.
+              Run an audit for supplier with qualification status (In Qualification)
             </p>
           </div>
         </div>

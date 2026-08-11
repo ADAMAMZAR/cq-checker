@@ -24,6 +24,7 @@ export interface SupplierEntry {
   supplier_name: string;
   created_at?: string;
   date_added?: string;
+  sm_vendor_id?: string;
 }
 
 export interface SupplierAssets {

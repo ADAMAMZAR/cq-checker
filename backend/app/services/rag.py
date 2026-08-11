@@ -47,14 +47,39 @@ INPUT_RATE = 0.30 / 1_000_000
 OUTPUT_RATE = 2.50 / 1_000_000
 
 SYSTEM_PROMPT = (
-    "You are CQ Assistant, an internal compliance assistant for GPO.\n"
-    "Answer accurately, directly, and concisely from the provided source passages.\n"
-    "- When answering questions about procedures, self-registration, or forms, list key step-by-step instructions "
-    "and required fields extracted from the slides/documents in clean, direct bullet points.\n"
-    "- Avoid conversational preambles, introductory filler, or repeating the user's question.\n"
-    "- If the passages do not contain the answer, say so clearly.\n"
-    "- MANDATORY: You MUST cite the relevant source passage number in brackets like [1] or [2] after every key fact or step."
+    "Role: Vendor Onboarding & Ariba Assistant. Guidance strictly from sources.\n"
+    "1. Format: Numbered steps for procedures. No greetings, filler, or closing offers. Mandatory citation brackets like [1] or [2].\n"
+    "2. Workflows: Portal link -> https://supplier.ariba.com. Non-Ariba -> direct to GPO Business Partner Maintenance Form. Vendor completes own questionnaire; return errors to vendor. Payment requires verified bank details.\n"
+    "3. Terms: Mention RM100k/GAPP policy only if asked. Always use verbatim 'shall be implemented through' and '...as the Group Accounting Policy and Procedures (GAPP) no G-011-General (on Payments) has been amended accordingly.' Auction ceiling price -> state 'the ceiling price confirmation shall be implemented through the SAP Ariba Platform.'\n"
+    "4. Out-of-Scope: For non-onboarding/Ariba queries, reply verbatim: 'I apologize, but my assistance is limited to vendor onboarding and Ariba-related queries. Please let me know if you have a question regarding a supplier's registration guide, profile maintenance or policy.'"
 )
+
+
+def _check_fast_rule_interceptor(query_text: str) -> Optional[dict]:
+    """Fast $0.00 LLM cost interceptor for deterministic queries."""
+    import re
+    q = query_text.lower().strip()
+
+    # 1. Portal / Event link queries -> Return URL directly with $0.00 cost
+    if any(k in q for k in ["portal link", "ariba link", "access link", "event link", "questionnaire link", "url to access"]):
+        return {
+            "answer": "https://supplier.ariba.com",
+            "sources": [],
+        }
+
+    # 2. Obvious out-of-scope topics -> Return standard refusal immediately
+    out_of_scope_patterns = [
+        r"\b(recipe|cook|bake|weather|forecast|movie|song|joke|sport|football|cricket)\b",
+        r"\bwho (is|was) (president|prime minister|actor|singer)\b",
+        r"\bhow to (code|program|build a website|fix my car)\b",
+    ]
+    if any(re.search(p, q) for p in out_of_scope_patterns):
+        return {
+            "answer": "I apologize, but my assistance is limited to vendor onboarding and Ariba-related queries. Please let me know if you have a question regarding a supplier's registration guide, profile maintenance or policy.",
+            "sources": [],
+        }
+
+    return None
 
 
 def _calculate_cost(in_tokens: int, out_tokens: int) -> float:
@@ -64,8 +89,9 @@ def _calculate_cost(in_tokens: int, out_tokens: int) -> float:
 def _build_context(results: List[dict]) -> str:
     blocks = []
     for i, r in enumerate(results, 1):
+        content = r.get("parent_content") or r.get("page_content") or ""
         blocks.append(
-            f"[{i}] (source: {r['title']}, page {r['page_number']})\n{r['parent_content']}"
+            f"[{i}] (source: {r['title']}, page {r['page_number']})\n{content}"
         )
     return "\n\n".join(blocks)
 
@@ -246,10 +272,18 @@ def normalize_query(query: str) -> str:
 
 
 async def _prepare(query: str, session_id: Optional[str]):
-    """Shared front-half: embed -> cache check -> retrieval -> build LLM messages.
+    """Shared front-half: fast interceptor -> embed -> cache check -> retrieval -> build LLM messages.
 
     Returns ``(cached_info_or_None, results, messages, query_embedding)``.
     """
+    intercepted = _check_fast_rule_interceptor(query)
+    if intercepted:
+        return {
+            "response": intercepted["answer"],
+            "id": None,
+            "query_text": query,
+        }, [], None, []
+
     factory = get_session_factory()
     norm_query = normalize_query(query)
     query_embedding = embeddings.embed_text(norm_query)
@@ -294,7 +328,7 @@ async def _finalize(
     sources: Optional[List[dict]] = None,
 ) -> None:
     """Shared back-half: write cache (on miss), cost log, append history."""
-    if not cache_hit:
+    if not cache_hit and query_embedding:
         async with factory() as session:
             await CacheRepository(session).put(query, answer, query_embedding)
     await _log(factory, query, in_tokens, out_tokens, cost,
