@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     gemini_api_key: str = Field(default="", validation_alias="GEMINI_API_KEY")
 
     # ── AI Providers: endpoints / models ──────────────────────────
-    gemini_chat_model: str = Field(default="gemini-3.5-flash-lite", validation_alias="GEMINI_CHAT_MODEL")
+    gemini_chat_model: str = Field(default="gemini-2.5-flash-lite", validation_alias="GEMINI_CHAT_MODEL")
     gemini_embedding_model: str = Field(default="gemini-embedding-2", validation_alias="GEMINI_EMBEDDING_MODEL")
     gemini_embedding_dim: int = Field(default=1536, validation_alias="GEMINI_EMBEDDING_DIM")
 

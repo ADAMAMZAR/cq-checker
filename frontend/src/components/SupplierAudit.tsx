@@ -9,7 +9,9 @@ import {
   IconCheck,
   IconBuildingStore,
 } from "@tabler/icons-react";
-import { fetchAribaSuppliers, auditAribaSupplier } from "@/lib/api";
+// Commented out live Ariba imports:
+// import { fetchAribaSuppliers, auditAribaSupplier } from "@/lib/api";
+import { fetchSuppliers } from "@/lib/api";
 import type { SupplierEntry } from "@/types";
 
 interface SupplierAuditProps {
@@ -36,11 +38,13 @@ export default function SupplierAudit({ onNavigateToRegistry }: SupplierAuditPro
 
   const loadSuppliers = useCallback(async () => {
     try {
-      const supplierList = await fetchAribaSuppliers();
+      // Commented out live Ariba supplier search:
+      // const supplierList = await fetchAribaSuppliers();
+      const supplierList = await fetchSuppliers();
       supplierList.sort((a, b) => a.supplier_name.localeCompare(b.supplier_name));
       setSuppliers(supplierList);
     } catch {
-      setError("Could not load Ariba supplier list. Make sure the backend and Ariba credentials are set.");
+      setError("Could not load supplier list. Please check the backend connection.");
     }
   }, []);
 
@@ -105,13 +109,14 @@ export default function SupplierAudit({ onNavigateToRegistry }: SupplierAuditPro
       timersRef.current.push(setTimeout(() => setStage(i), i * 1800));
     });
 
-    if (selectedSupplier.sm_vendor_id) {
-      try {
-        await auditAribaSupplier(selectedSupplier.sm_vendor_id);
-      } catch (err: any) {
-        console.warn("Ariba live audit failed, proceeding with DB audit fallback:", err);
-      }
-    }
+    // Commented out live Ariba audit call:
+    // if (selectedSupplier.sm_vendor_id) {
+    //   try {
+    //     await auditAribaSupplier(selectedSupplier.sm_vendor_id);
+    //   } catch (err: any) {
+    //     console.warn("Ariba live audit failed, proceeding with DB audit fallback:", err);
+    //   }
+    // }
 
     timersRef.current.push(
       setTimeout(() => {

@@ -215,7 +215,7 @@ def _call_gemini(messages: List[dict]) -> tuple[str, int, int]:
         config=types.GenerateContentConfig(
             system_instruction=system,
             temperature=0.2,
-            max_output_tokens=768,
+            max_output_tokens=1200,
         ),
     )
     content = response.text.strip()
