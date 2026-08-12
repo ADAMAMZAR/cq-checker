@@ -9,7 +9,6 @@ export interface AuditLog {
   complete_qa_data_dump: string;
   compiled_extracted_data: string;
   result: string;
-  expiration_date: string;
   suggested_comment: string;
   comparison_table?: any;
   comparison_input_tokens?: number;
@@ -25,6 +24,7 @@ export interface SupplierEntry {
   supplier_name: string;
   created_at?: string;
   date_added?: string;
+  sm_vendor_id?: string;
 }
 
 export interface SupplierAssets {
@@ -71,14 +71,68 @@ export interface FormFields {
 export interface CostBreakdownItem {
   supplier_name: string;
   document_count: number;
+  cost_usd?: number;
   cost_myr: number;
 }
 
+export interface ChatbotCostLog {
+  id: string;
+  query_text: string;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+  cost_myr: number;
+  cache_hit: boolean;
+  latency_ms: number;
+  cached_query_text?: string;
+  created_at: string;
+}
+
+export interface IngestionCostDoc {
+  id: string;
+  title: string;
+  file_url: string;
+  page_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+  cost_myr: number;
+  created_at: string;
+}
+
 export interface CostAnalyticsData {
+  master_cost_usd?: number;
+  master_cost_myr?: number;
   total_cost_myr: number;
   total_documents: number;
   average_cost_myr: number;
   breakdown: CostBreakdownItem[];
+  cq_checker?: {
+    total_cost_usd: number;
+    total_cost_myr: number;
+    total_documents: number;
+    average_cost_myr: number;
+    breakdown: CostBreakdownItem[];
+  };
+  chatbot?: {
+    total_cost_usd: number;
+    total_cost_myr: number;
+    total_queries: number;
+    cache_hits: number;
+    cache_hit_rate_pct: number;
+    input_tokens: number;
+    output_tokens: number;
+    logs: ChatbotCostLog[];
+  };
+  ingestion?: {
+    total_cost_usd: number;
+    total_cost_myr: number;
+    total_documents: number;
+    total_pages: number;
+    input_tokens: number;
+    output_tokens: number;
+    documents: IngestionCostDoc[];
+  };
 }
 
 export interface AuditRegistryEntry {
@@ -132,6 +186,7 @@ export interface ChatResponse {
   cost_usd: number;
   cache_hit: boolean;
   session_id?: string | null;
+  message_id?: string | null;
 }
 
 export interface ChatHistoryResponse {
@@ -145,7 +200,25 @@ export interface ChatStreamDone {
   cost_usd: number;
   cache_hit: boolean;
   session_id?: string | null;
+  message_id?: string | null;
   error?: string;
+}
+
+export type FeedbackRating = "satisfied" | "not_satisfied";
+
+export interface FeedbackRequest {
+  message_id: string;
+  session_id: string;
+  rating: FeedbackRating;
+  reason?: string;
+}
+
+export interface FeedbackResponse {
+  id: string;
+  message_id: string;
+  rating: FeedbackRating;
+  reason?: string | null;
+  created_at?: string | null;
 }
 
 // ── Document Ingestion ───────────────────────────────────────────────────────
@@ -156,8 +229,9 @@ export interface DocumentIngestResult {
   document_id?: string | null;
   title: string;
   status: IngestStatus;
-  parent_count: number;
-  child_count: number;
+  page_count?: number;
+  parent_count?: number;
+  child_count?: number;
   cost_usd: number;
   message: string;
 }
@@ -166,8 +240,9 @@ export interface DocumentSummary {
   id: string;
   title: string;
   file_url: string;
-  parent_count: number;
-  child_count: number;
+  page_count?: number;
+  parent_count?: number;
+  child_count?: number;
   created_at?: string | null;
 }
 
@@ -180,7 +255,6 @@ export interface CertificateVerifyResult {
   extracted_data: Record<string, unknown>;
   reasoning_trace: string;
   confidence: number;
-  judge_source: string;
   rule_result?: Record<string, unknown> | null;
   record_id?: string | null;
 }
@@ -190,9 +264,8 @@ export interface SupplierAuditResponse {
   file_url: string;
   extracted_data: Record<string, unknown>;
   status: CertificateStatus;
-  judge_reasoning?: string | null;
+  reasoning_trace?: string | null;
   confidence?: number | null;
-  judge_source?: string | null;
   created_at?: string | null;
 }
 
@@ -210,6 +283,7 @@ export interface DbTableData {
   total: number;
   limit: number;
   offset: number;
+  primary_keys?: string[];
 }
 
 // ── Schema Viewer (read-only ERD-style visualisation) ─────────────────────

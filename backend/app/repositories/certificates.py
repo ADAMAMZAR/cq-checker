@@ -6,7 +6,8 @@ from uuid import UUID
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.tables import CertificateVerification
+from sqlalchemy.orm import joinedload
+from app.models.tables import CertificateVerification, ObjectStorage
 
 
 class CertificateRepository:
@@ -15,18 +16,18 @@ class CertificateRepository:
 
     async def create(
         self,
-        file_url: str,
         extracted_data: dict,
         status: str,
-        judge_reasoning: Optional[str] = None,
+        reasoning_trace: Optional[str] = None,
+        object_id: Optional[UUID] = None,
+        file_url: Optional[str] = None,
         file_hash: Optional[str] = None,
     ) -> CertificateVerification:
         record = CertificateVerification(
-            file_url=file_url,
-            file_hash=file_hash,
             extracted_data=extracted_data,
             status=status,
-            judge_reasoning=judge_reasoning,
+            reasoning_trace=reasoning_trace,
+            object_id=object_id,
         )
         self.session.add(record)
         await self.session.commit()
@@ -35,7 +36,9 @@ class CertificateRepository:
 
     async def get_by_id(self, record_id: UUID) -> Optional[CertificateVerification]:
         result = await self.session.execute(
-            select(CertificateVerification).where(CertificateVerification.id == record_id)
+            select(CertificateVerification)
+            .options(joinedload(CertificateVerification.object_storage))
+            .where(CertificateVerification.id == record_id)
         )
         return result.scalar_one_or_none()
 
@@ -43,7 +46,9 @@ class CertificateRepository:
         """Return the most recent verification for a file SHA-256 hash (if any)."""
         result = await self.session.execute(
             select(CertificateVerification)
-            .where(CertificateVerification.file_hash == file_hash)
+            .join(ObjectStorage, CertificateVerification.object_id == ObjectStorage.id)
+            .options(joinedload(CertificateVerification.object_storage))
+            .where(ObjectStorage.checksum == file_hash)
             .order_by(CertificateVerification.created_at.desc())
             .limit(1)
         )
@@ -52,6 +57,7 @@ class CertificateRepository:
     async def list_all(self, limit: int = 50, offset: int = 0) -> List[CertificateVerification]:
         result = await self.session.execute(
             select(CertificateVerification)
+            .options(joinedload(CertificateVerification.object_storage))
             .order_by(CertificateVerification.created_at.desc())
             .limit(limit)
             .offset(offset)

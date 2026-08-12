@@ -9,8 +9,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 # Import all models so Alembic can detect them for autogenerate
 from app.models.tables import (  # noqa: F401
     Document,
-    ParentChunk,
-    ChildChunk,
+    DocumentPage,
     CertificateVerification,
     QueryCache,
     User,

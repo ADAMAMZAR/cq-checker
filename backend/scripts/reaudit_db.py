@@ -143,14 +143,41 @@ async def reaudit_run(supplier_name: str, docs: List[DocumentEvidence],
     return result
 
 
-def print_result(result: dict, index: int, total: int):
+def print_result(result: dict, index: int, total: int, verbose: bool = False):
     print(f"\n[{index}/{total}] {result['supplier']}")
     print(f"  Region:   {result['region']}")
     print(f"  Verdict:  {result['verdict']}")
     print(f"  Docs:     {result['document_count']}")
     if "updated_ids" in result:
         print(f"  Updated:  {', '.join(result['updated_ids'])}")
-    print(f"  Comment:  {result['suggested_comment'][:200]}...")
+    print(f"  Comment:\n    {result['suggested_comment']}")
+
+    if verbose and "comparison_table" in result:
+        comp = result["comparison_table"]
+        print("\n  --- Comparison Table Breakdown ---")
+        for t in comp.get("tables", []):
+            q_label = t.get("question_label", "Unknown Question")
+            file_name = t.get("attached_file", "Unknown File")
+            cert_idx = t.get("certificate_index")
+            cert_str = f" [Cert #{cert_idx}]" if cert_idx else ""
+            cat = t.get("category", "")
+            intercept = t.get("intercept_type")
+            print(f"\n    📁 Question: {q_label}")
+            print(f"       File:     {file_name}{cert_str}")
+            print(f"       Category: {cat}")
+            if intercept:
+                print(f"       ⚠️ Intercept: {intercept}")
+            rows = t.get("comparison_rows", [])
+            if rows:
+                print("       Rows:")
+                for r in rows:
+                    fn = r.get("field_name") or r.get("field", "Field")
+                    ev = r.get("value_evidence") or r.get("evidence", "N/A")
+                    qa = r.get("value_in_ariba") or r.get("qa", "N/A")
+                    res = r.get("result") or r.get("status", "N/A")
+                    status = "✅" if res in ("Match", "MATCH", "PERMANENT_MATCH", "VALID") else "❌"
+                    print(f"         {status} [{fn}]: Extracted='{ev}' | Expected='{qa}' ({res})")
+        print("  ----------------------------------")
 
 
 async def _main():
@@ -163,6 +190,8 @@ async def _main():
                         help="Re-audit a specific supplier name only")
     parser.add_argument("--dry-run", "-n", action="store_true",
                         help="Preview results without writing to database")
+    parser.add_argument("--verbose", "-v", action="store_true",
+                        help="Print detailed field-by-field comparison rows and cert indices")
     parser.add_argument("--region", "-r", default=None,
                         choices=["australia", "malaysia"],
                         help="Force region for all records (overrides auto-detection)")
@@ -233,7 +262,7 @@ async def _main():
         result = await reaudit_run(supplier_name, docs, workspace_title=wt,
                                    dry_run=args.dry_run, force_region=args.region)
         if result:
-            print_result(result, idx, total)
+            print_result(result, idx, total, verbose=args.verbose)
             succeeded += 1
         else:
             print(f"[{idx}/{total}] {supplier_name} — SKIPPED (no usable documents)")

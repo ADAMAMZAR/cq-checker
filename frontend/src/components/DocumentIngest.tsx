@@ -9,16 +9,16 @@ import {
   IconRepeat,
   IconExternalLink,
 } from "@tabler/icons-react";
-import { uploadDocument, fetchDocuments, buildFileUrl } from "@/lib/api";
+import { uploadDocument, bulkUploadDocuments, fetchDocuments, buildFileUrl } from "@/lib/api";
 import type { DocumentIngestResult, DocumentSummary } from "@/types";
 
 const STAGES = ["Uploading", "Parsing", "Chunking", "Embedding"];
 
 export default function DocumentIngest() {
-  const [file, setFile] = useState<File | null>(null);
-  const [title, setTitle] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
+  const [overwrite, setOverwrite] = useState(true);
   const [stage, setStage] = useState(-1);
-  const [result, setResult] = useState<DocumentIngestResult | null>(null);
+  const [results, setResults] = useState<DocumentIngestResult[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [documents, setDocuments] = useState<DocumentSummary[]>([]);
   const [loadingDocs, setLoadingDocs] = useState(false);
@@ -50,31 +50,37 @@ export default function DocumentIngest() {
     []
   );
 
+  const handleFilesSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      setFiles(Array.from(e.target.files));
+      setResults([]);
+      setError(null);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!file) return;
+    if (!files.length) return;
     setError(null);
-    setResult(null);
+    setResults([]);
     setStage(0);
     timerRef.current = setInterval(() => {
       setStage((s) => Math.min(s + 1, STAGES.length - 1));
-    }, 3500);
+    }, 4500);
 
     try {
-      const res = await uploadDocument(file, title.trim() || undefined);
-      setResult(res);
-      if (res.status !== "failed") await loadDocuments();
+      const resList = await bulkUploadDocuments(files, overwrite);
+      setResults(resList);
+      await loadDocuments();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed.");
+      setError(err instanceof Error ? err.message : "Bulk upload failed.");
     } finally {
       if (timerRef.current) clearInterval(timerRef.current);
       timerRef.current = null;
       setStage(STAGES.length);
-      setFile(null);
-      if (file) {
-        const input = document.getElementById("ingest-file-input") as HTMLInputElement | null;
-        if (input) input.value = "";
-      }
+      setFiles([]);
+      const input = document.getElementById("ingest-file-input") as HTMLInputElement | null;
+      if (input) input.value = "";
     }
   };
 
@@ -83,7 +89,13 @@ export default function DocumentIngest() {
       case "created":
         return (
           <span className="px-2.5 py-1 rounded-full text-[10px] font-bold border bg-[var(--accent-success-soft)] text-[var(--accent-success-text)] border-[var(--accent-success-border)] inline-flex items-center gap-1">
-            <IconCheck className="w-3 h-3" /> INGESTED
+            <IconCheck className="w-3 h-3" /> CREATED
+          </span>
+        );
+      case "updated":
+        return (
+          <span className="px-2.5 py-1 rounded-full text-[10px] font-bold border bg-blue-500/15 text-blue-400 border-blue-500/30 inline-flex items-center gap-1">
+            <IconCheck className="w-3 h-3" /> OVERWRITTEN / UPDATED
           </span>
         );
       case "skipped":
@@ -112,8 +124,8 @@ export default function DocumentIngest() {
             <IconUpload className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-lg font-bold text-[var(--heading-color)] tracking-tight">Ingest a Manual</h2>
-            <p className="text-xs text-[var(--text-tertiary)]">Upload a PDF — parsed, chunked, and embedded for RAG retrieval.</p>
+            <h2 className="text-lg font-bold text-[var(--heading-color)] tracking-tight">Bulk Ingest Manuals</h2>
+            <p className="text-xs text-[var(--text-tertiary)]">Upload single or multiple PDF or Markdown manuals — Vision OCR for PDFs, smart Q&A chunking for Markdown, embedded for RAG retrieval.</p>
           </div>
         </div>
 
@@ -121,40 +133,48 @@ export default function DocumentIngest() {
           <label
             htmlFor="ingest-file-input"
             className={`flex flex-col items-center justify-center gap-3 p-8 rounded-xl border-2 border-dashed transition-all cursor-pointer ${
-              file ? "border-[var(--accent-success-border)] bg-[var(--accent-success-soft)]" : "border-[var(--border-visible)] bg-[var(--bg-surface)] hover:border-[var(--accent-primary-border-focus)]"
+              files.length > 0 ? "border-[var(--accent-success-border)] bg-[var(--accent-success-soft)]" : "border-[var(--border-visible)] bg-[var(--bg-surface)] hover:border-[var(--accent-primary-border-focus)]"
             }`}
           >
-            <IconFileText className={`w-8 h-8 ${file ? "text-[var(--accent-success-text)]" : "text-[var(--text-tertiary)]"}`} />
-            {file ? (
-              <span className="text-sm font-semibold text-[var(--heading-color)]">{file.name}</span>
+            <IconFileText className={`w-8 h-8 ${files.length > 0 ? "text-[var(--accent-success-text)]" : "text-[var(--text-tertiary)]"}`} />
+            {files.length > 0 ? (
+              <span className="text-sm font-semibold text-[var(--heading-color)]">
+                Selected {files.length} document(s): {files.map(f => f.name).join(", ")}
+              </span>
             ) : (
-              <span className="text-sm text-[var(--text-secondary)]">Click to select a <span className="font-mono text-[var(--accent-primary-text)]">.pdf</span> manual</span>
+              <span className="text-sm text-[var(--text-secondary)]">Click to select single or multiple <span className="font-mono text-[var(--accent-primary-text)]">.pdf</span> or <span className="font-mono text-[var(--accent-primary-text)]">.md</span> manuals</span>
             )}
             <input
               id="ingest-file-input"
               type="file"
-              accept="application/pdf"
+              accept=".pdf,.md,.markdown,.txt,application/pdf,text/markdown,text/plain"
+              multiple
               className="hidden"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              onChange={handleFilesSelected}
             />
           </label>
 
-          <input
-            type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="Optional title (defaults to filename)"
-            aria-label="Document title"
-            className="w-full px-4 py-2.5 rounded-xl bg-[var(--bg-input)] border border-[var(--border-subtle)] text-sm text-[var(--heading-color)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[var(--accent-primary-border-focus)]"
-          />
+          {/* Overwrite Checkbox */}
+          <div className="flex items-center gap-2 pt-1 px-1">
+            <input
+              id="overwrite-check"
+              type="checkbox"
+              checked={overwrite}
+              onChange={(e) => setOverwrite(e.target.checked)}
+              className="accent-[var(--accent-primary)] w-4 h-4 cursor-pointer"
+            />
+            <label htmlFor="overwrite-check" className="text-xs font-semibold text-[var(--heading-color)] cursor-pointer">
+              Overwrite existing documents if filename or title already exists in database
+            </label>
+          </div>
 
           <button
             type="submit"
-            disabled={!file || stage >= 0 && stage < STAGES.length}
+            disabled={files.length === 0 || (stage >= 0 && stage < STAGES.length)}
             className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-[var(--accent-primary)] hover:bg-[var(--accent-primary-hover)] text-white font-bold text-sm transition-all shadow-md shadow-[var(--accent-primary-shadow)] active:scale-[0.98] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <IconUpload className="w-4 h-4" />
-            {stage >= 0 && stage < STAGES.length ? "Ingesting…" : "Ingest Document"}
+            {stage >= 0 && stage < STAGES.length ? `Ingesting ${files.length} document(s)…` : `Ingest ${files.length > 0 ? `${files.length} Document(s)` : "Documents"}`}
           </button>
         </form>
 
@@ -180,33 +200,25 @@ export default function DocumentIngest() {
               ))}
             </div>
             <p className="text-center text-[10px] text-[var(--text-tertiary)] mt-2 animate-pulse">
-              Running {STAGES[stage].toLowerCase()} pipeline — large manuals take ~20–40s…
+              Running bulk Vision OCR pipeline ({STAGES[stage].toLowerCase()}) — processing documents…
             </p>
           </div>
         )}
 
-        {/* Result */}
-        {stage === STAGES.length && result && (
-          <div className="mt-6 rounded-xl border border-[var(--border-visible)] bg-[var(--bg-surface)] p-5 space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2 min-w-0">
-                <IconFileText className="w-4 h-4 text-[var(--text-tertiary)] shrink-0" />
-                <span className="text-sm font-semibold text-[var(--heading-color)] truncate">{result.title}</span>
+        {/* Results List */}
+        {stage === STAGES.length && results.length > 0 && (
+          <div className="mt-6 flex flex-col gap-3">
+            <h4 className="text-xs font-bold text-[var(--heading-color)]">Bulk Ingestion Results ({results.length}):</h4>
+            {results.map((res, i) => (
+              <div key={i} className="rounded-xl border border-[var(--border-visible)] bg-[var(--bg-surface)] p-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  <IconFileText className="w-4 h-4 text-[var(--text-tertiary)] shrink-0" />
+                  <span className="text-xs font-semibold text-[var(--heading-color)] truncate">{res.title}</span>
+                  <span className="font-mono text-[10px] text-[var(--text-tertiary)]">({res.page_count ?? res.parent_count ?? 0} pages · ${res.cost_usd.toFixed(6)})</span>
+                </div>
+                {statusBadge(res.status)}
               </div>
-              {statusBadge(result.status)}
-            </div>
-            {result.status === "failed" ? (
-              <p className="text-xs text-[var(--accent-danger-text)]">{result.message || "Ingestion failed."}</p>
-            ) : (
-              <div className="grid grid-cols-3 gap-3">
-                <Stat label="Parent chunks" value={String(result.parent_count)} />
-                <Stat label="Child chunks" value={String(result.child_count)} />
-                <Stat label="Cost" value={`$${result.cost_usd.toFixed(6)}`} />
-              </div>
-            )}
-            {result.message && result.status !== "failed" && (
-              <p className="text-xs text-[var(--text-tertiary)]">{result.message}</p>
-            )}
+            ))}
           </div>
         )}
 
@@ -232,15 +244,16 @@ export default function DocumentIngest() {
             <table className="min-w-full text-left text-xs font-sans text-[var(--text-primary)]">
               <thead>
                 <tr className="border-b border-[var(--border-subtle)] font-bold text-[var(--text-tertiary)]">
+                  <th className="py-3 px-4 text-center uppercase tracking-wider text-[10px] w-12">#</th>
                   <th className="py-3 px-4 uppercase tracking-wider text-[10px]">Title</th>
-                  <th className="py-3 px-4 text-center uppercase tracking-wider text-[10px]">Parents</th>
-                  <th className="py-3 px-4 text-center uppercase tracking-wider text-[10px]">Children</th>
+                  <th className="py-3 px-4 text-center uppercase tracking-wider text-[10px]">Pages</th>
                   <th className="py-3 px-4 text-right uppercase tracking-wider text-[10px]">Added</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--border-subtle)]">
-                {documents.map((doc) => (
+                {documents.map((doc, idx) => (
                   <tr key={doc.id} className="hover:bg-[var(--bg-surface)] transition-colors">
+                    <td className="py-3 px-4 text-center font-mono font-bold text-[var(--text-tertiary)] tabular-nums">{idx + 1}</td>
                     <td className="py-3 px-4">
                       <a
                         href={buildFileUrl(doc.file_url)}
@@ -253,8 +266,7 @@ export default function DocumentIngest() {
                         <IconExternalLink className="w-3 h-3 text-[var(--text-tertiary)]" />
                       </a>
                     </td>
-                    <td className="py-3 px-4 text-center font-mono tabular-nums">{doc.parent_count}</td>
-                    <td className="py-3 px-4 text-center font-mono tabular-nums">{doc.child_count}</td>
+                    <td className="py-3 px-4 text-center font-mono tabular-nums">{doc.page_count ?? doc.parent_count ?? 0}</td>
                     <td className="py-3 px-4 text-right text-[var(--text-tertiary)]">
                       {doc.created_at ? new Date(doc.created_at).toLocaleString() : "—"}
                     </td>

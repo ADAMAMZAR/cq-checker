@@ -112,7 +112,6 @@ async def get_next_audit_id() -> str:
 # ── Audit logs ───────────────────────────────────────────────────────────────
 
 def _to_audit_log_entry(r: AuditLog) -> AuditLogEntry:
-    expiration_date = "N/A"
     cert_type = "Relational evidence"
     compiled = r.compiled_extracted_data or ""
     try:
@@ -120,24 +119,23 @@ def _to_audit_log_entry(r: AuditLog) -> AuditLogEntry:
         extracted_docs = json.loads(compiled)
         if isinstance(extracted_docs, list) and extracted_docs:
             first = extracted_docs[0].get("extracted_data", {})
-            expiration_date = first.get("expirationDate", "N/A")
             cert_type = first.get("certificateType", "Relational evidence")
     except Exception:
         pass
     ts_val = getattr(r, "created_at", None) or getattr(r, "timestamp", None)
     disp_ts = _display_timestamp(ts_val)
+    sup_name = r.supplier.supplier_name if (hasattr(r, "supplier") and r.supplier) else r.supplier_name
     return AuditLogEntry(
         audit_id=r.audit_id,
         supplier_id=r.supplier_id,
         created_at=disp_ts,
         timestamp=disp_ts,
-        supplier_name=r.supplier_name,
+        supplier_name=sup_name,
         workspace_title=r.workspace_title or "Ariba Workspace",
         cert_type=cert_type,
         complete_qa_data_dump=r.complete_qa_data_dump or "[]",
         compiled_extracted_data=compiled,
         result=r.result or "Mismatch",
-        expiration_date=expiration_date,
         suggested_comment=r.suggested_comment or "",
         screenshot_url=r.screenshot_url,
         comparison_input_tokens=r.comparison_input_tokens or 0,
@@ -172,10 +170,11 @@ async def get_audit_registry() -> List[dict]:
     for r in logs:
         ts_val = getattr(r, "created_at", None) or getattr(r, "timestamp", None)
         disp_ts = _display_timestamp(ts_val)
+        sup_name = r.supplier.supplier_name if (hasattr(r, "supplier") and r.supplier) else r.supplier_name
         result.append({
             "audit_id": r.audit_id,
             "supplier_id": r.supplier_id,
-            "supplier_name": r.supplier_name,
+            "supplier_name": sup_name,
             "result": r.result or "Mismatch",
             "created_at": disp_ts,
             "timestamp": disp_ts,
@@ -213,12 +212,13 @@ async def update_audit_result(
 def _to_document_evidence(r: NeonDocumentEvidence) -> DocumentEvidence:
     ts_val = getattr(r, "created_at", None) or getattr(r, "timestamp", None)
     disp_ts = _display_timestamp(ts_val)
+    sup_name = r.supplier.supplier_name if (hasattr(r, "supplier") and r.supplier) else r.supplier_name
     return DocumentEvidence(
         audit_id=r.audit_id,
         supplier_id=r.supplier_id,
         created_at=disp_ts,
         timestamp=disp_ts,
-        supplier_name=r.supplier_name,
+        supplier_name=sup_name,
         filename=r.filename,
         ariba_question_label=r.ariba_question_label,
         ariba_qa_answers=r.ariba_qa_answers or "[]",
@@ -252,28 +252,39 @@ async def get_document_evidence_logs(
 async def update_document_evidence(audit_id: str, filename: str, updated_metadata: dict) -> bool:
     factory = get_session_factory()
     async with factory() as session:
-        repo = DocumentEvidenceRepository(session)
-        record = await repo.get_by_filename(audit_id, filename)
-        if not record:
+        result = await session.execute(
+            select(NeonDocumentEvidence).where(
+                NeonDocumentEvidence.audit_id == audit_id,
+                NeonDocumentEvidence.filename == filename,
+            )
+        )
+        records = result.scalars().all()
+        if not records:
             return False
         import json
-        record.gemini_extracted_metadata = json.dumps(updated_metadata)
-        owner = updated_metadata.get("certificateOwnerName")
-        if owner:
-            record.gemini_extracted_supplier_name = owner
+        certs = updated_metadata.get("certificates") if isinstance(updated_metadata, dict) else None
+        first = certs[0] if isinstance(certs, list) and certs else updated_metadata
+        owner = first.get("certificateOwnerName") if isinstance(first, dict) else None
+        for record in records:
+            record.gemini_extracted_metadata = json.dumps(updated_metadata)
+            if owner:
+                record.gemini_extracted_supplier_name = owner
         await session.commit()
     return True
 
 
-async def find_metadata_by_hash(file_hash: str, ariba_question_label: str) -> Optional[Dict[str, Any]]:
+async def find_metadata_by_hash(file_hash: str) -> Optional[Dict[str, Any]]:
+    """Return cached extraction metadata for identical file bytes (any question).
+
+    Extraction is question-agnostic (the extractor returns every certificate in
+    the file), so the same bytes can be reused across every question that
+    references the file — each question is then audited separately.
+    """
     factory = get_session_factory()
     async with factory() as session:
         result = await session.execute(
             select(NeonDocumentEvidence)
-            .where(
-                NeonDocumentEvidence.file_hash == file_hash,
-                NeonDocumentEvidence.ariba_question_label == ariba_question_label,
-            )
+            .where(NeonDocumentEvidence.file_hash == file_hash)
             .limit(1)
         )
         record = result.scalars().first()
@@ -307,25 +318,126 @@ async def get_screenshot_urls_by_supplier_id(supplier_id: int) -> List[str]:
 async def get_cost_analytics() -> dict:
     factory = get_session_factory()
     async with factory() as session:
-        repo = DocumentEvidenceRepository(session)
-        records = await repo.list_all(limit=100000)
-    total_cost_myr = 0.0
-    supplier_map: dict = {}
-    for r in records:
-        name = r.supplier_name or "Unknown"
-        cost_myr = float(r.cost_usd or 0.0) * MYR_RATE
-        total_cost_myr += cost_myr
-        if name not in supplier_map:
-            supplier_map[name] = {"supplier_name": name, "document_count": 0, "cost_myr": 0.0}
-        supplier_map[name]["document_count"] += 1
-        supplier_map[name]["cost_myr"] += cost_myr
-    breakdown = sorted(supplier_map.values(), key=lambda s: s["cost_myr"], reverse=True)
-    total_documents = len(records)
+        # 1. CQ Checker (Supplier Audits)
+        ev_repo = DocumentEvidenceRepository(session)
+        evidence_records = await ev_repo.list_all(limit=100000)
+
+        cq_total_cost_usd = 0.0
+        supplier_map: dict = {}
+        for r in evidence_records:
+            name = r.supplier_name or "Unknown"
+            c_usd = float(r.cost_usd or 0.0)
+            cq_total_cost_usd += c_usd
+            if name not in supplier_map:
+                supplier_map[name] = {"supplier_name": name, "document_count": 0, "cost_usd": 0.0, "cost_myr": 0.0}
+            supplier_map[name]["document_count"] += 1
+            supplier_map[name]["cost_usd"] += c_usd
+            supplier_map[name]["cost_myr"] += c_usd * MYR_RATE
+
+        cq_breakdown = sorted(supplier_map.values(), key=lambda s: s["cost_usd"], reverse=True)
+        cq_total_documents = len(evidence_records)
+        cq_total_cost_myr = cq_total_cost_usd * MYR_RATE
+
+        # 2. Chatbot RAG
+        from app.models.tables import ChatLog, Document, DocumentPage
+        from sqlalchemy import select, func
+
+        chat_res = await session.execute(
+            select(ChatLog).order_by(ChatLog.created_at.desc()).limit(1000)
+        )
+        chat_records = list(chat_res.scalars().all())
+
+        chat_total_cost_usd = sum(float(c.cost_usd or 0.0) for c in chat_records)
+        chat_total_cost_myr = chat_total_cost_usd * MYR_RATE
+        chat_in_tokens = sum(c.input_tokens or 0 for c in chat_records)
+        chat_out_tokens = sum(c.output_tokens or 0 for c in chat_records)
+        chat_cache_hits = sum(1 for c in chat_records if c.cache_hit == 1)
+
+        chat_logs_list = [
+            {
+                "id": str(c.id),
+                "query_text": c.query_text,
+                "input_tokens": c.input_tokens or 0,
+                "output_tokens": c.output_tokens or 0,
+                "cost_usd": float(c.cost_usd or 0.0),
+                "cost_myr": round(float(c.cost_usd or 0.0) * MYR_RATE, 4),
+                "cache_hit": c.cache_hit == 1,
+                "latency_ms": c.latency_ms or 0,
+                "cached_query_text": c.cached_query_text,
+                "created_at": _display_timestamp(c.created_at),
+            }
+            for c in chat_records
+        ]
+
+        # 3. Document Ingestion
+        from sqlalchemy.orm import joinedload
+        doc_res = await session.execute(
+            select(Document).options(joinedload(Document.object_storage)).order_by(Document.created_at.desc()).limit(1000)
+        )
+        doc_records = list(doc_res.scalars().all())
+
+        ingest_total_cost_usd = sum(float(d.cost_usd or 0.0) for d in doc_records)
+        ingest_total_cost_myr = ingest_total_cost_usd * MYR_RATE
+        ingest_in_tokens = sum(d.input_tokens or 0 for d in doc_records)
+        ingest_out_tokens = sum(d.output_tokens or 0 for d in doc_records)
+
+        pages_res = await session.execute(select(func.count(DocumentPage.id)))
+        ingest_total_pages = pages_res.scalar() or 0
+
+        doc_list = []
+        for d in doc_records:
+            p_res = await session.execute(
+                select(func.count(DocumentPage.id)).where(DocumentPage.document_id == d.id)
+            )
+            p_cnt = p_res.scalar() or 0
+            doc_list.append({
+                "id": str(d.id),
+                "title": d.title,
+                "file_url": d.file_url,
+                "page_count": p_cnt,
+                "input_tokens": d.input_tokens or 0,
+                "output_tokens": d.output_tokens or 0,
+                "cost_usd": float(d.cost_usd or 0.0),
+                "cost_myr": round(float(d.cost_usd or 0.0) * MYR_RATE, 4),
+                "created_at": _display_timestamp(d.created_at),
+            })
+
+    master_cost_usd = cq_total_cost_usd + chat_total_cost_usd + ingest_total_cost_usd
+    master_cost_myr = master_cost_usd * MYR_RATE
+
     return {
-        "total_cost_myr": round(total_cost_myr, 4),
-        "total_documents": total_documents,
-        "average_cost_myr": round(total_cost_myr / total_documents, 4) if total_documents else 0.0,
-        "breakdown": [{**s, "cost_myr": round(s["cost_myr"], 4)} for s in breakdown],
+        "master_cost_usd": round(master_cost_usd, 6),
+        "master_cost_myr": round(master_cost_myr, 4),
+        "total_cost_myr": round(cq_total_cost_myr, 4),
+        "total_documents": cq_total_documents,
+        "average_cost_myr": round(cq_total_cost_myr / cq_total_documents, 4) if cq_total_documents else 0.0,
+        "breakdown": [{**s, "cost_usd": round(s["cost_usd"], 6), "cost_myr": round(s["cost_myr"], 4)} for s in cq_breakdown],
+        "cq_checker": {
+            "total_cost_usd": round(cq_total_cost_usd, 6),
+            "total_cost_myr": round(cq_total_cost_myr, 4),
+            "total_documents": cq_total_documents,
+            "average_cost_myr": round(cq_total_cost_myr / cq_total_documents, 4) if cq_total_documents else 0.0,
+            "breakdown": [{**s, "cost_usd": round(s["cost_usd"], 6), "cost_myr": round(s["cost_myr"], 4)} for s in cq_breakdown],
+        },
+        "chatbot": {
+            "total_cost_usd": round(chat_total_cost_usd, 6),
+            "total_cost_myr": round(chat_total_cost_myr, 4),
+            "total_queries": len(chat_records),
+            "cache_hits": chat_cache_hits,
+            "cache_hit_rate_pct": round((chat_cache_hits / len(chat_records) * 100), 1) if chat_records else 0.0,
+            "input_tokens": chat_in_tokens,
+            "output_tokens": chat_out_tokens,
+            "logs": chat_logs_list,
+        },
+        "ingestion": {
+            "total_cost_usd": round(ingest_total_cost_usd, 6),
+            "total_cost_myr": round(ingest_total_cost_myr, 4),
+            "total_documents": len(doc_records),
+            "total_pages": ingest_total_pages,
+            "input_tokens": ingest_in_tokens,
+            "output_tokens": ingest_out_tokens,
+            "documents": doc_list,
+        },
     }
 
 
@@ -379,7 +491,6 @@ async def log_audit_run(
                     existing_log.complete_qa_data_dump = audit_log.complete_qa_data_dump or "[]"
                     existing_log.compiled_extracted_data = audit_log.compiled_extracted_data or ""
                     existing_log.result = audit_log.result or "Mismatch"
-                    existing_log.expiration_date = audit_log.expiration_date or "N/A"
                     existing_log.suggested_comment = audit_log.suggested_comment or ""
                     existing_log.screenshot_url = audit_log.screenshot_url
                     existing_log.comparison_input_tokens = audit_log.comparison_input_tokens or 0
@@ -399,7 +510,6 @@ async def log_audit_run(
                         complete_qa_data_dump=audit_log.complete_qa_data_dump or "[]",
                         compiled_extracted_data=audit_log.compiled_extracted_data or "",
                         result=audit_log.result or "Mismatch",
-                        expiration_date=audit_log.expiration_date or "N/A",
                         suggested_comment=audit_log.suggested_comment or "",
                         screenshot_url=audit_log.screenshot_url,
                         comparison_input_tokens=audit_log.comparison_input_tokens or 0,
@@ -422,9 +532,18 @@ async def log_audit_run(
                 ))
 
             ev_repo = DocumentEvidenceRepository(session)
+            from app.repositories.object_storage import ObjectStorageRepository
+            obj_repo = ObjectStorageRepository(session)
+
             for doc in doc_evidences:
                 import json
                 doc_ts = _to_db_timestamp(doc.created_at or doc.timestamp)
+                object_id = None
+                if doc.file_url:
+                    obj_rec = await obj_repo.get_by_url(doc.file_url)
+                    if obj_rec:
+                        object_id = obj_rec.id
+
                 await ev_repo.create(NeonDocumentEvidence(
                     audit_id=doc.audit_id,
                     supplier_id=doc.supplier_id,
@@ -439,8 +558,7 @@ async def log_audit_run(
                     input_tokens=doc.input_tokens or 0,
                     output_tokens=doc.output_tokens or 0,
                     cost_usd=float(doc.cost_usd or 0.0),
-                    file_hash=doc.file_hash,
-                    file_url=doc.file_url,
+                    object_id=object_id,
                 ))
         return audit_id
     except Exception as e:

@@ -431,3 +431,103 @@ def test_comment_field_revision_template():
     verdict, comment, table = auditor.run_full_audit("ACME Corp", [ctx], [extraction])
     assert "Please revise the Certificate Number" in comment
     assert "NEW-999" in comment
+
+
+# ---------------------------------------------------------------------------
+# Multi-certificate: nested {"certificates": [...]} expands per certificate,
+# selecting only the cert(s) matching the question's expected type
+# ---------------------------------------------------------------------------
+
+def _merged_certs():
+    return {
+        "certificates": [
+            {
+                "certificateType": "ISO 45001", "certificateOwnerName": "ACME Corp",
+                "issuerName": "BSI", "certificateNumber": "CERT-001",
+                "expirationDate": "31/12/2030", "effectiveDate": "01/01/2025",
+                "certificateLocation": "Selangor, Malaysia", "yearOfPublication": "2025",
+            },
+            {
+                "certificateType": "Board of Engineers Malaysia (BEM)",
+                "certificateOwnerName": "Ir. Ahmad Bin Ismail",
+                "issuerName": "Lembaga Jurutera Malaysia", "certificateNumber": "BEM-999",
+                "expirationDate": "31/12/2030", "effectiveDate": "01/01/2025",
+                "certificateLocation": "Selangor, Malaysia", "yearOfPublication": "2025",
+            },
+        ]
+    }
+
+
+def _merged_qa(**overrides):
+    base = {
+        "Certificate Type": None,
+        "Issuer": None,
+        "Certificate Number": None,
+        "Certificate Location": "Selangor, Malaysia",
+        "Effective Date": "01/01/2025",
+        "Expiration Date": "31/12/2030",
+        "Year of publication": "2025",
+    }
+    base.update(overrides)
+    return json.dumps([
+        {"label": k, "value": v} for k, v in base.items() if v is not None
+    ])
+
+
+def test_run_full_audit_nested_picks_matching_cert():
+    # Question expects ISO 45001 -> only the ISO cert is audited; the unrelated
+    # BEM cert in the same merged file must not fail this question.
+    ctx = {"ariba_question_label": "1.1 ISO", "ariba_qa_answers": _merged_qa(**{
+        "Certificate Type": "ISO 45001", "Issuer": "BSI", "Certificate Number": "CERT-001",
+    }), "filename": "merged.pdf"}
+    verdict, comment, table = auditor.run_full_audit("ACME Corp", [ctx], [_merged_certs()])
+    assert verdict == "Match"
+    assert comment == "All match."
+    assert len(table["tables"]) == 1
+    assert table["tables"][0]["certificate_index"] == 1
+    assert table["tables"][0]["attached_file"] == "merged.pdf"
+
+
+def test_run_full_audit_nested_picks_matching_cert_bem():
+    ctx = {"ariba_question_label": "1.2 BEM", "ariba_qa_answers": _merged_qa(**{
+        "Certificate Type": "Board of Engineers Malaysia (BEM)",
+        "Issuer": "Lembaga Jurutera Malaysia", "Certificate Number": "BEM-999",
+    }), "filename": "merged.pdf"}
+    verdict, comment, table = auditor.run_full_audit(
+        "ACME Corp", [ctx], [_merged_certs()], qa_data_title="Professional Services / Malaysia"
+    )
+    assert verdict == "Match"
+    assert len(table["tables"]) == 1
+    assert table["tables"][0]["certificate_index"] == 1
+
+
+def test_run_full_audit_nested_no_match_falls_back_to_all():
+    # Question expects a type absent from the file -> audit all certs (worst-wins).
+    ctx = {"ariba_question_label": "1.3 TNB", "ariba_qa_answers": _merged_qa(**{
+        "Certificate Type": "TNB", "Issuer": "BSI", "Certificate Number": "CERT-001",
+    }), "filename": "merged.pdf"}
+    verdict, comment, table = auditor.run_full_audit("ACME Corp", [ctx], [_merged_certs()])
+    assert verdict == "Mismatch"
+    assert len(table["tables"]) == 2
+    assert table["tables"][0]["certificate_index"] == 1
+    assert table["tables"][1]["certificate_index"] == 2
+
+
+def test_run_full_audit_nested_single_certificate():
+    ctx = {"ariba_question_label": "1.1 ISO", "ariba_qa_answers": _merged_qa(**{
+        "Certificate Type": "ISO 45001", "Issuer": "BSI", "Certificate Number": "CERT-001",
+    }), "filename": "single.pdf"}
+    nested = {
+        "certificates": [{
+            "certificateType": "ISO 45001", "certificateOwnerName": "ACME Corp",
+            "issuerName": "BSI", "certificateNumber": "CERT-001",
+            "expirationDate": "31/12/2030", "effectiveDate": "01/01/2025",
+            "certificateLocation": "Selangor, Malaysia", "yearOfPublication": "2025",
+        }]
+    }
+    verdict, comment, table = auditor.run_full_audit("ACME Corp", [ctx], [nested])
+    # Single-cert nested output behaves exactly like the legacy flat dict.
+    assert verdict == "Match"
+    assert comment == "All match."
+    assert len(table["tables"]) == 1
+    assert "certificate_index" not in table["tables"][0]

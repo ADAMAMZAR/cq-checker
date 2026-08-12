@@ -61,16 +61,32 @@ async def db_session(test_engine, setup_test_db):
 class TestDocumentRepository:
     @pytest.mark.asyncio
     async def test_create_document(self, db_session):
+        obj_repo = ObjectStorageRepository(db_session)
+        obj = await obj_repo.create(file_url="https://example.com/test.pdf", checksum="a" * 64)
         repo = DocumentRepository(db_session)
-        doc = await repo.create(title="Test Manual", file_url="https://example.com/test.pdf")
+        doc = await repo.create(title="Test Manual", object_id=obj.id)
         assert doc.title == "Test Manual"
         assert doc.file_url == "https://example.com/test.pdf"
         assert doc.id is not None
 
     @pytest.mark.asyncio
+    async def test_create_document_with_object_id(self, db_session):
+        obj_repo = ObjectStorageRepository(db_session)
+        obj = await obj_repo.create(file_url="https://example.com/linked.pdf", checksum="b" * 64)
+
+        doc_repo = DocumentRepository(db_session)
+        doc = await doc_repo.create(
+            title="Linked Manual",
+            object_id=obj.id,
+        )
+        assert doc.object_id == obj.id
+
+    @pytest.mark.asyncio
     async def test_get_document_by_id(self, db_session):
+        obj_repo = ObjectStorageRepository(db_session)
+        obj = await obj_repo.create(file_url="https://example.com/lookup.pdf", checksum="c" * 64)
         repo = DocumentRepository(db_session)
-        doc = await repo.create(title="Lookup Test", file_url="https://example.com/lookup.pdf")
+        doc = await repo.create(title="Lookup Test", object_id=obj.id)
         found = await repo.get_by_id(doc.id)
         assert found is not None
         assert found.title == "Lookup Test"
@@ -83,61 +99,67 @@ class TestDocumentRepository:
 
     @pytest.mark.asyncio
     async def test_exists_by_url(self, db_session):
+        obj_repo = ObjectStorageRepository(db_session)
+        obj = await obj_repo.create(file_url="https://example.com/exists.pdf", checksum="d" * 64)
         repo = DocumentRepository(db_session)
-        await repo.create(title="Exists Test", file_url="https://example.com/exists.pdf")
+        await repo.create(title="Exists Test", object_id=obj.id)
         assert await repo.exists_by_url("https://example.com/exists.pdf") is True
         assert await repo.exists_by_url("https://example.com/nonexistent.pdf") is False
 
     @pytest.mark.asyncio
     async def test_list_documents(self, db_session):
+        obj_repo = ObjectStorageRepository(db_session)
+        o1 = await obj_repo.create(file_url="https://example.com/1.pdf", checksum="e1" + "0" * 62)
+        o2 = await obj_repo.create(file_url="https://example.com/2.pdf", checksum="e2" + "0" * 62)
         repo = DocumentRepository(db_session)
-        await repo.create(title="Doc 1", file_url="https://example.com/1.pdf")
-        await repo.create(title="Doc 2", file_url="https://example.com/2.pdf")
+        await repo.create(title="Doc 1", object_id=o1.id)
+        await repo.create(title="Doc 2", object_id=o2.id)
         docs = await repo.list_all(limit=10)
         assert len(docs) >= 2
 
 
-# ── Chunk Repository Tests ───────────────────────────────────────────────
+# ── Page Repository Tests ───────────────────────────────────────────────
 
-class TestChunkRepository:
+class TestPageRepository:
     @pytest.mark.asyncio
-    async def test_create_parent_and_child(self, db_session):
+    async def test_create_page(self, db_session):
+        obj_repo = ObjectStorageRepository(db_session)
+        obj = await obj_repo.create(file_url="https://example.com/page.pdf", checksum="f" * 64)
         doc_repo = DocumentRepository(db_session)
-        chunk_repo = ChunkRepository(db_session)
+        page_repo = PageRepository(db_session)
 
-        doc = await doc_repo.create(title="Chunk Test", file_url="https://example.com/chunk.pdf")
-        parent = await chunk_repo.create_parent(doc.id, content="Parent chunk content", page_number=1)
-        child = await chunk_repo.create_child(parent.id, content="Child chunk content")
+        doc = await doc_repo.create(title="Page Test", object_id=obj.id)
+        page = await page_repo.create_page(doc.id, page_number=1, content="Page chunk content", embedding=[0.1] * 1536)
 
-        assert parent.document_id == doc.id
-        assert child.parent_id == parent.id
+        assert page.document_id == doc.id
+        assert page.page_number == 1
 
     @pytest.mark.asyncio
-    async def test_get_parent_with_children(self, db_session):
+    async def test_list_pages(self, db_session):
+        obj_repo = ObjectStorageRepository(db_session)
+        obj = await obj_repo.create(file_url="https://example.com/pages.pdf", checksum="g" * 64)
         doc_repo = DocumentRepository(db_session)
-        chunk_repo = ChunkRepository(db_session)
+        page_repo = PageRepository(db_session)
 
-        doc = await doc_repo.create(title="Parent-Child Test", file_url="https://example.com/pc.pdf")
-        parent = await chunk_repo.create_parent(doc.id, content="Parent")
-        await chunk_repo.create_child(parent.id, content="Child 1")
-        await chunk_repo.create_child(parent.id, content="Child 2")
+        doc = await doc_repo.create(title="List Pages Test", object_id=obj.id)
+        await page_repo.create_page(doc.id, page_number=1, content="Page 1")
+        await page_repo.create_page(doc.id, page_number=2, content="Page 2")
 
-        result = await chunk_repo.get_parent_with_children(parent.id)
-        assert result is not None
-        assert len(result.child_chunks) == 2
+        pages = await page_repo.list_pages(doc.id)
+        assert len(pages) == 2
 
     @pytest.mark.asyncio
     async def test_count_by_document(self, db_session):
+        obj_repo = ObjectStorageRepository(db_session)
+        obj = await obj_repo.create(file_url="https://example.com/count.pdf", checksum="h" * 64)
         doc_repo = DocumentRepository(db_session)
-        chunk_repo = ChunkRepository(db_session)
+        page_repo = PageRepository(db_session)
 
-        doc = await doc_repo.create(title="Count Test", file_url="https://example.com/count.pdf")
-        parent = await chunk_repo.create_parent(doc.id, content="Parent")
-        await chunk_repo.create_child(parent.id, content="Child")
+        doc = await doc_repo.create(title="Count Test", object_id=obj.id)
+        await page_repo.create_page(doc.id, page_number=1, content="Page 1")
 
-        counts = await chunk_repo.count_by_document(doc.id)
-        assert counts["parent_chunks"] == 1
-        assert counts["child_chunks"] == 1
+        counts = await page_repo.count_by_document(doc.id)
+        assert counts["page_count"] == 1
 
 
 # ── Certificate Repository Tests ─────────────────────────────────────────
@@ -145,21 +167,26 @@ class TestChunkRepository:
 class TestCertificateRepository:
     @pytest.mark.asyncio
     async def test_create_certificate(self, db_session):
+        obj_repo = ObjectStorageRepository(db_session)
+        obj = await obj_repo.create(file_url="https://example.com/cert.pdf", checksum="i" * 64)
         repo = CertificateRepository(db_session)
         record = await repo.create(
-            file_url="https://example.com/cert.pdf",
+            object_id=obj.id,
             extracted_data={"name": "Test Corp", "expiry": "2027-01-01"},
             status="PASS",
-            judge_reasoning="All fields match.",
+            reasoning_trace="All fields match.",
         )
         assert record.status == "PASS"
         assert record.extracted_data["name"] == "Test Corp"
 
     @pytest.mark.asyncio
     async def test_list_certificates(self, db_session):
+        obj_repo = ObjectStorageRepository(db_session)
+        o1 = await obj_repo.create(file_url="https://example.com/c1.pdf", checksum="j1" + "0" * 62)
+        o2 = await obj_repo.create(file_url="https://example.com/c2.pdf", checksum="j2" + "0" * 62)
         repo = CertificateRepository(db_session)
-        await repo.create(file_url="https://example.com/c1.pdf", extracted_data={}, status="FAIL")
-        await repo.create(file_url="https://example.com/c2.pdf", extracted_data={}, status="PASS")
+        await repo.create(object_id=o1.id, extracted_data={}, status="FAIL")
+        await repo.create(object_id=o2.id, extracted_data={}, status="PASS")
         records = await repo.list_all(limit=10)
         assert len(records) >= 2
 

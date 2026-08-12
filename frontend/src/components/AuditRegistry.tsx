@@ -9,7 +9,7 @@ import {
 import type { AuditRegistryEntry, DocumentEvidence, SupplierAssets, ComparisonTable } from "@/types";
 import { FIELD_NAME_TO_META_KEY } from "@/types";
 import { fetchAuditRegistry, fetchSupplierAssets, updateEvidenceMetadata, buildFileUrl } from "@/lib/api";
-import { getCommentAndTable, cleanQuestionLabel, getLabelSortKey } from "@/lib/utils";
+import { getCommentAndTable, formatSuggestedComment, cleanQuestionLabel, getLabelSortKey, parseEvidenceMetadata } from "@/lib/utils";
 import ScreenshotLightbox from "./ScreenshotLightbox";
 
 interface AuditRegistryProps {
@@ -97,7 +97,7 @@ export default function AuditRegistry({ evidenceLogs, isEvidenceLoading, onRefre
   };
 
   const handleCopyComment = (comment: string) => {
-    navigator.clipboard.writeText(comment);
+    navigator.clipboard.writeText(formatSuggestedComment(comment));
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -139,8 +139,7 @@ export default function AuditRegistry({ evidenceLogs, isEvidenceLoading, onRefre
         e.filename.toLowerCase() === filename.toLowerCase()
       );
       if (!evRecord) throw new Error("No matching evidence record found for this file.");
-      let metadata: Record<string, string> = {};
-      try { metadata = JSON.parse(evRecord.gemini_extracted_metadata); } catch { metadata = {}; }
+      let metadata: Record<string, string> = parseEvidenceMetadata(evRecord);
       const edits = tableEditValues[tIdx] || {};
       table.comparison_rows.forEach((row: any, rIdx: number) => {
         if (edits[rIdx] !== undefined && edits[rIdx] !== row.value_evidence) {
@@ -332,7 +331,7 @@ function LogListPanel({
                     : "bg-[var(--bg-surface)] border-[var(--border-subtle)] hover:border-[var(--accent-success)] hover:bg-[var(--accent-success-soft)]"
                     }`}
                 >
-                  <div className="flex justify-between items-start mb-2">
+                  <div className="flex justify-between items-center">
                     <h4 className="font-semibold text-sm text-[var(--heading-color)] group-hover:text-[var(--match-text)] transition-colors">{log.supplier_name}</h4>
                     <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wider uppercase shrink-0 ${isMatch
                       ? "bg-[var(--match-bg)] text-[var(--match-text)] border border-[var(--match-border)]"
@@ -451,6 +450,8 @@ function ComparisonTab({
   const { comment, table, tables } = getCommentAndTable(log.suggested_comment);
   const hasJsonTable = log.comparison_table && Array.isArray(log.comparison_table.tables);
 
+  const fullFormattedComment = formatSuggestedComment(comment);
+
   return (
     <div className="flex-1 flex flex-col gap-6 overflow-y-auto max-h-none lg:max-h-[620px] pr-2">
       <div className="p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-input)]">
@@ -471,7 +472,7 @@ function ComparisonTab({
       <div className="p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-input)] relative">
         <h4 className="text-[10px] font-bold text-[var(--text-tertiary)] uppercase tracking-wider mb-2">Suggested comment</h4>
         <p className="text-sm text-[var(--text-primary)] italic font-medium pr-10 leading-relaxed whitespace-pre-wrap">
-          &ldquo;{comment || "No detailed comments provided."}&rdquo;
+          &ldquo;{fullFormattedComment || "No detailed comments provided."}&rdquo;
         </p>
         <button onClick={() => onCopyComment(comment)}
           className="icon-action absolute right-4 top-4 p-2 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-visible)] hover:bg-[var(--bg-surface-hover)] transition-all duration-300 cursor-pointer active:scale-95 text-[var(--text-secondary)] hover:text-[var(--heading-color)]"
@@ -579,7 +580,7 @@ function JsonComparisonTables({
               <div className={isActive && pdfUrl ? "xl:col-span-7 space-y-3" : "space-y-3"}>
                 {t.question_label && (
                   <div className="flex flex-row justify-between items-start gap-2 mt-1">
-                    <h4 className="text-xs font-bold text-[var(--text-primary)] tracking-wide">{t.question_label}</h4>
+                    <h4 className="text-xs font-bold text-[var(--text-primary)] tracking-wide">{t.question_label} - ({t.attached_file})</h4>
                     <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
                       {editingTableIdx === tIdx ? (
                         <>
@@ -855,8 +856,7 @@ function EvidenceTab({ log, assets, assetsLoading, isEvidenceLoading, evidenceLo
               ev.filename.toLowerCase().includes(d.name.toLowerCase()) ||
               d.name.toLowerCase().includes(ev.filename.toLowerCase())
             );
-            let geminiData = null;
-            try { geminiData = JSON.parse(ev.gemini_extracted_metadata || "{}"); } catch { }
+            const geminiData = parseEvidenceMetadata(ev);
 
             return (
               <div key={idx} className="p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-input)] space-y-4">

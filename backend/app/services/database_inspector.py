@@ -6,16 +6,17 @@ information_schema (whitelist), so arbitrary SQL injection is not possible.
 """
 
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
 
 from app.db.session import get_session_factory
+from app.services.timezones import to_malaysia
 
 logger = logging.getLogger(__name__)
 
-# Columns that are binary/huge and not useful to render (e.g. embeddings).
-SKIP_COLUMN_UDTS = {"vector", "tsvector"}
+# Columns that are binary/huge — we render truncated previews for them instead of skipping.
+SKIP_COLUMN_UDTS = set()
 
 # Cap on rows returned per table for the preview.
 MAX_PREVIEW_ROWS = 500
@@ -56,6 +57,52 @@ async def get_columns(table: str) -> List[str]:
             {"t": table},
         )
         return [r[0] for r in rows if r[1] not in SKIP_COLUMN_UDTS]
+
+
+async def get_primary_keys(table: str) -> List[Dict[str, Any]]:
+    """Return the primary key columns (name + udt) of a validated table."""
+    factory = get_session_factory()
+    async with factory() as session:
+        rows = await session.execute(
+            text(
+                """
+                SELECT kcu.column_name, c.udt_name
+                FROM information_schema.table_constraints tc
+                JOIN information_schema.key_column_usage kcu
+                  ON tc.constraint_name = kcu.constraint_name
+                 AND tc.table_schema = kcu.table_schema
+                JOIN information_schema.columns c
+                  ON c.table_schema = tc.table_schema
+                 AND c.table_name = tc.table_name
+                 AND c.column_name = kcu.column_name
+                WHERE tc.table_schema = 'public'
+                  AND tc.table_name = :t
+                  AND tc.constraint_type = 'PRIMARY KEY'
+                ORDER BY kcu.ordinal_position
+                """
+            ),
+            {"t": table},
+        )
+        return [{"name": r[0], "udt": r[1]} for r in rows]
+
+
+def _cast_for(udt: str) -> str:
+    """SQL cast for a bound primary-key value, keyed by the column's UDT."""
+    if udt in ("uuid", "int2", "int4", "int8", "numeric", "bool", "date", "time", "timestamptz"):
+        return udt
+    return "text"
+
+
+def _coerce_value(udt: str, value: Any) -> Any:
+    """Coerce a string grid value to the Python type asyncpg expects for the column."""
+    if udt in ("int2", "int4", "int8"):
+        return int(value)
+    if udt == "numeric":
+        from decimal import Decimal
+        return Decimal(str(value))
+    if udt == "bool":
+        return str(value).strip().lower() in ("1", "true", "t", "yes")
+    return str(value)
 
 
 async def get_full_schema() -> Dict[str, Any]:
@@ -285,7 +332,7 @@ def _short_type(udt: str, data_type: str) -> str:
     return (udt or data_type or "?").upper()
 
 
-async def get_table_data(table: str, limit: int = 100, offset: int = 0) -> Dict[str, Any]:
+async def get_table_data(table: str, limit: int = 100, offset: int = 0, search: Optional[str] = None) -> Dict[str, Any]:
     """Return a page of rows for a validated table name.
 
     ``limit`` is clamped to ``MAX_PREVIEW_ROWS``. The table name must already be
@@ -294,18 +341,32 @@ async def get_table_data(table: str, limit: int = 100, offset: int = 0) -> Dict[
     limit = max(1, min(int(limit), MAX_PREVIEW_ROWS))
     offset = max(0, int(offset))
     columns = await get_columns(table)
+    primary_keys = [pk["name"] for pk in await get_primary_keys(table)]
     if not columns:
-        return {"table": table, "columns": [], "rows": [], "total": 0, "limit": limit, "offset": offset}
+        return {
+            "table": table, "columns": [], "rows": [], "total": 0,
+            "limit": limit, "offset": offset, "primary_keys": primary_keys,
+        }
 
     factory = get_session_factory()
     async with factory() as session:
-        total_row = await session.execute(text(f'SELECT count(*) FROM "{table}"'))
+        where_clause = ""
+        params: Dict[str, Any] = {"lim": limit, "off": offset}
+        if search and search.strip():
+            # Exclude non-textual heavy columns (vectors, tsvector) from ILIKE search
+            searchable_cols = [c for c in columns if c not in ("embedding", "tsv_content")]
+            if searchable_cols:
+                clauses = [f'CAST("{c}" AS TEXT) ILIKE :s' for c in searchable_cols]
+                where_clause = " WHERE " + " OR ".join(clauses)
+                params["s"] = f"%{search.strip()}%"
+
+        total_row = await session.execute(text(f'SELECT count(*) FROM "{table}"{where_clause}'), params)
         total = total_row.scalar() or 0
 
         col_sql = ", ".join(f'"{c}"' for c in columns)
         data = await session.execute(
-            text(f'SELECT {col_sql} FROM "{table}" ORDER BY 1 LIMIT :lim OFFSET :off'),
-            {"lim": limit, "off": offset},
+            text(f'SELECT {col_sql} FROM "{table}"{where_clause} ORDER BY 1 LIMIT :lim OFFSET :off'),
+            params,
         )
         rows = []
         for record in data:
@@ -318,19 +379,64 @@ async def get_table_data(table: str, limit: int = 100, offset: int = 0) -> Dict[
         "total": total,
         "limit": limit,
         "offset": offset,
+        "primary_keys": primary_keys,
     }
 
 
+async def delete_row(table: str, pk: Dict[str, Any]) -> int:
+    """Delete a single row identified by its primary key values.
+
+    ``pk`` maps column name -> value (strings from the preview grid). The table
+    name must already be validated against the whitelist. Returns the number of
+    deleted rows.
+    """
+    pk_cols = await get_primary_keys(table)
+    if not pk_cols:
+        raise ValueError("Table has no primary key — cannot delete rows.")
+    where = []
+    params: Dict[str, Any] = {}
+    for col in pk_cols:
+        name = col["name"]
+        if name not in pk:
+            raise ValueError(f"Missing primary key value for column '{name}'.")
+        cast = _cast_for(col["udt"])
+        where.append(f'"{name}" = CAST(:{name} AS {cast})')
+        params[name] = _coerce_value(col["udt"], pk[name])
+
+    factory = get_session_factory()
+    async with factory() as session:
+        result = await session.execute(
+            text(f'DELETE FROM "{table}" WHERE ' + " AND ".join(where)),
+            params,
+        )
+        await session.commit()
+        return result.rowcount or 0
+
+
 def _stringify(value: Any) -> str:
-    """Render a cell value as a display string, flattening JSON/dates."""
+    """Render a cell value as a display string, flattening JSON/dates/vectors."""
     if value is None:
         return ""
-    if isinstance(value, (dict, list)):
+    # Vector handling: array of numbers
+    if isinstance(value, (list, tuple)):
+        if len(value) > 20 and all(isinstance(x, (float, int)) for x in value[:5]):
+            first_few = ", ".join(f"{x:.4f}" for x in value[:3])
+            return f"[{first_few}, ... ({len(value)} dims)]"
+        import json
+        try:
+            return json.dumps(value, ensure_ascii=False, default=str)
+        except Exception:
+            return str(value)
+    if isinstance(value, dict):
         import json
         try:
             return json.dumps(value, ensure_ascii=False, default=str)
         except Exception:
             return str(value)
     if hasattr(value, "isoformat"):
-        return value.isoformat()
-    return str(value)
+        return to_malaysia(value).strftime("%Y-%m-%d %H:%M:%S")
+    val_str = str(value)
+    # Format tsvector display strings cleanly without truncating body text
+    if len(val_str) > 500 and "'english'" in val_str:
+        return val_str[:200] + "... (tsvector)"
+    return val_str

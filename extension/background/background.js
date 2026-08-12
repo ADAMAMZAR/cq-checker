@@ -277,9 +277,9 @@ async function handleAuditData(tabId, data) {
 
     if (stopSignal.aborted) throw new Error('Stopped by user.');
 
-    // Step 4a: Phase 1 — Upload files & run Gemini extraction (Worker + LLM Judge)
-    notifyPanel('Phase 1/2: Extracting certificate data with Gemini (Worker + LLM Judge)...');
-    notifyAribaTab(tabId, 'Running Gemini extraction & LLM Judge verification...');
+    // Step 4: Upload files & run full audit (Gemini extraction + code-based comparison)
+    notifyPanel('Running Gemini extraction & code-based comparison audit...');
+    notifyAribaTab(tabId, 'Running audit pipeline...');
 
     const formData = new FormData();
     // Use the original (uncleaned) name for the database and all API responses
@@ -305,42 +305,18 @@ async function handleAuditData(tabId, data) {
       formData.append('screenshot', screenshotBlob, 'verification_screenshot.jpg');
     }
 
-    const extractUrl = `${BACKEND_URL}/api/extract`;
-    const extractResponse = await fetch(extractUrl, {
+    const auditUrl = `${BACKEND_URL}/api/audit`;
+    const auditResponse = await fetch(auditUrl, {
       method: 'POST',
-      body: formData
+      body: formData,
+      signal: stopSignal
     });
 
-    if (!extractResponse.ok) {
-      throw new Error(`Extraction endpoint returned HTTP ${extractResponse.status}`);
+    if (!auditResponse.ok) {
+      throw new Error(`Audit endpoint returned HTTP ${auditResponse.status}`);
     }
 
-    const extractResult = await extractResponse.json();
-    notifyPanel(`Phase 1 complete — ${extractResult.file_count} file(s) extracted and verified by LLM Judge.`);
-    notifyPanel('Phase 2/2: Running code-based comparison audit...');
-    notifyAribaTab(tabId, 'Extraction done. Running comparison audit...');
-
-    // Step 4b: Phase 2 — Run code-based comparison
-    const compareForm = new FormData();
-    compareForm.append('audit_id', extractResult.audit_id);
-    compareForm.append('supplier_name', extractResult.supplier_name);
-    compareForm.append('workspace_title', extractResult.workspace_title);
-    compareForm.append('cert_type', extractResult.cert_type);
-    compareForm.append('qa_data', extractResult.qa_data);
-    compareForm.append('screenshot_url', extractResult.screenshot_url || '');
-    compareForm.append('timestamp', extractResult.timestamp);
-
-    const compareUrl = `${BACKEND_URL}/api/audit/comparison`;
-    const compareResponse = await fetch(compareUrl, {
-      method: 'POST',
-      body: compareForm
-    });
-
-    if (!compareResponse.ok) {
-      throw new Error(`Comparison audit endpoint returned HTTP ${compareResponse.status}`);
-    }
-
-    const auditResult = await compareResponse.json();
+    const auditResult = await auditResponse.json();
 
     // Complete audit state
     chrome.tabs.sendMessage(tabId, { action: 'hideOverlay' }).catch(() => {});

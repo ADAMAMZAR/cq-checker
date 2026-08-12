@@ -44,12 +44,7 @@ The API will be available at `http://localhost:8000`.
 | `NEON_DATABASE_URL` | Neon PostgreSQL connection string (asyncpg) | `postgresql+asyncpg://postgres:postgres@localhost:5432/cq_checker` |
 | `GEMINI_API_KEY` | Google Gemini API key | — |
 | `MINIMAX_API_KEY` | MiniMax M3 parser API key | — |
-| `DEEPSEEK_API_KEY` | DeepSeek V4 Flash API key | — |
-| `QWEN_API_KEY` | Qwen Reasoning judge API key | — |
-| `DEEPSEEK_BASE_URL` | DeepSeek API base URL | `https://api.deepseek.com` |
-| `DEEPSEEK_MODEL` | DeepSeek model name | `deepseek-v4-flash` |
-| `QWEN_BASE_URL` | Qwen (DashScope) OpenAI-compatible base URL | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
-| `QWEN_MODEL` | Qwen model name | `qwen-max` |
+| `GEMINI_CHAT_MODEL` | Gemini model for the RAG chatbot | `gemini-3.5-flash-lite` |
 | `MINIMAX_BASE_URL` | MiniMax M3 API base URL | `https://api.minimax.chat` |
 | `MINIMAX_MODEL` | MiniMax model name | `MiniMax-M3` |
 | `GEMINI_EMBEDDING_MODEL` | Gemini embedding model | `gemini-embedding-2` |
@@ -69,10 +64,7 @@ Grouped by function. Full reference: [`API-Endpoints.md`](../API-Endpoints.md). 
 | Method | Path | Group |
 |---|---|---|
 | `GET` | `/` | System / Health |
-| `POST` | `/api/extract` | Supplier Audit — Extraction |
-| `POST` | `/api/test/extract` | Supplier Audit — Extraction |
 | `POST` | `/api/audit` | Supplier Audit — Full Run |
-| `POST` | `/api/audit/comparison` | Supplier Audit — Comparison |
 | `GET` | `/api/logs` | Supplier Audit — Read |
 | `GET` | `/api/suppliers` | Supplier Audit — Read |
 | `GET` | `/api/audit-registry` | Supplier Audit — Read |
@@ -87,22 +79,15 @@ Grouped by function. Full reference: [`API-Endpoints.md`](../API-Endpoints.md). 
 | `POST` | `/api/chat` | RAG Chatbot |
 | `GET` | `/api/chat/history` | RAG Chatbot |
 | `POST` | `/api/chat/cache/clear` | RAG Chatbot |
-| `GET` | `/api/files/{encoded_url:path}` | File Serving — Legacy |
 | `GET` | `/api/files/local/{folder}/{filename}` | File Serving — Local |
 
 ### 🏷️ System / Health
 
 - **`GET /`** — Health check. Returns `{"status": "healthy", "service": "..."}`.
 
-### 📄 Supplier Audit — Extraction (legacy Gemini flow)
-
-- **`POST /api/extract`** — Phase 1 (Chrome Extension). Single-pass file processing (read → match QA label → hash → upload → Gemini extraction), saves `document_evidence`, returns `audit_id`. Form: `supplier_name`, `supplier_folder?`, `workspace_title`, `cert_type`, `qa_data` (JSON), `files[]`, `screenshot?`.
-- **`POST /api/test/extract`** — Dev helper. Upload one file, return raw Gemini OCR extraction JSON without persisting. Form: `file`.
-
 ### 📄 Supplier Audit — Full Run & Comparison
 
-- **`POST /api/audit`** — Main audit (Chrome Extension). Extraction + code-based `auditor.run_full_audit`, persists `audit_logs` + `document_evidence`. Form: same as `/api/extract`. Returns `AuditResultResponse`.
-- **`POST /api/audit/comparison`** — Phase 2. Runs comparison only from existing evidence by `audit_id`, saves audit log, returns verdict. Form: `audit_id`, `supplier_name`, `workspace_title`, `cert_type`, `qa_data`, `screenshot_url?`, `timestamp`.
+- **`POST /api/audit`** — Main audit (Chrome Extension). Extraction + code-based `auditor.run_full_audit`, persists `audit_logs` + `document_evidence`. Form: `supplier_name`, `supplier_folder?`, `workspace_title`, `cert_type`, `qa_data`, `files[]`, `screenshot?`. Returns `AuditResultResponse`.
 
 ### 📄 Supplier Audit — Read / Update
 
@@ -119,7 +104,7 @@ Grouped by function. Full reference: [`API-Endpoints.md`](../API-Endpoints.md). 
 
 ### 📜 Certificate Verification (Phase 4)
 
-- **`POST /api/certificates/verify`** — Upload cert → DeepSeek extraction → Qwen judge → persist to `certificate_verifications` → verdict + reasoning. Form: `file`, `supplier_name`, `question_label?`, `qa_answers?`, `qa_data_title?`. Returns `CertificateVerifyResult`. 502 if extraction fails.
+- **`POST /api/certificates/verify`** — Upload cert → Gemini 3.5 Flash Lite extraction (one JSON per certificate in the file, nested under `certificates[]`) → deterministic rules (worst-wins across certificates) → persist to `certificate_verifications` → verdict + reasoning. Form: `file`, `supplier_name`, `question_label?`, `qa_answers?`, `qa_data_title?`. Returns `CertificateVerifyResult`. 502 if extraction fails.
 - **`GET /api/certificates`** — List past verifications. Query: `limit` (50), `offset` (0).
 
 ### 📚 Document Ingestion / RAG (Phase 5)
@@ -129,7 +114,7 @@ Grouped by function. Full reference: [`API-Endpoints.md`](../API-Endpoints.md). 
 
 ### 💬 RAG Chatbot (Phase 6)
 
-- **`POST /api/chat`** — RAG query: semantic cache (cosine > 0.93) → hybrid retrieval (pgvector + tsvector) → DeepSeek. Multi-turn via `session_id`. `stream: true` returns SSE. Body: `ChatRequest`.
+- **`POST /api/chat`** — RAG query: semantic cache (cosine > 0.93) → hybrid retrieval (pgvector + tsvector) → Gemini. Multi-turn via `session_id`. `stream: true` returns SSE. Body: `ChatRequest`.
 - **`GET /api/chat/history`** — Conversation history for a session. Query: `session_id`.
 - **`POST /api/chat/cache/clear`** — Admin: clear semantic cache. Returns `{"cleared": N}`.
 
@@ -204,14 +189,13 @@ backend/
 │       ├── database_inspector.py # Read-only DB browser for preview page
 │       ├── storage.py     # StorageProvider (LocalDisk now, GCS in Phase 8)
 │       ├── pdf.py         # PDF -> image rendering (PyMuPDF)
-│       ├── rules.py       # Deterministic certificate rules (reuses auditor.py)
-│       ├── extractor.py   # DeepSeek V4 Flash extractor
-│       ├── judge.py       # Qwen reasoning judge (with rules fallback)
+│       ├── rules.py       # Deterministic certificate rules + status mapping
+│       ├── extractor.py   # Gemini 3.5 Flash Lite extractor
 │       ├── parser.py      # PDF -> Markdown (MiniMax M3 + PyMuPDF fallback)
 │       ├── chunker.py     # Parent-child chunking
 │       ├── embeddings.py  # Gemini Embedding 2 (REST, 1536-dim)
 │       ├── ingest.py      # Document ingestion orchestrator
-│       └── rag.py         # RAG chatbot (cache + hybrid retrieval + DeepSeek)
+│       └── rag.py         # RAG chatbot (cache + hybrid retrieval + Gemini)
 ├── migrations/            # Alembic database migrations
 │   ├── env.py
 │   └── versions/

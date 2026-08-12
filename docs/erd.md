@@ -14,7 +14,7 @@ The schema holds **9 tables** across **4 domains**:
 | Domain | Tables | Purpose |
 |---|---|---|
 | **Document RAG / Ingestion** | `documents`, `parent_chunks`, `child_chunks` | Store uploaded manuals as hierarchical parent/child chunks for hybrid vector + full-text retrieval |
-| **Certificate Verification** | `certificate_verifications` | Persist AI-extracted fields, judge verdict, and reasoning trace |
+| **Certificate Verification** | `certificate_verifications` | Persist AI-extracted fields, rules verdict, and reasoning trace |
 | **Chatbot** | `chat_sessions`, `chat_messages`, `chat_logs`, `query_cache` | Multi-turn conversations, semantic caching, and per-request cost telemetry |
 | **Legacy Audit** | `suppliers`, `audit_logs`, `document_evidence` | Ported from Supabase/Sheets; historical Gemini-based supplier audits |
 
@@ -60,7 +60,7 @@ erDiagram
         varchar(64) file_hash "UNIQUE, idx — SHA-256 dedup"
         jsonb extracted_data "NOT NULL — Name/ID/Expiry/Authority + confidence"
         varchar(50) status "CHECK: PASS | FAIL | REQUIRES_HUMAN_REVIEW"
-        text judge_reasoning "Qwen CoT trace"
+        text reasoning_trace "rules reasoning trace"
         timestamptz created_at "server_default now()"
     }
     QUERY_CACHE {
@@ -214,7 +214,7 @@ erDiagram
 
 **`certificate_verifications`**
 - **Where used:** `POST /api/certificates/verify`, `GET /api/certificates`.
-- **Why needed:** Audit trail of the ~200 certs/month pipeline — extracted JSON fields, DeepSeek extractor confidence, Qwen judge verdict (`PASS`/`FAIL`/`REQUIRES_HUMAN_REVIEW`), and the CoT reasoning trace. `file_hash` (unique) makes re-uploading the same file return the prior verdict with **zero LLM cost**; `status` is CHECK-constrained.
+- **Why needed:** Audit trail of the ~200 certs/month pipeline — extracted JSON fields, Gemini extractor confidence, deterministic rules verdict (`PASS`/`FAIL`/`REQUIRES_HUMAN_REVIEW`), and the reasoning trace. `file_hash` (unique) makes re-uploading the same file return the prior verdict with **zero LLM cost**; `status` is CHECK-constrained.
 
 ### 4.3 RAG Chatbot
 
@@ -289,7 +289,7 @@ erDiagram
 
 ### 6.3 Missing entities
 - ✅ **FIXED (`e5f6a7b8c9d0`)** — `object_storage` metadata table added (file_url, bucket, object_key, content_type, size_bytes, sha256 checksum). `storage.store_and_record` writes it on every upload; Phase 8 GCS migration can map old URLs → GCS objects.
-- **No `compliance_rules` / rule-registry table** — Qwen judge rules are hardcoded in `rules.py`; they cannot be versioned, admin-edited, or audited over time.
+- **No `compliance_rules` / rule-registry table** — certificate rules are hardcoded in `rules.py`; they cannot be versioned, admin-edited, or audited over time.
 - **`certificate_verifications` has no FK** to `suppliers` or `documents` → a verification can't be associated with a supplier or a source manual.
 - **No `documents` ↔ `document_evidence` link** — the RAG corpus and the legacy audit evidence are disconnected silos of the same concept (supplier certificates).
 - **No rate-limit / API-key / quota table** — `/api/chat` is unthrottled, contradicting the Phase 9 security hardening plan.
@@ -303,7 +303,7 @@ erDiagram
 ### 6.5 Recommended fix priority
 1. ✅ **DONE** — `users` table + real FKs on `chat_messages.session_id` / `document_evidence.audit_id` (migration `c3d4e5f6a7b8`).
 2. ✅ **DONE** — `cost_usd` → `NUMERIC(12,6)` everywhere (DB + model + repos).
-3. **`compliance_rules` table** to externalize judge logic.
+3. **`compliance_rules` table** to externalize rules logic.
 4. ✅ **DONE** — `query_cache` TTL + eviction + hit counter (migration `d4e5f6a7b8c9`).
 5. ✅ **DONE** — `object_storage` metadata table for the Phase 8 GCS migration (migration `e5f6a7b8c9d0`).
 6. ✅ **DONE** — Check constraints + `file_hash` dedup on certificate verifications (migration `d4e5f6a7b8c9`).

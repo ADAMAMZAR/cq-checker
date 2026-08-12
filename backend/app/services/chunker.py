@@ -1,110 +1,140 @@
-"""Parent–child chunking for RAG.
+"""Page-level and Markdown-smart chunking for Hybrid Page RAG.
 
-- Parent chunk: ~800–1000 tokens (full paragraph/table context)
-- Child chunk:  ~200 tokens (vectorized for granular search)
-
-Uses a ~4 chars/token heuristic (no external tokenizer dependency). Pages are
-preserved on every parent chunk; children inherit the parent's page.
+Supports:
+1. PDF page-level chunking.
+2. Smart Markdown chunking by Q&A pairs, Mermaid diagram sections, and header blocks.
 """
 
 import re
-from typing import List
+from typing import List, Optional
 
-PARENT_MIN_TOKENS = 600
-PARENT_MAX_TOKENS = 1000
-CHILD_MAX_TOKENS = 200
 CHARS_PER_TOKEN = 4.0
 
 
 def estimate_tokens(text: str) -> int:
+    """Estimate token count based on ~4 chars/token heuristic."""
     if not text:
         return 0
     return max(1, int(len(text) / CHARS_PER_TOKEN))
 
 
-def _split_sentences(text: str) -> List[str]:
-    """Split text into sentence-like units, keeping whitespace."""
-    if not text:
-        return []
-    parts = re.split(r"(?<=[.!?])\s+|\n+", text)
-    return [p.strip() for p in parts if p.strip()]
+def chunk_page(page_number: int, text: str) -> Optional[dict]:
+    """Format one page's text into a single page chunk dict.
+
+    Returns {"page_number": int, "content": str} or None if page is empty.
+    """
+    if not text or not text.strip():
+        return None
+    return {
+        "page_number": page_number,
+        "content": text.strip(),
+    }
 
 
-def chunk_into_parents(page_number: int, text: str) -> List[dict]:
-    """Split one page's markdown into parent chunks (each ~600–1000 tokens).
+def chunk_pages(pages: List[dict]) -> List[dict]:
+    """Process a list of parsed pages [{"page_number": int, "text": str}] into page chunks.
 
     Returns [{"page_number": int, "content": str}].
     """
-    if not text or not text.strip():
-        return []
-
-    sentences = _split_sentences(text)
-    parents: List[dict] = []
-    current: List[str] = []
-    current_tokens = 0
-
-    for sent in sentences:
-        sent_tokens = estimate_tokens(sent)
-        if current and current_tokens + sent_tokens > PARENT_MAX_TOKENS:
-            parents.append({
-                "page_number": page_number,
-                "content": " ".join(current).strip(),
-            })
-            current = []
-            current_tokens = 0
-        current.append(sent)
-        current_tokens += sent_tokens
-
-    if current:
-        parents.append({
-            "page_number": page_number,
-            "content": " ".join(current).strip(),
-        })
-
-    # Merge undersized parents into neighbours to avoid tiny chunks
-    merged = _merge_small_parents(parents)
-    return merged
+    chunks = []
+    for page in pages:
+        p_num = page.get("page_number", 1)
+        p_text = page.get("text", "")
+        c = chunk_page(p_num, p_text)
+        if c:
+            chunks.append(c)
+    return chunks
 
 
-def _merge_small_parents(parents: List[dict]) -> List[dict]:
-    if not parents:
-        return []
-    merged: List[dict] = []
-    for parent in parents:
-        if merged and estimate_tokens(parent["content"]) < PARENT_MIN_TOKENS:
-            merged[-1]["content"] = (merged[-1]["content"] + "\n\n" + parent["content"]).strip()
-            continue
-        merged.append(dict(parent))
-    return merged
+def _split_markdown_by_qa(markdown_text: str) -> List[str]:
+    """Split markdown text into distinct Q&A pairs if Q&A headers exist."""
+    # Pattern matching Q&A headers e.g.:
+    # ## **BU-Q1: ...**, ## **Q1: ...**, ## Q1: ..., ### Question: ..., ### Template 1: ...
+    qa_header_regex = re.compile(
+        r'^(?=(?:#{2,3}\s+(?:\*\*)?(?:BU-Q\d+|Q\d+|Question|Template\s+\d+):?))',
+        re.MULTILINE | re.IGNORECASE
+    )
+    parts = qa_header_regex.split(markdown_text)
+    cleaned = [p.strip() for p in parts if p and p.strip()]
+    return cleaned
 
 
-def split_parent(parent_content: str) -> List[str]:
-    """Split a parent chunk into child chunks of ~200 tokens.
+def _split_markdown_by_headers(markdown_text: str) -> List[str]:
+    """Split markdown text by #, ##, ### headers or --- dividers."""
+    # Split on headers (#, ##, ###) or horizontal rules (---)
+    header_regex = re.compile(
+        r'^(?=(?:#{1,3}\s+|---+\s*$))',
+        re.MULTILINE
+    )
+    sections = header_regex.split(markdown_text)
+    cleaned = [s.strip() for s in sections if s and s.strip() and s.strip() != '---']
+    return cleaned
 
-    Returns a list of child content strings.
+
+def chunk_markdown_document(markdown_text: str, max_chunk_tokens: int = 1200) -> List[dict]:
+    """Smartly chunk a Markdown document for RAG ingestion.
+
+    1. Preserves Q&A pairs (Question + Answer in 1 chunk).
+    2. Keeps Mermaid code blocks together with their step list narratives.
+    3. Splits narrative sections by Markdown headers (###, ##, #).
     """
-    if not parent_content:
+    if not markdown_text or not markdown_text.strip():
         return []
-    tokens = estimate_tokens(parent_content)
-    if tokens <= CHILD_MAX_TOKENS:
-        return [parent_content.strip()]
 
-    # Slice by sentence boundaries into ~200-token windows
-    sentences = _split_sentences(parent_content)
-    children: List[str] = []
-    current: List[str] = []
-    current_tokens = 0
+    # First split by major structural headers (H1, H2, H3, or ---)
+    major_sections = _split_markdown_by_headers(markdown_text)
+    raw_chunks = []
 
-    for sent in sentences:
-        sent_tokens = estimate_tokens(sent)
-        if current and current_tokens + sent_tokens > CHILD_MAX_TOKENS:
-            children.append(" ".join(current).strip())
-            current = []
+    for section in major_sections:
+        # Check if this section contains multiple Q&A pairs
+        qa_pairs = _split_markdown_by_qa(section)
+        if len(qa_pairs) > 1:
+            for pair in qa_pairs:
+                raw_chunks.append(pair)
+        else:
+            raw_chunks.append(section)
+
+    final_chunks = []
+    chunk_index = 1
+
+    for chunk_text in raw_chunks:
+        # If chunk contains Mermaid block, ensure it stays whole unless excessively large
+        has_mermaid = "```mermaid" in chunk_text
+
+        tokens = estimate_tokens(chunk_text)
+        if tokens <= max_chunk_tokens or has_mermaid:
+            final_chunks.append({
+                "page_number": chunk_index,
+                "content": chunk_text,
+            })
+            chunk_index += 1
+        else:
+            # Fallback: split long non-mermaid sections by paragraph breaks
+            paragraphs = [p.strip() for p in chunk_text.split("\n\n") if p.strip()]
+            current_buf = []
             current_tokens = 0
-        current.append(sent)
-        current_tokens += sent_tokens
 
-    if current:
-        children.append(" ".join(current).strip())
+            for p in paragraphs:
+                p_tok = estimate_tokens(p)
+                if current_tokens + p_tok > max_chunk_tokens and current_buf:
+                    combined = "\n\n".join(current_buf)
+                    final_chunks.append({
+                        "page_number": chunk_index,
+                        "content": combined,
+                    })
+                    chunk_index += 1
+                    current_buf = [p]
+                    current_tokens = p_tok
+                else:
+                    current_buf.append(p)
+                    current_tokens += p_tok
 
-    return [c for c in children if c]
+            if current_buf:
+                combined = "\n\n".join(current_buf)
+                final_chunks.append({
+                    "page_number": chunk_index,
+                    "content": combined,
+                })
+                chunk_index += 1
+
+    return final_chunks

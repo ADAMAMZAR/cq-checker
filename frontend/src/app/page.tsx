@@ -1,118 +1,33 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
-import dynamic from "next/dynamic";
 import type { MainTab } from "@/components/SubNavTabs";
-import type { DocumentEvidence } from "@/types";
-import { fetchEvidenceLogs } from "@/lib/api";
+import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
-import SubNavTabs from "@/components/SubNavTabs";
-import AuditRegistry from "@/components/AuditRegistry";
 import LandingPage from "@/components/LandingPage";
 
-const SupplierDataEditor = dynamic(() => import("@/components/SupplierDataEditor"), { ssr: false });
-const SupplierAudit = dynamic(() => import("@/components/SupplierAudit"), { ssr: false });
-const Chatbot = dynamic(() => import("@/components/Chatbot"), { ssr: false });
-
 export default function Dashboard() {
-  const [activeMainTab, setActiveMainTab] = useState<MainTab>("home");
-  const [evidenceLogs, setEvidenceLogs] = useState<DocumentEvidence[]>([]);
-  const [isEvidenceLoading, setIsEvidenceLoading] = useState(false);
-  const [globalError, setGlobalError] = useState<string | null>(null);
-  const [registrySupplier, setRegistrySupplier] = useState<string | null>(null);
-  const evidenceFetched = useRef(false);
+  const router = useRouter();
 
-  const loadEvidence = useCallback(async () => {
-    setIsEvidenceLoading(true);
-    try {
-      const data = await fetchEvidenceLogs();
-      setEvidenceLogs(data);
-    } catch (err) {
-      console.error("Failed to load document evidence logs:", err);
-    } finally {
-      setIsEvidenceLoading(false);
+  const handleNavigate = (tab: MainTab) => {
+    if (tab === "assistant" || tab === "chat") {
+      router.push("/assistant");
+    } else if (tab === "audit" || tab === "registry" || tab === "editor") {
+      router.push(`/checker?tab=${tab}`);
     }
-  }, []);
-
-  useEffect(() => {
-    if (!evidenceFetched.current) {
-      evidenceFetched.current = true;
-      loadEvidence();
-    }
-  }, [loadEvidence]);
-
-  const handleRefresh = () => {
-    setGlobalError(null);
-    loadEvidence();
-  };
-
-  const handleGoHome = () => {
-    setActiveMainTab("home");
-  };
-
-  const handleNavigateToRegistry = (supplierName: string) => {
-    setRegistrySupplier(supplierName);
-    setActiveMainTab("registry");
   };
 
   return (
     <div className="flex-1 flex flex-col w-full p-4 md:p-8">
       <Header
-        error={globalError}
+        error={null}
         isLoading={false}
-        isEvidenceLoading={isEvidenceLoading}
-        onRefresh={handleRefresh}
-        onGoHome={handleGoHome}
+        isEvidenceLoading={false}
+        onRefresh={() => {}}
+        onGoHome={() => router.push("/")}
       />
-
-      {/* Hide SubNavTabs on Main Home page and Assistant page */}
-      {activeMainTab !== "home" && activeMainTab !== "assistant" && (
-        <SubNavTabs
-          active={activeMainTab}
-          onChange={setActiveMainTab}
-          onGoHome={handleGoHome}
-        />
-      )}
-      {activeMainTab === "home" && (
-        <div className="flex-1 flex flex-col">
-          <LandingPage onNavigate={setActiveMainTab} />
-        </div>
-      )}
-      {activeMainTab === "assistant" && (
-        <div className="flex-1 flex flex-col">
-          <Chatbot onGoHome={handleGoHome} />
-        </div>
-      )}
-      {activeMainTab === "chat" && (
-        <div className="flex-1 flex flex-col">
-          <Chatbot onGoHome={handleGoHome} />
-        </div>
-      )}
-      {activeMainTab === "audit" && (
-        <div className="flex-1 flex flex-col">
-          <SupplierAudit onNavigateToRegistry={handleNavigateToRegistry} />
-        </div>
-      )}
-      {activeMainTab === "registry" && (
-        <div className="flex-1 flex flex-col">
-          <AuditRegistry
-            evidenceLogs={evidenceLogs}
-            isEvidenceLoading={isEvidenceLoading}
-            onRefreshEvidence={loadEvidence}
-            initialSupplier={registrySupplier}
-          />
-        </div>
-      )}
-      {activeMainTab === "editor" && (
-        <div className="flex-1 flex flex-col">
-          <SupplierDataEditor
-            evidenceLogs={evidenceLogs}
-            isEvidenceLoading={isEvidenceLoading}
-            onRefreshEvidence={loadEvidence}
-            onRefreshLogs={handleRefresh}
-          />
-        </div>
-      )}
+      <div className="flex-1 flex flex-col">
+        <LandingPage onNavigate={handleNavigate} />
+      </div>
     </div>
   );
 }

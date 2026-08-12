@@ -16,12 +16,19 @@ import type {
   DbTableMeta,
   DbTableData,
   DbSchema,
+  FeedbackRating,
+  FeedbackResponse,
 } from "@/types";
 
 // Single seam for backend routing.
 // - Local dev: defaults to same-origin "/api", proxied by next.config rewrites.
 // - Phase 8 static export: baked at build time to the Cloud Run URL via NEXT_PUBLIC_API_URL.
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "/api";
+export const UPLOAD_API_BASE =
+  process.env.NEXT_PUBLIC_API_URL ||
+  (typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
+    ? "http://127.0.0.1:8000/api"
+    : API_BASE);
 
 function base64url(input: string): string {
   const b64 = btoa(input);
@@ -37,7 +44,7 @@ function base64url(input: string): string {
 export function buildFileUrl(url?: string | null): string {
   if (!url) return "";
   if (url.startsWith("/api/")) return `${API_BASE}${url.slice("/api".length)}`;
-  if (/^https?:\/\//.test(url)) return `${API_BASE}/files/${base64url(url)}`;
+  if (/^https?:\/\//.test(url)) return url;
   return url;
 }
 
@@ -60,6 +67,12 @@ export async function fetchAuditLogs(): Promise<AuditLog[]> {
 export async function fetchSuppliers(): Promise<SupplierEntry[]> {
   const res = await fetch(`${API_BASE}/suppliers`);
   if (!res.ok) throw new Error(`Failed to load suppliers: HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function fetchAribaSuppliers(): Promise<SupplierEntry[]> {
+  const res = await fetch(`${API_BASE}/ariba/suppliers`);
+  if (!res.ok) throw new Error(`Failed to load Ariba suppliers: HTTP ${res.status}`);
   return res.json();
 }
 
@@ -190,11 +203,12 @@ export async function sendChat(
   }
 
   return {
-    answer,
+    answer: (done as any).answer || answer,
     sources: done.sources ?? [],
     cost_usd: done.cost_usd ?? 0,
     cache_hit: !!done.cache_hit,
     session_id: done.session_id ?? sessionId,
+    message_id: done.message_id ?? null,
   };
 }
 
@@ -211,13 +225,50 @@ export async function clearChatCache(): Promise<number> {
   return data.cleared ?? 0;
 }
 
+export async function submitFeedback(
+  messageId: string,
+  sessionId: string,
+  rating: FeedbackRating,
+  reason?: string
+): Promise<FeedbackResponse> {
+  const res = await fetch(`${API_BASE}/chat/feedback`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      message_id: messageId,
+      session_id: sessionId,
+      rating,
+      reason: reason || null,
+    }),
+  });
+  if (!res.ok) throw new Error(await errorDetail(res));
+  return res.json();
+}
+
 // ── Document Ingestion ───────────────────────────────────────────────────────
 
-export async function uploadDocument(file: File, title?: string): Promise<DocumentIngestResult> {
+export async function uploadDocument(
+  file: File,
+  title?: string,
+  overwrite: boolean = true
+): Promise<DocumentIngestResult> {
   const form = new FormData();
   form.append("file", file);
   if (title) form.append("title", title);
-  const res = await fetch(`${API_BASE}/documents/upload`, { method: "POST", body: form });
+  form.append("overwrite", overwrite.toString());
+  const res = await fetch(`${UPLOAD_API_BASE}/documents/upload`, { method: "POST", body: form });
+  if (!res.ok) throw new Error(await errorDetail(res));
+  return res.json();
+}
+
+export async function bulkUploadDocuments(
+  files: File[],
+  overwrite: boolean = true
+): Promise<DocumentIngestResult[]> {
+  const form = new FormData();
+  files.forEach((f) => form.append("files", f));
+  form.append("overwrite", overwrite.toString());
+  const res = await fetch(`${UPLOAD_API_BASE}/documents/bulk-upload`, { method: "POST", body: form });
   if (!res.ok) throw new Error(await errorDetail(res));
   return res.json();
 }
@@ -247,7 +298,7 @@ export async function verifyCertificate(
   if (opts.questionLabel) form.append("question_label", opts.questionLabel);
   if (opts.qaAnswers) form.append("qa_answers", opts.qaAnswers);
   if (opts.qaDataTitle) form.append("qa_data_title", opts.qaDataTitle);
-  const res = await fetch(`${API_BASE}/certificates/verify`, { method: "POST", body: form });
+  const res = await fetch(`${UPLOAD_API_BASE}/certificates/verify`, { method: "POST", body: form });
   if (!res.ok) throw new Error(await errorDetail(res));
   return res.json();
 }
@@ -269,17 +320,70 @@ export async function fetchDbTables(): Promise<DbTableMeta[]> {
 export async function fetchDbTable(
   table: string,
   limit: number = 100,
-  offset: number = 0
+  offset: number = 0,
+  search?: string
 ): Promise<DbTableData> {
+  const qParam = search ? `&q=${encodeURIComponent(search)}` : "";
   const res = await fetch(
-    `${API_BASE}/db/tables/${encodeURIComponent(table)}?limit=${limit}&offset=${offset}`
+    `${API_BASE}/db/tables/${encodeURIComponent(table)}?limit=${limit}&offset=${offset}${qParam}`
   );
   if (!res.ok) throw new Error(await errorDetail(res));
   return res.json();
 }
 
+export async function deleteDbRow(table: string, pk: Record<string, string>): Promise<void> {
+  const res = await fetch(`${API_BASE}/db/tables/${encodeURIComponent(table)}`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pk }),
+  });
+  if (!res.ok) throw new Error(await errorDetail(res));
+}
+
 export async function fetchDbSchema(): Promise<DbSchema> {
   const res = await fetch(`${API_BASE}/db/schema`);
+  if (!res.ok) throw new Error(await errorDetail(res));
+  return res.json();
+}
+
+export async function auditAribaSupplier(smVendorId: string): Promise<any> {
+  const res = await fetch(`${API_BASE}/audit/ariba-supplier?sm_vendor_id=${encodeURIComponent(smVendorId)}`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(await errorDetail(res));
+  return res.json();
+}
+
+export async function testIngestDocument(
+  file: File,
+  mode: "single" | "all" = "single",
+  pageNumber: number = 1,
+  title?: string
+): Promise<any> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("mode", mode);
+  form.append("page_number", pageNumber.toString());
+  if (title) form.append("title", title);
+
+  const res = await fetch(`${UPLOAD_API_BASE}/documents/test-ingest`, {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) throw new Error(await errorDetail(res));
+  return res.json();
+}
+
+export async function commitIngestPages(
+  filename: string,
+  title: string,
+  pages: { page_number: number; markdown: string }[]
+): Promise<any> {
+  const res = await fetch(`${API_BASE}/documents/commit-pages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filename, title, pages }),
+  });
   if (!res.ok) throw new Error(await errorDetail(res));
   return res.json();
 }

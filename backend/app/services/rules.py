@@ -1,9 +1,9 @@
-"""Deterministic certificate rules used by the Qwen judge.
+"""Deterministic certificate rules for the Gemini verify pipeline.
 
 Reuses the battle-tested matchers/checks from `auditor.py` (no duplication) and
-exposes a single-document verification helper the judge can call to get a
-code-backed verdict + comparison rows. This guarantees the pipeline never
-depends solely on LLM judgement.
+exposes a single-document verification helper the verify endpoint can call to
+get a code-backed verdict + comparison rows. This guarantees the pipeline never
+depends on an LLM for the verdict.
 """
 
 import json
@@ -19,12 +19,12 @@ from app.services.auditor import (
     check_expiry,
     check_special_rules,
     check_standard_equivalence,
+    clean_question_label,
     classify_document,
     match_flexible,
     match_supplier,
     parse_pl_amount,
 )
-from app.services.legacy_gemini_audit import clean_question_label
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +38,22 @@ class RuleResult:
     expiry_status: Optional[str] = None
     comparison_rows: List[dict] = field(default_factory=list)
     reasons: List[str] = field(default_factory=list)
+
+
+def _derive_status_from_rules(rule: RuleResult) -> str:
+    """Map the deterministic verdict to a status without calling an LLM."""
+    if rule.verdict == "Match":
+        return "PASS"
+    # Intercepts that are unambiguous → FAIL; borderline → human review
+    hard_intercepts = {
+        "RECERTIFICATION_LETTER", "SSM_UPLOAD", "EXPIRED",
+        "PL_INSUFFICIENT", "WRONG_STANDARD", "SUPPLIER_MISMATCH", "WRONG_DOC",
+    }
+    if rule.intercept_type in hard_intercepts:
+        return "FAIL"
+    if rule.expiry_status == "PERMANENT_NEEDS_REVISION":
+        return "FAIL"
+    return "REQUIRES_HUMAN_REVIEW"
 
 
 def _parse_qa_map(qa_answers_str: str) -> Dict[str, str]:
@@ -60,10 +76,10 @@ def verify_document(
     ariba_qa_answers: Optional[str] = "[]",
     qa_data_title: str = "",
 ) -> RuleResult:
-    """Run the full deterministic rule engine on a single extracted certificate.
+    """    Run the full deterministic rule engine on a single extracted certificate.
 
     Mirrors the core of `auditor.run_full_audit` for one document, returning a
-    structured RuleResult the judge can annotate with Qwen reasoning.
+    structured RuleResult used for the code-backed verdict.
     """
     question_label = clean_question_label(ariba_question_label)
     region = detect_region(qa_data_title or question_label)

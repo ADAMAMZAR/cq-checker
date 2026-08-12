@@ -64,16 +64,17 @@ async def store_and_record(
     filename: str,
     content_type: str,
     bucket: Optional[str] = None,
-) -> Optional[str]:
+) -> tuple[Optional[str], Optional[object]]:
     """Upload a file AND record its metadata in ``object_storage``.
 
     Wrapper around the active StorageProvider that persists (file_url, bucket,
     object_key, content_type, size_bytes, sha256 checksum) so Phase 8 can map
-    old URLs to GCS objects. Returns the public URL or None on failure.
+    old URLs to GCS objects. Returns tuple (file_url, object_id) or (None, None) on failure.
     """
     file_url = get_storage().upload(file_bytes, folder, filename, content_type)
     if not file_url:
-        return None
+        return None, None
+    object_id = None
     try:
         from app.db.session import get_session_factory
         from app.repositories.object_storage import ObjectStorageRepository
@@ -81,15 +82,26 @@ async def store_and_record(
         factory = get_session_factory()
         async with factory() as session:
             repo = ObjectStorageRepository(session)
-            await repo.create(
-                file_url=file_url,
-                bucket=bucket,
-                object_key=file_url,
-                content_type=content_type or None,
-                size_bytes=len(file_bytes),
-                checksum=hashlib.sha256(file_bytes).hexdigest(),
-            )
+            existing = await repo.get_by_url(file_url)
+            if existing:
+                existing.size_bytes = len(file_bytes)
+                existing.checksum = hashlib.sha256(file_bytes).hexdigest()
+                if content_type:
+                    existing.content_type = content_type
+                await session.commit()
+                object_id = existing.id
+            else:
+                record = await repo.create(
+                    file_url=file_url,
+                    bucket=bucket,
+                    object_key=file_url,
+                    content_type=content_type or None,
+                    size_bytes=len(file_bytes),
+                    checksum=hashlib.sha256(file_bytes).hexdigest(),
+                )
+                object_id = record.id
     except Exception as e:
         # Metadata recording is best-effort; do not fail the upload because of it.
         logger.warning(f"Failed to record object metadata for {file_url}: {e}")
-    return file_url
+    return file_url, object_id
+

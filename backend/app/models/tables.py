@@ -57,32 +57,31 @@ class Document(Base):
     __tablename__ = "documents"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
+    object_id = Column(UUID(as_uuid=True), ForeignKey("object_storage.id", ondelete="SET NULL"), nullable=True, index=True)
     title = Column(String(255), nullable=False)
-    file_url = Column(Text, nullable=False)
-    file_hash = Column(String(64), nullable=True, unique=True, index=True)
+    input_tokens = Column(Integer, nullable=False, default=0)
+    output_tokens = Column(Integer, nullable=False, default=0)
+    cost_usd = Column(Numeric(12, 6), nullable=False, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    parent_chunks = relationship("ParentChunk", back_populates="document", cascade="all, delete-orphan")
+    object_storage = relationship("ObjectStorage")
+    pages = relationship("DocumentPage", back_populates="document", cascade="all, delete-orphan")
+
+    @property
+    def file_url(self) -> str:
+        return self.object_storage.file_url if self.object_storage else ""
+
+    @property
+    def file_hash(self) -> Optional[str]:
+        return self.object_storage.checksum if self.object_storage else None
 
 
-class ParentChunk(Base):
-    __tablename__ = "parent_chunks"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
-    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
-    content = Column(Text, nullable=False)
-    page_number = Column(Integer, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    document = relationship("Document", back_populates="parent_chunks")
-    child_chunks = relationship("ChildChunk", back_populates="parent", cascade="all, delete-orphan")
-
-
-class ChildChunk(Base):
-    __tablename__ = "child_chunks"
+class DocumentPage(Base):
+    __tablename__ = "document_pages"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
-    parent_id = Column(UUID(as_uuid=True), ForeignKey("parent_chunks.id", ondelete="CASCADE"), nullable=False)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True)
+    page_number = Column(Integer, nullable=False)
     content = Column(Text, nullable=False)
     embedding = Column(Vector(1536), nullable=True)
     tsv_content = Column(
@@ -93,7 +92,11 @@ class ChildChunk(Base):
     )
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    parent = relationship("ParentChunk", back_populates="child_chunks")
+    document = relationship("Document", back_populates="pages")
+
+    __table_args__ = (
+        CheckConstraint("page_number > 0", name="chk_document_pages_page_number"),
+    )
 
 
 # ── Certificate Verification ─────────────────────────────────────────────────
@@ -102,12 +105,21 @@ class CertificateVerification(Base):
     __tablename__ = "certificate_verifications"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
-    file_url = Column(Text, nullable=False)
-    file_hash = Column(String(64), nullable=True, unique=True, index=True)
+    object_id = Column(UUID(as_uuid=True), ForeignKey("object_storage.id", ondelete="SET NULL"), nullable=True, index=True)
     extracted_data = Column(JSONB, nullable=False)
     status = Column(String(50), nullable=False)  # PASS, FAIL, REQUIRES_HUMAN_REVIEW
-    judge_reasoning = Column(Text, nullable=True)
+    reasoning_trace = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    object_storage = relationship("ObjectStorage")
+
+    @property
+    def file_url(self) -> str:
+        return self.object_storage.file_url if self.object_storage else ""
+
+    @property
+    def file_hash(self) -> Optional[str]:
+        return self.object_storage.checksum if self.object_storage else None
 
     __table_args__ = (
         CheckConstraint(
@@ -162,10 +174,28 @@ class ChatMessage(Base):
     session_id = Column(String(100), ForeignKey("chat_sessions.session_id", ondelete="CASCADE"), nullable=False, index=True)
     role = Column(String(20), nullable=False)  # "user" | "assistant"
     content = Column(Text, nullable=False)
+    sources = Column(JSONB, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
         CheckConstraint("role IN ('user', 'assistant')", name="chk_chat_messages_role"),
+    )
+
+
+class ChatFeedback(Base):
+    __tablename__ = "chat_feedback"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
+    message_id = Column(UUID(as_uuid=True), ForeignKey("chat_messages.id", ondelete="CASCADE"), nullable=False, index=True)
+    session_id = Column(String(100), nullable=False, index=True)
+    rating = Column(String(20), nullable=False)
+    reason = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    message = relationship("ChatMessage")
+
+    __table_args__ = (
+        CheckConstraint("rating IN ('satisfied', 'not_satisfied')", name="chk_chat_feedback_rating"),
     )
 
 
@@ -178,8 +208,12 @@ class ChatLog(Base):
     output_tokens = Column(Integer, nullable=False, default=0)
     cost_usd = Column(Numeric(12, 6), nullable=False, default=0)
     cache_hit = Column(Integer, nullable=False, default=0)  # 0/1
+    cached_query_id = Column(UUID(as_uuid=True), ForeignKey("query_cache.id", ondelete="SET NULL"), nullable=True, index=True)
+    cached_query_text = Column(Text, nullable=True)
     latency_ms = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    cached_query = relationship("QueryCache")
 
 
 # ── Object Storage Metadata (Phase 8 GCS migration readiness) ────────────────
@@ -221,7 +255,6 @@ class AuditLog(Base):
     complete_qa_data_dump = Column(Text, nullable=True, default="[]")
     compiled_extracted_data = Column(Text, nullable=False)
     result = Column(String(50), nullable=True, default="Mismatch")
-    expiration_date = Column(String(50), nullable=True, default="N/A")
     suggested_comment = Column(Text, nullable=False)
     screenshot_url = Column(Text, nullable=True)
     comparison_input_tokens = Column(Integer, nullable=False, default=0)
@@ -242,6 +275,7 @@ class DocumentEvidence(Base):
     __tablename__ = "document_evidence"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
+    object_id = Column(UUID(as_uuid=True), ForeignKey("object_storage.id", ondelete="SET NULL"), nullable=True, index=True)
     audit_id = Column(String(100), ForeignKey("audit_logs.audit_id", ondelete="CASCADE"), nullable=False, index=True)
     supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=False)
     supplier_name = Column(String(255), nullable=False)
@@ -254,8 +288,19 @@ class DocumentEvidence(Base):
     input_tokens = Column(Integer, nullable=False, default=0)
     output_tokens = Column(Integer, nullable=False, default=0)
     cost_usd = Column(Numeric(12, 6), nullable=False, default=0)
-    file_hash = Column(String(64), nullable=True)
-    file_url = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    object_storage = relationship("ObjectStorage")
+    supplier = relationship("Supplier")
+
+    @property
+    def file_url(self) -> str:
+        return self.object_storage.file_url if self.object_storage else ""
+
+    @property
+    def file_hash(self) -> Optional[str]:
+        return self.object_storage.checksum if self.object_storage else None
+
+
 
 

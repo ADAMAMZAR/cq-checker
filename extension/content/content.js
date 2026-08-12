@@ -368,7 +368,13 @@
     }
 
     const files = [];
+    const seenFileUrls = new Set();
     finalAnchors.forEach(a => {
+      // Same attachment attached under several questions -> one URL entry, so
+      // the extension downloads it once and the backend records it per question.
+      const url = (a.href || '').trim();
+      if (url && seenFileUrls.has(url)) return;
+      if (url) seenFileUrls.add(url);
       a.style.outline = '2px solid green';
       files.push({
         url: a.href,

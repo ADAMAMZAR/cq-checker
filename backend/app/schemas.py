@@ -4,8 +4,9 @@ from typing import Optional, List
 class SupplierEntry(BaseModel):
     supplier_id: int = Field(..., description="Unique sequential integer ID of the supplier")
     supplier_name: str = Field(..., description="Cleaned supplier name")
-    created_at: str = Field(..., description="Timestamp of when the supplier was first audited")
+    created_at: str = Field(default="", description="Timestamp of when the supplier was first audited")
     date_added: Optional[str] = Field(None, description="Legacy alias for created_at")
+    sm_vendor_id: Optional[str] = Field(None, description="Ariba SM Vendor ID")
 
 class DocumentEvidence(BaseModel):
     audit_id: str = Field(..., description="Unique UUID for the audit run")
@@ -42,7 +43,6 @@ class AuditLogEntry(BaseModel):
     complete_qa_data_dump: Optional[str] = Field(default="[]", description="JSON string of all QA pairs scraped from the page")
     compiled_extracted_data: str = Field(..., description="JSON string of compiled metadata from all documents")
     result: Optional[str] = Field(default="Mismatch", description="Audit Result (Match/Mismatch)")
-    expiration_date: Optional[str] = Field(default="N/A", description="Expiration Date of the certificate")
     suggested_comment: str = Field(..., description="Suggested feedback or comments")
     screenshot_url: Optional[str] = Field(None, description="Hosting path for verification screenshot")
     comparison_input_tokens: int = Field(default=0, description="Gemini prompt input tokens for comparison audit")
@@ -65,7 +65,6 @@ class AuditResultResponse(BaseModel):
     cert_type: Optional[str] = "Relational evidence"
     filename: str
     result: Optional[str] = "Mismatch"
-    expiration_date: Optional[str] = "N/A"
     suggested_comment: str
     screenshot_url: Optional[str] = None
     comparison_input_tokens: int = 0
@@ -104,9 +103,8 @@ class CertificateVerificationResponse(BaseModel):
     file_url: str
     extracted_data: dict
     status: str
-    judge_reasoning: Optional[str] = None
+    reasoning_trace: Optional[str] = None
     confidence: Optional[float] = None
-    judge_source: Optional[str] = None
     created_at: Optional[str] = None
 
 
@@ -115,7 +113,6 @@ class CertificateVerifyResult(BaseModel):
     extracted_data: dict
     reasoning_trace: str
     confidence: float
-    judge_source: str
     rule_result: Optional[dict] = None
     record_id: Optional[str] = None
 
@@ -124,6 +121,7 @@ class DocumentIngestResult(BaseModel):
     document_id: Optional[str] = None
     title: str
     status: str
+    page_count: int = 0
     parent_count: int = 0
     child_count: int = 0
     cost_usd: float = 0.0
@@ -134,6 +132,7 @@ class DocumentSummary(BaseModel):
     id: str
     title: str
     file_url: str
+    page_count: int = 0
     parent_count: int = 0
     child_count: int = 0
     created_at: Optional[str] = None
@@ -158,9 +157,25 @@ class ChatResponse(BaseModel):
     cost_usd: float = 0.0
     cache_hit: bool = False
     session_id: Optional[str] = None
+    message_id: Optional[str] = None
 
 
 class ChatHistoryResponse(BaseModel):
     session_id: str
     messages: List[dict] = []
+
+
+class FeedbackRequest(BaseModel):
+    message_id: str
+    session_id: str
+    rating: str
+    reason: Optional[str] = None
+
+
+class FeedbackResponse(BaseModel):
+    id: str
+    message_id: str
+    rating: str
+    reason: Optional[str] = None
+    created_at: Optional[str] = None
 

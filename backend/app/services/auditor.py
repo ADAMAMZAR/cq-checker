@@ -756,6 +756,92 @@ def clean_question_label(label: Optional[str]) -> str:
 # Orchestrator — Evaluation Precedence Waterfall
 # ---------------------------------------------------------------------------
 
+
+def _expected_cert_info(ctx: dict) -> tuple[str, str]:
+    """Extract expected (certificate_type, state_location) for a question context.
+    Reads from QA answers list or infers from the question label.
+    """
+    qa_answers_str = ctx.get("ariba_qa_answers", "[]")
+    q_label = ctx.get("ariba_question_label", "")
+
+    exp_type = ""
+    exp_state = ""
+
+    try:
+        qa_list = json.loads(qa_answers_str or "[]")
+        if isinstance(qa_list, list):
+            for item in qa_list:
+                lbl = str(item.get("label", "")).strip().lower()
+                val = str(item.get("value", "")).strip()
+                if "certificate type" in lbl and val:
+                    exp_type = val
+                elif ("state" in lbl or "location" in lbl) and val:
+                    exp_state = val
+    except Exception:
+        pass
+
+    # Infer from question label if expected type/state are missing
+    q_label_lower = q_label.lower()
+
+    if not exp_type:
+        if "workers' compensation" in q_label_lower or "workers compensation" in q_label_lower:
+            exp_type = "Workers Compensation"
+        elif "public liability" in q_label_lower:
+            exp_type = "Public Liability"
+        elif "professional indemnity" in q_label_lower:
+            exp_type = "Professional Indemnity"
+        elif "motor vehicle" in q_label_lower:
+            exp_type = "Motor Vehicle"
+        elif "iso 9001" in q_label_lower:
+            exp_type = "ISO 9001"
+        elif "iso 14001" in q_label_lower:
+            exp_type = "ISO 14001"
+        elif "iso 45001" in q_label_lower or "ohsas 18001" in q_label_lower:
+            exp_type = "ISO 45001"
+        elif "cidb" in q_label_lower:
+            exp_type = "CIDB Certificate"
+        elif "ssm" in q_label_lower:
+            exp_type = "SSM Profile"
+
+    if not exp_state:
+        # Detect Australian state in parentheses or standalone word
+        au_states = ["NSW", "VIC", "QLD", "WA", "SA", "TAS", "ACT", "NT"]
+        for st in au_states:
+            if re.search(rf'\b{st}\b', q_label, re.IGNORECASE):
+                exp_state = st
+                break
+
+    return exp_type, exp_state
+
+
+def _cert_matches_expected(cert: dict, expected_type: str, expected_state: str, region_config) -> bool:
+    ev_ct = str(cert.get("certificateType", "") or "")
+    if not ev_ct or ev_ct == "N/A":
+        return False
+
+    type_matched = True
+    if expected_type:
+        type_matched = match_flexible(ev_ct, expected_type) or check_standard_equivalence(ev_ct, expected_type, region_config)
+
+    if not type_matched:
+        return False
+
+    if expected_state:
+        ev_loc = str(cert.get("certificateLocation", "") or "")
+        cert_text = json.dumps(cert).upper()
+        st_upper = expected_state.upper()
+
+        # Check location or full cert text for state match
+        state_matched = (
+            re.search(rf'\b{st_upper}\b', ev_loc, re.IGNORECASE) is not None
+            or re.search(rf'\b{st_upper}\b', cert_text) is not None
+        )
+        if not state_matched:
+            return False
+
+    return True
+
+
 def run_full_audit(
     supplier_name: str,
     file_contexts: list,
@@ -773,7 +859,38 @@ def run_full_audit(
         "tables": [],
     }
 
-    pairs = list(zip(file_contexts, extraction_results))
+    # Expand multi-certificate extractions ({"certificates": [...]}) into one
+    # comparison entry per certificate. Flat single-cert dicts pass through
+    # unchanged (cert_index stays None), preserving legacy behaviour.
+    # When a merged file holds several certificates, only the ones matching the
+    # question's expected certificate type and state are audited against that question.
+    pairs = []
+    for ctx, extracted in zip(file_contexts, extraction_results):
+        certs = extracted.get("certificates") if isinstance(extracted, dict) else None
+        if isinstance(certs, list) and len(certs) > 1:
+            exp_type, exp_state = _expected_cert_info(ctx)
+            selected_with_idx = [
+                (i, c) for i, c in enumerate(certs, start=1)
+                if _cert_matches_expected(c, exp_type, exp_state, region_config)
+            ]
+            if not selected_with_idx and exp_type:
+                # Fall back to type matching if state match is unavailable
+                selected_with_idx = [
+                    (i, c) for i, c in enumerate(certs, start=1)
+                    if match_flexible(str(c.get("certificateType", "")), exp_type)
+                    or check_standard_equivalence(str(c.get("certificateType", "")), exp_type, region_config)
+                ]
+            if not selected_with_idx:
+                # If no cert matches type or state, pick only the FIRST cert as single representative candidate
+                selected_with_idx = [(1, certs[0])]
+
+            for i, cert in selected_with_idx:
+                pairs.append((ctx, cert, i))
+        elif isinstance(certs, list) and len(certs) == 1:
+            # Single-cert nested output unwraps to the flat dict (legacy shape).
+            pairs.append((ctx, certs[0], None))
+        else:
+            pairs.append((ctx, extracted, None))
 
     def _sort_key(pair):
         label = clean_question_label(pair[0].get("ariba_question_label", "General Attachment"))
@@ -790,10 +907,11 @@ def run_full_audit(
     all_comment_parts = []
     intercept_groups = defaultdict(list)
 
-    for ctx, extracted_data in pairs:
+    for ctx, extracted_data, cert_index in pairs:
         question_label = clean_question_label(ctx.get("ariba_question_label", "General Attachment"))
         qa_answers_str = ctx.get("ariba_qa_answers", "[]")
         filename = ctx.get("filename", "")
+        cert_suffix = f" [Cert {cert_index}]" if cert_index else ""
 
         qa_answers_list = []
         try:
@@ -825,6 +943,8 @@ def run_full_audit(
             "expiry_status": None,
             "comparison_rows": [],
         }
+        if cert_index:
+            table_entry["certificate_index"] = cert_index
 
         intercept = None
         intercept_params = {}
@@ -950,13 +1070,13 @@ def run_full_audit(
                     (k, str(v)) for k, v in intercept_params.items()
                 ))
                 intercept_groups[group_key].append({
-                    "label": question_label,
+                    "label": question_label + cert_suffix,
                     "filename": filename,
                     "lines": entry_lines,
                 })
             else:
                 # Non-intercept entries (field-level, PL_INSUFFICIENT) — keep individual
-                label = f"{question_label} ({filename})" if filename else question_label
+                label = (f"{question_label} ({filename})" if filename else question_label) + cert_suffix
                 block = f"{label}:\n" + "\n".join(f"- {line}" for line in entry_lines)
                 all_comment_parts.append(block)
 
@@ -972,15 +1092,20 @@ def run_full_audit(
             block = f"{label}:\n" + "\n".join(f"- {line}" for line in entry["lines"])
             all_comment_parts.append(block)
 
+    def _comment_sort_key(comment_block: str) -> list[int]:
+        m = re.search(r'(\d+(?:\.\d+)*)', comment_block)
+        if m:
+            try:
+                return [int(x) for x in m.group(1).split(".")]
+            except Exception:
+                pass
+        return [9999]
+
+    all_comment_parts.sort(key=_comment_sort_key)
+
     if not all_comment_parts:
         suggested_comment = "All match."
     else:
-        body = "\n\n".join(all_comment_parts)
-        suggested_comment = (
-            "Dear Sir/Madam,\n\n"
-            "We seek for your resubmission for the following in Part 2: Modular Certificates Questionnaire:\n\n"
-            f"{body}\n\n"
-            "Thank you."
-        )
+        suggested_comment = "\n\n".join(all_comment_parts)
 
     return overall_verdict, suggested_comment, comparison_table

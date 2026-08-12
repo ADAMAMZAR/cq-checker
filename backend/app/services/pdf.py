@@ -1,6 +1,6 @@
 """PDF rendering helpers.
 
-Converts PDF pages into JPEG images so multimodal models (DeepSeek V4 Flash)
+Converts PDF pages into JPEG images so multimodal models (Gemini 3.5 Flash Lite)
 can read them. Handles both native text+image PDFs and full-image scans by
 rendering every page to a raster image.
 """
