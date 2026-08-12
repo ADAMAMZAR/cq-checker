@@ -353,9 +353,10 @@ async def get_table_data(table: str, limit: int = 100, offset: int = 0, search: 
         where_clause = ""
         params: Dict[str, Any] = {"lim": limit, "off": offset}
         if search and search.strip():
-            text_cols = [c for c in columns if c not in ("embedding", "tsv_content", "id", "document_id", "created_at")]
-            if text_cols:
-                clauses = [f'CAST("{c}" AS TEXT) ILIKE :s' for c in text_cols]
+            # Exclude non-textual heavy columns (vectors, tsvector) from ILIKE search
+            searchable_cols = [c for c in columns if c not in ("embedding", "tsv_content")]
+            if searchable_cols:
+                clauses = [f'CAST("{c}" AS TEXT) ILIKE :s' for c in searchable_cols]
                 where_clause = " WHERE " + " OR ".join(clauses)
                 params["s"] = f"%{search.strip()}%"
 
