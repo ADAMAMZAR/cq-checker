@@ -16,6 +16,8 @@ import type {
   DbTableMeta,
   DbTableData,
   DbSchema,
+  FeedbackRating,
+  FeedbackResponse,
 } from "@/types";
 
 // Single seam for backend routing.
@@ -206,6 +208,7 @@ export async function sendChat(
     cost_usd: done.cost_usd ?? 0,
     cache_hit: !!done.cache_hit,
     session_id: done.session_id ?? sessionId,
+    message_id: done.message_id ?? null,
   };
 }
 
@@ -220,6 +223,26 @@ export async function clearChatCache(): Promise<number> {
   if (!res.ok) throw new Error(await errorDetail(res));
   const data = await res.json();
   return data.cleared ?? 0;
+}
+
+export async function submitFeedback(
+  messageId: string,
+  sessionId: string,
+  rating: FeedbackRating,
+  reason?: string
+): Promise<FeedbackResponse> {
+  const res = await fetch(`${API_BASE}/chat/feedback`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      message_id: messageId,
+      session_id: sessionId,
+      rating,
+      reason: reason || null,
+    }),
+  });
+  if (!res.ok) throw new Error(await errorDetail(res));
+  return res.json();
 }
 
 // ── Document Ingestion ───────────────────────────────────────────────────────

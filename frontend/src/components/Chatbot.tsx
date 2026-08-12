@@ -11,9 +11,12 @@ import {
   IconBulb,
   IconArrowLeft,
   IconSourceCode,
+  IconThumbUp,
+  IconThumbDown,
+  IconX,
 } from "@tabler/icons-react";
-import { sendChat, fetchChatHistory, fetchDocuments, buildFileUrl } from "@/lib/api";
-import type { ChatSource } from "@/types";
+import { sendChat, fetchChatHistory, fetchDocuments, buildFileUrl, submitFeedback } from "@/lib/api";
+import type { ChatSource, FeedbackRating } from "@/types";
 
 const CitationSidePanel = dynamic(() => import("@/components/CitationSidePanel"), { ssr: false });
 
@@ -30,6 +33,8 @@ interface ChatMessage {
   cacheHit?: boolean;
   costUsd?: number;
   isStreaming?: boolean;
+  dbMessageId?: string;
+  feedbackGiven?: FeedbackRating;
 }
 
 const SESSION_KEY = "cq_chat_session";
@@ -64,12 +69,22 @@ function nowLabel(): string {
 
 const REMARK_PLUGINS = [remarkGfm];
 
+const FEEDBACK_REASONS = [
+  "Incorrect information",
+  "Incomplete answer",
+  "Off-topic response",
+  "Too verbose",
+  "Other",
+] as const;
+
 const ChatMessageItem = memo(function ChatMessageItem({
   msg,
   onOpenCitation,
+  onFeedback,
 }: {
   msg: ChatMessage;
   onOpenCitation: (src: ChatSource) => void;
+  onFeedback: (msg: ChatMessage, rating: FeedbackRating) => void;
 }) {
   const formattedText = useMemo(() => formatCitationLinks(msg.text), [msg.text]);
 
@@ -192,10 +207,145 @@ const ChatMessageItem = memo(function ChatMessageItem({
             </div>
           </div>
         )}
+        {msg.sender === "ai" && !msg.isStreaming && msg.dbMessageId && (
+          <div className="flex items-center gap-1 mt-2">
+            <button
+              onClick={() => onFeedback(msg, "satisfied")}
+              disabled={!!msg.feedbackGiven}
+              className={`p-1.5 rounded-lg transition-all ${
+                msg.feedbackGiven === "satisfied"
+                  ? "bg-[var(--accent-success)] text-white"
+                  : msg.feedbackGiven
+                  ? "text-[var(--text-tertiary)] opacity-40 cursor-not-allowed"
+                  : "text-[var(--text-secondary)] hover:text-[var(--accent-success)] hover:bg-[var(--accent-primary-soft)] cursor-pointer"
+              }`}
+              title="Satisfied"
+              aria-label="Mark as satisfied"
+            >
+              <IconThumbUp className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => onFeedback(msg, "not_satisfied")}
+              disabled={!!msg.feedbackGiven}
+              className={`p-1.5 rounded-lg transition-all ${
+                msg.feedbackGiven === "not_satisfied"
+                  ? "bg-[var(--accent-danger)] text-white"
+                  : msg.feedbackGiven
+                  ? "text-[var(--text-tertiary)] opacity-40 cursor-not-allowed"
+                  : "text-[var(--text-secondary)] hover:text-[var(--accent-danger-text)] hover:bg-[var(--accent-primary-soft)] cursor-pointer"
+              }`}
+              title="Not satisfied"
+              aria-label="Mark as not satisfied"
+            >
+              <IconThumbDown className="w-4 h-4" />
+            </button>
+            {msg.feedbackGiven && (
+              <span className="text-[10px] text-[var(--text-tertiary)] ml-1">
+                Thanks for your feedback
+              </span>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
 });
+
+function FeedbackModal({
+  messageId,
+  onClose,
+  onSubmit,
+}: {
+  messageId: string;
+  onClose: () => void;
+  onSubmit: (messageId: string, rating: FeedbackRating, reason?: string) => Promise<void>;
+}) {
+  const [selectedReasons, setSelectedReasons] = useState<string[]>([]);
+  const [customReason, setCustomReason] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const toggleReason = (reason: string) => {
+    setSelectedReasons((prev) =>
+      prev.includes(reason) ? prev.filter((r) => r !== reason) : [...prev, reason]
+    );
+  };
+
+  const handleSubmit = async () => {
+    const reasons = [...selectedReasons];
+    if (customReason.trim()) reasons.push(customReason.trim());
+    const reasonText = reasons.join("; ") || undefined;
+
+    setSubmitting(true);
+    try {
+      await onSubmit(messageId, "not_satisfied", reasonText);
+      onClose();
+    } catch {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fade-in">
+      <div className="bg-[var(--bg-card)] border border-[var(--border-visible)] rounded-2xl shadow-2xl w-full max-w-md mx-4 animate-slide-up">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border-subtle)]">
+          <h3 className="text-base font-bold text-[var(--heading-color)]">
+            What went wrong?
+          </h3>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-[var(--text-secondary)] hover:text-[var(--heading-color)] hover:bg-[var(--bg-surface)] transition-all cursor-pointer"
+            aria-label="Close"
+          >
+            <IconX className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="px-5 py-4 space-y-4">
+          <p className="text-sm text-[var(--text-secondary)]">
+            Help us improve by telling us what was wrong with this response.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {FEEDBACK_REASONS.map((reason) => (
+              <button
+                key={reason}
+                onClick={() => toggleReason(reason)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all border ${
+                  selectedReasons.includes(reason)
+                    ? "bg-[var(--accent-primary)] text-white border-[var(--accent-primary-border-strong)]"
+                    : "bg-[var(--bg-surface)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:border-[var(--accent-primary-border)] hover:text-[var(--accent-primary-text)]"
+                } cursor-pointer`}
+              >
+                {reason}
+              </button>
+            ))}
+          </div>
+          <textarea
+            value={customReason}
+            onChange={(e) => setCustomReason(e.target.value)}
+            placeholder="Or describe the issue in your own words..."
+            rows={3}
+            className="w-full px-3 py-2 text-sm bg-[var(--bg-input)] border border-[var(--border-visible)] rounded-xl text-[var(--heading-color)] placeholder-[var(--text-tertiary)] outline-none focus:border-[var(--accent-primary-border-focus)] focus:ring-2 focus:ring-[var(--accent-primary-ring)] transition-all resize-none"
+          />
+        </div>
+        <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-[var(--border-subtle)]">
+          <button
+            onClick={onClose}
+            disabled={submitting}
+            className="px-4 py-2 rounded-xl text-sm font-medium text-[var(--text-secondary)] hover:text-[var(--heading-color)] hover:bg-[var(--bg-surface)] transition-all cursor-pointer disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={submitting || (!selectedReasons.length && !customReason.trim())}
+            className="px-4 py-2 rounded-xl text-sm font-bold text-white bg-[var(--accent-primary)] hover:bg-[var(--accent-primary-hover)] shadow-md transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {submitting ? "Submitting..." : "Submit Feedback"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -203,6 +353,7 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
   const [isTyping, setIsTyping] = useState(false);
   const [pdfView, setPdfView] = useState<{ fileUrl: string; page: number; title: string } | null>(null);
   const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [feedbackModal, setFeedbackModal] = useState<{ messageId: string } | null>(null);
   const sessionRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -231,6 +382,8 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
             text: m.content,
             sources: m.sources ?? [],
             timestamp: m.created_at ? new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : nowLabel(),
+            dbMessageId: m.id ?? undefined,
+            feedbackGiven: m.feedback_rating ?? undefined,
           }))
         );
       })
@@ -241,14 +394,18 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
   }, [getSessionId]);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const scrollToBottom = useCallback((instant = false) => {
     if (scrollContainerRef.current) {
       const el = scrollContainerRef.current;
-      const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 180;
-      if (instant || isNearBottom) {
-        el.scrollTop = el.scrollHeight;
-      }
+      // Wrap layout reads in requestAnimationFrame to avoid synchronous layout thrashing (forced reflow)
+      window.requestAnimationFrame(() => {
+        const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 250;
+        if (instant || isNearBottom) {
+          el.scrollTop = el.scrollHeight;
+        }
+      });
     }
   }, []);
 
@@ -259,16 +416,25 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
       if (scrollContainerRef.current) {
         scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
       }
-    }, 50);
+    }, 80);
     return () => clearTimeout(timer);
   }, [historyLoaded]);
 
+  // Debounce scroll triggers slightly during fast AI streaming deltas
   useEffect(() => {
     if (!historyLoaded) return;
-    scrollToBottom(isTyping);
+    if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+    scrollTimeoutRef.current = setTimeout(() => {
+      scrollToBottom(isTyping);
+    }, 16); // ~60fps frame budget
   }, [messages, isTyping, historyLoaded, scrollToBottom]);
 
-  useEffect(() => () => abortRef.current?.abort(), []);
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+    };
+  }, []);
 
   const openCitation = useCallback(async (source?: ChatSource) => {
     if (!source) return;
@@ -290,6 +456,33 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
       title: source.title || "Source Document",
     });
   }, []);
+
+  const handleFeedback = useCallback((msg: ChatMessage, rating: FeedbackRating) => {
+    if (msg.feedbackGiven || !msg.dbMessageId) return;
+    if (rating === "satisfied") {
+      const sid = getSessionId();
+      submitFeedback(msg.dbMessageId, sid, "satisfied")
+        .then(() => {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === msg.id ? { ...m, feedbackGiven: "satisfied" } : m))
+          );
+        })
+        .catch(() => {
+          /* silently fail */
+        });
+    } else {
+      setFeedbackModal({ messageId: msg.dbMessageId });
+    }
+  }, [getSessionId]);
+
+  const handleSubmitFeedback = useCallback(async (messageId: string, rating: FeedbackRating, reason?: string) => {
+    await submitFeedback(messageId, getSessionId(), rating, reason);
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.dbMessageId === messageId ? { ...m, feedbackGiven: rating } : m
+      )
+    );
+  }, [getSessionId]);
 
   const handleSend = useCallback(
     async (textToSend?: string) => {
@@ -373,6 +566,7 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
                 cacheHit: result.cache_hit,
                 costUsd: result.cost_usd,
                 isStreaming: false,
+                dbMessageId: result.message_id ?? undefined,
               }
               : m
           )
@@ -411,9 +605,10 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
     ]);
   };
   return (
+    <>
     <Group orientation="horizontal" className="flex-1 min-h-0" id="chat-citation-panels">
       <Panel defaultSize={pdfView ? 50 : 100} minSize={30}>
-        <div className="flex flex-col h-[calc(100vh-140px)] min-h-[550px] rounded-2xl border border-[var(--border-visible)] bg-[var(--bg-card)] shadow-2xl backdrop-blur-2xl overflow-hidden animate-fade-in">
+        <div className="flex flex-col h-[calc(100vh-140px)] min-h-[550px] rounded-2xl border border-[var(--border-visible)] bg-[var(--bg-card)] shadow-2xl overflow-hidden animate-fade-in">
           {/* ── Top Header ── */}
           <header className="px-6 py-4 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] flex items-center justify-between shrink-0">
             <div className="flex items-center gap-3.5">
@@ -446,7 +641,7 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
               </div>
             ) : (
               messages.map((msg) => (
-                <ChatMessageItem key={msg.id} msg={msg} onOpenCitation={openCitation} />
+                <ChatMessageItem key={msg.id} msg={msg} onOpenCitation={openCitation} onFeedback={handleFeedback} />
               ))
             )}
             <div ref={chatEndRef} />
@@ -513,5 +708,13 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
         </Panel>
       )}
     </Group>
+    {feedbackModal && (
+      <FeedbackModal
+        messageId={feedbackModal.messageId}
+        onClose={() => setFeedbackModal(null)}
+        onSubmit={handleSubmitFeedback}
+      />
+    )}
+  </>
   );
 }

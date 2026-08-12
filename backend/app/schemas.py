@@ -157,9 +157,25 @@ class ChatResponse(BaseModel):
     cost_usd: float = 0.0
     cache_hit: bool = False
     session_id: Optional[str] = None
+    message_id: Optional[str] = None
 
 
 class ChatHistoryResponse(BaseModel):
     session_id: str
     messages: List[dict] = []
+
+
+class FeedbackRequest(BaseModel):
+    message_id: str
+    session_id: str
+    rating: str
+    reason: Optional[str] = None
+
+
+class FeedbackResponse(BaseModel):
+    id: str
+    message_id: str
+    rating: str
+    reason: Optional[str] = None
+    created_at: Optional[str] = None
 

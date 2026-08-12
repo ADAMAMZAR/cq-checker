@@ -36,14 +36,11 @@ frontend/build/
 .DS_Store
 Thumbs.db
 
-MVP.md
-PRD.md
-/Product Requirement Document (PRD).md
-/Development-Plan.md
 /audit-rules-review.html
 /backend/reaudit_db.py
 /backend/revert_audit.py
 /backend/test_upload.py
+/script_overwrite_document_markdown.py
 
 # Next.js & Extension Node dependencies
 node_modules/
@@ -59,3 +56,4 @@ playwright-report/
 .impeccable/
 .gemini/
 skills-lock.json
+rag-doc/

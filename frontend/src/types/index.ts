@@ -186,6 +186,7 @@ export interface ChatResponse {
   cost_usd: number;
   cache_hit: boolean;
   session_id?: string | null;
+  message_id?: string | null;
 }
 
 export interface ChatHistoryResponse {
@@ -199,7 +200,25 @@ export interface ChatStreamDone {
   cost_usd: number;
   cache_hit: boolean;
   session_id?: string | null;
+  message_id?: string | null;
   error?: string;
+}
+
+export type FeedbackRating = "satisfied" | "not_satisfied";
+
+export interface FeedbackRequest {
+  message_id: string;
+  session_id: string;
+  rating: FeedbackRating;
+  reason?: string;
+}
+
+export interface FeedbackResponse {
+  id: string;
+  message_id: string;
+  rating: FeedbackRating;
+  reason?: string | null;
+  created_at?: string | null;
 }
 
 // ── Document Ingestion ───────────────────────────────────────────────────────

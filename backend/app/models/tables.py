@@ -182,6 +182,23 @@ class ChatMessage(Base):
     )
 
 
+class ChatFeedback(Base):
+    __tablename__ = "chat_feedback"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
+    message_id = Column(UUID(as_uuid=True), ForeignKey("chat_messages.id", ondelete="CASCADE"), nullable=False, index=True)
+    session_id = Column(String(100), nullable=False, index=True)
+    rating = Column(String(20), nullable=False)
+    reason = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    message = relationship("ChatMessage")
+
+    __table_args__ = (
+        CheckConstraint("rating IN ('satisfied', 'not_satisfied')", name="chk_chat_feedback_rating"),
+    )
+
+
 class ChatLog(Base):
     __tablename__ = "chat_logs"
 

@@ -6,7 +6,7 @@ from uuid import UUID
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.tables import ChatSession, ChatMessage, ChatLog
+from app.models.tables import ChatSession, ChatMessage, ChatLog, ChatFeedback
 
 
 class ChatSessionRepository:
@@ -87,3 +87,32 @@ class ChatLogRepository:
         await self.session.commit()
         await self.session.refresh(record)
         return record
+
+
+class ChatFeedbackRepository:
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def add(
+        self,
+        message_id: UUID,
+        session_id: str,
+        rating: str,
+        reason: Optional[str] = None,
+    ) -> ChatFeedback:
+        record = ChatFeedback(
+            message_id=message_id,
+            session_id=session_id,
+            rating=rating,
+            reason=reason,
+        )
+        self.session.add(record)
+        await self.session.commit()
+        await self.session.refresh(record)
+        return record
+
+    async def get_by_message_id(self, message_id: UUID) -> Optional[ChatFeedback]:
+        result = await self.session.execute(
+            select(ChatFeedback).where(ChatFeedback.message_id == message_id)
+        )
+        return result.scalar_one_or_none()

@@ -6,7 +6,7 @@ information_schema (whitelist), so arbitrary SQL injection is not possible.
 """
 
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
 
