@@ -580,7 +580,7 @@ function JsonComparisonTables({
               <div className={isActive && pdfUrl ? "xl:col-span-7 space-y-3" : "space-y-3"}>
                 {t.question_label && (
                   <div className="flex flex-row justify-between items-start gap-2 mt-1">
-                    <h4 className="text-xs font-bold text-[var(--text-primary)] tracking-wide">{t.question_label}</h4>
+                    <h4 className="text-xs font-bold text-[var(--text-primary)] tracking-wide">{t.question_label} - ({t.attached_file})</h4>
                     <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
                       {editingTableIdx === tIdx ? (
                         <>

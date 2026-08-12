@@ -13,6 +13,9 @@ import {
   IconSourceCode,
   IconThumbUp,
   IconThumbDown,
+  IconCopy,
+  IconCheck,
+  IconPlayerStop,
   IconX,
 } from "@tabler/icons-react";
 import { sendChat, fetchChatHistory, fetchDocuments, buildFileUrl, submitFeedback } from "@/lib/api";
@@ -46,7 +49,24 @@ const SUGGESTIONS = [
 
 function formatCitationLinks(text: string): string {
   if (!text) return "";
-  return text.replace(/\[(\d+(?:[\s,–-]+\d+)*)\]/g, (match, p1) => {
+  let cleanText = text
+    .replace(/\$\\rightarrow\$/g, "→")
+    .replace(/\\rightarrow/g, "→")
+    .replace(/\$\\Rightarrow\$/g, "⇒")
+    .replace(/\\Rightarrow/g, "⇒");
+
+  // Auto-number multi-line procedures if the model omitted "1. ", "2. " prefixes
+  if (!/^\s*\d+\.\s+/m.test(cleanText)) {
+    const rawLines = cleanText.split("\n").map((l) => l.trim()).filter(Boolean);
+    if (
+      rawLines.length >= 3 &&
+      rawLines.every((l) => !l.startsWith("#") && !l.startsWith("-") && !l.startsWith("*"))
+    ) {
+      cleanText = rawLines.map((line, idx) => `${idx + 1}. ${line}`).join("\n");
+    }
+  }
+
+  return cleanText.replace(/\[(\d+(?:[\s,–-]+\d+)*)\]/g, (match, p1) => {
     if (p1.includes("-") || p1.includes("–")) {
       const parts = p1.split(/[-–]/).map((s: string) => parseInt(s.trim(), 10));
       if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
@@ -86,10 +106,40 @@ const ChatMessageItem = memo(function ChatMessageItem({
   onOpenCitation: (src: ChatSource) => void;
   onFeedback: (msg: ChatMessage, rating: FeedbackRating) => void;
 }) {
+  const [copied, setCopied] = useState(false);
   const formattedText = useMemo(() => formatCitationLinks(msg.text), [msg.text]);
+
+  const handleCopy = useCallback(() => {
+    const textToCopy = formattedText || msg.text;
+    if (!textToCopy) return;
+    navigator.clipboard.writeText(textToCopy);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }, [formattedText, msg.text]);
 
   const markdownComponents = useMemo(
     () => ({
+      ol({ children, ...props }: any) {
+        return (
+          <ol className="list-decimal pl-6 my-2 space-y-1.5 text-left font-normal" {...props}>
+            {children}
+          </ol>
+        );
+      },
+      ul({ children, ...props }: any) {
+        return (
+          <ul className="list-disc pl-6 my-2 space-y-1.5 text-left font-normal" {...props}>
+            {children}
+          </ul>
+        );
+      },
+      li({ children, ...props }: any) {
+        return (
+          <li className="pl-1 leading-relaxed" {...props}>
+            {children}
+          </li>
+        );
+      },
       a({ href, children, ...props }: any) {
         if (href?.startsWith("#cite-")) {
           const idx = parseInt(href.replace("#cite-", ""), 10) - 1;
@@ -207,42 +257,67 @@ const ChatMessageItem = memo(function ChatMessageItem({
             </div>
           </div>
         )}
-        {msg.sender === "ai" && !msg.isStreaming && msg.dbMessageId && (
+        {msg.sender === "ai" && !msg.isStreaming && msg.text && (
           <div className="flex items-center gap-1 mt-2">
             <button
-              onClick={() => onFeedback(msg, "satisfied")}
-              disabled={!!msg.feedbackGiven}
-              className={`p-1.5 rounded-lg transition-all ${
-                msg.feedbackGiven === "satisfied"
-                  ? "bg-[var(--accent-success)] text-white"
-                  : msg.feedbackGiven
-                  ? "text-[var(--text-tertiary)] opacity-40 cursor-not-allowed"
-                  : "text-[var(--text-secondary)] hover:text-[var(--accent-success)] hover:bg-[var(--accent-primary-soft)] cursor-pointer"
-              }`}
-              title="Satisfied"
-              aria-label="Mark as satisfied"
+              onClick={handleCopy}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--heading-color)] hover:bg-[var(--accent-primary-soft)] transition-all cursor-pointer border border-[var(--border-subtle)] hover:border-[var(--accent-primary-border)] shadow-xs"
+              title="Copy response text"
+              aria-label="Copy response text"
+              type="button"
             >
-              <IconThumbUp className="w-4 h-4" />
+              {copied ? (
+                <>
+                  <IconCheck className="w-3.5 h-3.5 text-[var(--accent-success)]" />
+                  <span className="text-[11px] font-semibold text-[var(--accent-success)]">Copied!</span>
+                </>
+              ) : (
+                <>
+                  <IconCopy className="w-3.5 h-3.5 text-[var(--text-tertiary)]" />
+                  <span className="text-[11px]">Copy</span>
+                </>
+              )}
             </button>
-            <button
-              onClick={() => onFeedback(msg, "not_satisfied")}
-              disabled={!!msg.feedbackGiven}
-              className={`p-1.5 rounded-lg transition-all ${
-                msg.feedbackGiven === "not_satisfied"
-                  ? "bg-[var(--accent-danger)] text-white"
-                  : msg.feedbackGiven
-                  ? "text-[var(--text-tertiary)] opacity-40 cursor-not-allowed"
-                  : "text-[var(--text-secondary)] hover:text-[var(--accent-danger-text)] hover:bg-[var(--accent-primary-soft)] cursor-pointer"
-              }`}
-              title="Not satisfied"
-              aria-label="Mark as not satisfied"
-            >
-              <IconThumbDown className="w-4 h-4" />
-            </button>
-            {msg.feedbackGiven && (
-              <span className="text-[10px] text-[var(--text-tertiary)] ml-1">
-                Thanks for your feedback
-              </span>
+
+            {msg.dbMessageId && (
+              <>
+                <div className="w-px h-3.5 bg-[var(--border-subtle)] mx-0.5" />
+                <button
+                  onClick={() => onFeedback(msg, "satisfied")}
+                  disabled={!!msg.feedbackGiven}
+                  className={`p-1.5 rounded-lg transition-all ${
+                    msg.feedbackGiven === "satisfied"
+                      ? "bg-[var(--accent-success)] text-white"
+                      : msg.feedbackGiven
+                      ? "text-[var(--text-tertiary)] opacity-40 cursor-not-allowed"
+                      : "text-[var(--text-secondary)] hover:text-[var(--accent-success)] hover:bg-[var(--accent-primary-soft)] cursor-pointer"
+                  }`}
+                  title="Satisfied"
+                  aria-label="Mark as satisfied"
+                >
+                  <IconThumbUp className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => onFeedback(msg, "not_satisfied")}
+                  disabled={!!msg.feedbackGiven}
+                  className={`p-1.5 rounded-lg transition-all ${
+                    msg.feedbackGiven === "not_satisfied"
+                      ? "bg-[var(--accent-danger)] text-white"
+                      : msg.feedbackGiven
+                      ? "text-[var(--text-tertiary)] opacity-40 cursor-not-allowed"
+                      : "text-[var(--text-secondary)] hover:text-[var(--accent-danger-text)] hover:bg-[var(--accent-primary-soft)] cursor-pointer"
+                  }`}
+                  title="Not satisfied"
+                  aria-label="Mark as not satisfied"
+                >
+                  <IconThumbDown className="w-4 h-4" />
+                </button>
+                {msg.feedbackGiven && (
+                  <span className="text-[10px] text-[var(--text-tertiary)] ml-1">
+                    Thanks for your feedback
+                  </span>
+                )}
+              </>
             )}
           </div>
         )}
@@ -395,6 +470,27 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (textareaRef.current) {
+      if (!input) {
+        textareaRef.current.style.height = "38px";
+      } else {
+        textareaRef.current.style.height = "auto";
+        const newHeight = Math.max(38, Math.min(textareaRef.current.scrollHeight, 140));
+        textareaRef.current.style.height = `${newHeight}px`;
+      }
+    }
+  }, [input]);
+
+  const handleStop = useCallback(() => {
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
+    setIsTyping(false);
+  }, []);
 
   const scrollToBottom = useCallback((instant = false) => {
     if (scrollContainerRef.current) {
@@ -573,7 +669,13 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
         );
       } catch (err) {
         if (flushTimer) clearTimeout(flushTimer);
-        if (err instanceof DOMException && err.name === "AbortError") return;
+        const isAbort = (err instanceof DOMException && err.name === "AbortError") || (err as any)?.name === "AbortError";
+        if (isAbort) {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === aiMsgId ? { ...m, isStreaming: false } : m))
+          );
+          return;
+        }
         const message = err instanceof Error ? err.message : "Request failed.";
         setMessages((prev) =>
           prev.map((m) =>
@@ -664,31 +766,57 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                handleSend();
+                if (isTyping) {
+                  handleStop();
+                } else {
+                  handleSend();
+                }
               }}
-              className="flex items-center gap-2 rounded-xl bg-[var(--bg-card)] border border-[var(--border-visible)] p-2 focus-within:border-[var(--accent-primary-border-focus)] focus-within:ring-2 focus-within:ring-[var(--accent-primary-ring)] transition-all"
+              className="flex items-end gap-2 rounded-xl bg-[var(--bg-card)] border border-[var(--border-visible)] p-2 focus-within:border-[var(--accent-primary-border-focus)] focus-within:ring-2 focus-within:ring-[var(--accent-primary-ring)] transition-all"
             >
-              <input
-                type="text"
+              <textarea
+                ref={textareaRef}
+                rows={1}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder="Ask about the manuals…"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    if (!isTyping && input.trim()) {
+                      handleSend();
+                    }
+                  }
+                }}
+                placeholder="Ask about the manuals… (Shift + Enter for new line)"
                 disabled={isTyping}
                 aria-label="Ask Procurement Assistant"
-                className="flex-1 bg-transparent px-3 py-2 text-sm text-[var(--heading-color)] placeholder-[var(--text-tertiary)] outline-none border-none"
+                className="flex-1 bg-transparent px-3 py-1.5 text-sm text-[var(--heading-color)] placeholder-[var(--text-tertiary)] outline-none border-none resize-none h-[38px] min-h-[38px] max-h-36 overflow-y-auto leading-relaxed"
               />
-              <button
-                type="submit"
-                disabled={!input.trim() || isTyping}
-                className={`icon-action p-2.5 rounded-xl font-bold text-white transition-all flex items-center justify-center shrink-0 cursor-pointer ${input.trim() && !isTyping
-                  ? "bg-[var(--accent-primary)] hover:bg-[var(--accent-primary-hover)] shadow-md shadow-[var(--accent-primary-shadow)] active:scale-95"
-                  : "bg-[var(--accent-neutral-bg)] text-[var(--accent-neutral-text)] cursor-not-allowed"
+              {isTyping ? (
+                <button
+                  type="button"
+                  onClick={handleStop}
+                  className="icon-action p-2.5 rounded-xl font-bold text-white bg-[var(--accent-danger)] hover:opacity-90 shadow-md active:scale-95 transition-all flex items-center justify-center shrink-0 cursor-pointer mb-0.5"
+                  title="Stop response generation"
+                  aria-label="Stop response generation"
+                >
+                  <IconPlayerStop className="w-4 h-4" />
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={!input.trim()}
+                  className={`icon-action p-2.5 rounded-xl font-bold text-white transition-all flex items-center justify-center shrink-0 cursor-pointer mb-0.5 ${
+                    input.trim()
+                      ? "bg-[var(--accent-primary)] hover:bg-[var(--accent-primary-hover)] shadow-md shadow-[var(--accent-primary-shadow)] active:scale-95"
+                      : "bg-[var(--accent-neutral-bg)] text-[var(--accent-neutral-text)] cursor-not-allowed"
                   }`}
-                title="Send message"
-                aria-label="Send message"
-              >
-                <IconSend className="w-4 h-4" />
-              </button>
+                  title="Send message (Enter)"
+                  aria-label="Send message"
+                >
+                  <IconSend className="w-4 h-4" />
+                </button>
+              )}
             </form>
           </footer>
         </div>

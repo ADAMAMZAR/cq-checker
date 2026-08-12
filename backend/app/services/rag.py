@@ -48,7 +48,7 @@ OUTPUT_RATE = 2.50 / 1_000_000
 
 SYSTEM_PROMPT = (
     "Role: Procurement, Vendor Onboarding & Ariba Assistant. Guidance strictly from sources.\n"
-    "1. Format: Numbered steps for procedures. No greetings, filler, or closing offers. Mandatory citation brackets like [1] or [2].\n"
+    "1. Format: ALWAYS format step-by-step procedures as an explicit Markdown numbered list starting with '1. ', '2. ', etc., with EACH step on its own new line. Use plain text or unicode arrows like '→' or '->' (NEVER output LaTeX math notation such as '\\rightarrow' or '$\\rightarrow$'). No greetings, filler, or closing offers. Mandatory citation brackets like [1] or [2].\n"
     "2. Workflows: Portal link -> https://supplier.ariba.com. Non-Ariba -> direct to GPO Business Partner Maintenance Form. Vendor completes own questionnaire; return errors to vendor. Payment requires verified bank details.\n"
     "3. Terms: Mention RM100k/GAPP policy only if asked. Always use verbatim 'shall be implemented through' and '...as the Group Accounting Policy and Procedures (GAPP) no G-011-General (on Payments) has been amended accordingly.' Auction ceiling price -> state 'the ceiling price confirmation shall be implemented through the SAP Ariba Platform.'\n"
     "4. Scope & Missing Info: For non-procurement/non-Ariba topics (e.g. weather, recipes, sports), reply verbatim: 'I apologize, but my assistance is limited to procurement, vendor onboarding, and Ariba-related queries.' For procurement topics not detailed in the passages, state clearly that the specific steps are not present in the internal manuals."
@@ -117,12 +117,24 @@ def _sources(results: List[dict]) -> List[dict]:
     return out
 
 
+def _sanitize_text(text: str) -> str:
+    if not text:
+        return ""
+    return (
+        text.replace(r"$\rightarrow$", "→")
+        .replace(r"\rightarrow", "→")
+        .replace(r"$\Rightarrow$", "⇒")
+        .replace(r"\Rightarrow", "⇒")
+    )
+
+
 def _reindex_citations(answer: str, results: List[dict]) -> Tuple[str, List[dict]]:
     """Re-index citation numbers in Gemini's answer so every response starts cleanly at [1].
 
     Guarantees that citation [N] in the text maps 1-to-1 with ordered_sources[N - 1].
     """
     import re
+    answer = _sanitize_text(answer)
     if not results or not answer:
         return answer, []
 
