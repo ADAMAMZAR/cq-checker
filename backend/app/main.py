@@ -110,6 +110,54 @@ def _cert_for_question(extracted_data: dict, target_q_label: str) -> dict:
     return certs[0]
 
 
+def _q_pairs_for_file(filename: str, qa_list: list) -> list:
+    pairs = []
+    norm_fn = filename.strip().lower()
+    for item in qa_list:
+        if isinstance(item, dict):
+            att = item.get("attachedFile") or item.get("attached_file") or ""
+            if isinstance(att, dict):
+                att_name = (att.get("name") or att.get("fileName") or "").strip().lower()
+            elif isinstance(att, str):
+                att_name = att.strip().lower()
+            else:
+                att_name = ""
+
+            q_label = item.get("questionLabel") or item.get("question_label") or "Certificate Question"
+            answers = item.get("answers") or []
+            if isinstance(answers, list):
+                ans_str = ", ".join(
+                    f"{a.get('label')}: {a.get('value')}" if isinstance(a, dict) else str(a)
+                    for a in answers
+                )
+            elif isinstance(answers, str):
+                ans_str = answers
+            else:
+                ans_str = "Uploaded Attachment"
+
+            if not att_name or norm_fn in att_name or att_name in norm_fn:
+                pairs.append((q_label, ans_str or "Uploaded Attachment"))
+
+    if not pairs and qa_list:
+        for item in qa_list:
+            if isinstance(item, dict):
+                q_label = item.get("questionLabel") or item.get("question_label") or "Certificate Question"
+                answers = item.get("answers") or []
+                if isinstance(answers, list):
+                    ans_str = ", ".join(
+                        f"{a.get('label')}: {a.get('value')}" if isinstance(a, dict) else str(a)
+                        for a in answers
+                    )
+                else:
+                    ans_str = str(answers)
+                pairs.append((q_label, ans_str or "Uploaded Attachment"))
+
+    if not pairs:
+        pairs = [("Certificate Question", "Uploaded Attachment")]
+
+    return pairs
+
+
 async def _process_uploaded_files(
     supplier_name: str,
     safe_supplier_name: str,
@@ -130,6 +178,7 @@ async def _process_uploaded_files(
         raw = await file.read()
         content_type = file.content_type or "application/pdf"
         orig_filename = file.filename or "document"
+        q_pairs = _q_pairs_for_file(orig_filename, qa_list)
         target_qa_items = [
             {"questionLabel": label, "supplierInputValue": answers}
             for label, answers in q_pairs
@@ -152,7 +201,8 @@ async def _process_uploaded_files(
                 target_qa_items,
             )
 
-        file_url = await storage.store_and_record(raw, safe_supplier_name, orig_filename, content_type)
+        f_res = await storage.store_and_record(raw, safe_supplier_name, orig_filename, content_type)
+        file_url = f_res[0] if isinstance(f_res, tuple) else f_res
 
         file_entries.append({
             "filename": orig_filename,
@@ -311,14 +361,34 @@ async def get_ariba_questionnaire_answers_endpoint(sm_vendor_id: str, doc_id: st
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/audit/ariba-supplier", tags=["Supplier Audit — Single Phase Waterfall"])
-async def audit_ariba_supplier_endpoint(sm_vendor_id: str):
+@app.post("/api/ariba/suppliers/{sm_vendor_id}/questionnaires/{doc_id}/download-attachments", tags=["Supplier Audit — Single Phase Waterfall"])
+async def download_ariba_attachments_endpoint(sm_vendor_id: str, doc_id: str):
     """
-    Executes Ariba Step 2 (get docId) and Step 3 (extract Q&A answers).
-    Triggered when the user selects an Ariba supplier and clicks 'Audit' in the Audit Tab.
+    Downloads all certificate attachment files for a questionnaire from SAP Ariba
+    and saves them temporarily to local disk storage.
     """
     try:
-        res = await asyncio.to_thread(supplier_search.audit_ariba_supplier, sm_vendor_id)
+        token = await asyncio.to_thread(supplier_search.get_oauth_token)
+        result = await asyncio.to_thread(
+            supplier_search.download_certified_attachments_for_questionnaire,
+            token,
+            sm_vendor_id,
+            doc_id
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Error downloading attachments for vendor {sm_vendor_id}, doc {doc_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/audit/ariba-supplier", tags=["Supplier Audit — Single Phase Waterfall"])
+async def audit_ariba_supplier_endpoint(sm_vendor_id: str, doc_id: Optional[str] = None):
+    """
+    Executes the complete 2-stage multi-certificate audit pipeline for an Ariba supplier:
+    Downloads attachments ➔ Runs Gemini 3.5 Flash Vision OCR ➔ Executes Python auditor rules ➔ Persists to Neon DB.
+    """
+    try:
+        res = await supplier_search.run_ariba_2stage_audit_pipeline(sm_vendor_id, doc_id)
         return res
     except Exception as e:
         logger.error(f"Error auditing Ariba supplier {sm_vendor_id}: {e}")
@@ -425,7 +495,7 @@ async def run_audit(
     supplier_name: str = Form(...),
     supplier_folder: Optional[str] = Form(None),
     workspace_title: str = Form(...),
-    cert_type: str = Form(...),
+    cert_type: Optional[str] = Form(None),
     qa_data: str = Form(...),
     files: List[UploadFile] = File(...),
     screenshot: Optional[UploadFile] = File(None)
@@ -442,9 +512,10 @@ async def run_audit(
         screenshot_filename = f"screenshot_{now_malaysia().strftime('%Y%m%d_%H%M%S')}.png"
         screenshot_bytes = screenshot.file.read()
         screenshot.file.seek(0)
-        screenshot_url = await storage.store_and_record(
+        res = await storage.store_and_record(
             screenshot_bytes, safe_supplier_name, screenshot_filename, "image/png"
         )
+        screenshot_url = res[0] if isinstance(res, tuple) else res
 
     temp_audit_id = f"TEMP_{uuid7()}"
     timestamp = now_malaysia().strftime("%d/%m/%Y, %H:%M:%S")
@@ -464,7 +535,7 @@ async def run_audit(
 
     all_filenames = [d.filename for d in doc_evidences]
 
-    qa_data_title = f"{workspace_title} {cert_type}"
+    qa_data_title = f"{workspace_title} {cert_type or ''}".strip()
     audit_result, suggested_comment, comparison_table_dict = auditor.run_full_audit(
         supplier_name,
         file_contexts,
@@ -484,7 +555,6 @@ async def run_audit(
         timestamp=timestamp,
         supplier_name=supplier_name,
         workspace_title=workspace_title,
-        cert_type=cert_type,
         complete_qa_data_dump=qa_data,
         compiled_extracted_data=json.dumps(extracted_docs),
         result=audit_result,

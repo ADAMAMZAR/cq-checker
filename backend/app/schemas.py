@@ -39,7 +39,7 @@ class AuditLogEntry(BaseModel):
     timestamp: Optional[str] = Field(default=None, description="Legacy alias for created_at")
     supplier_name: str = Field(..., description="Supplier Name")
     workspace_title: Optional[str] = Field(default="Ariba Workspace", description="Workspace Title")
-    cert_type: Optional[str] = Field(default="Relational evidence", description="Certificate Type")
+    cert_type: Optional[str] = Field(default=None, description="Deprecated Certificate Type field")
     complete_qa_data_dump: Optional[str] = Field(default="[]", description="JSON string of all QA pairs scraped from the page")
     compiled_extracted_data: str = Field(..., description="JSON string of compiled metadata from all documents")
     result: Optional[str] = Field(default="Mismatch", description="Audit Result (Match/Mismatch)")
@@ -62,7 +62,7 @@ class AuditResultResponse(BaseModel):
     supplier_id: int
     supplier_name: str
     workspace_title: Optional[str] = "Ariba Workspace"
-    cert_type: Optional[str] = "Relational evidence"
+    cert_type: Optional[str] = None
     filename: str
     result: Optional[str] = "Mismatch"
     suggested_comment: str
@@ -85,7 +85,7 @@ class AuditRegistryEntry(BaseModel):
     result: str
     created_at: str = ""
     timestamp: Optional[str] = None
-    cert_type: str = "Relational evidence"
+    cert_type: Optional[str] = None
     document_count: int = 0
     suggested_comment: str = ""
     screenshot_url: Optional[str] = None

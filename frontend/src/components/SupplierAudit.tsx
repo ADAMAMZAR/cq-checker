@@ -7,19 +7,17 @@ import {
   IconChevronDown,
   IconLoader2,
   IconCheck,
-  IconBuildingStore,
   IconFileDescription,
   IconChevronRight,
   IconInfoCircle,
-  IconCode,
-  IconRefresh,
   IconFileCheck,
 } from "@tabler/icons-react";
 import {
-  fetchSuppliers,
   fetchAribaSuppliers,
   fetchAribaQuestionnaires,
   fetchAribaQuestionnaireAnswers,
+  downloadAribaQuestionnaireAttachments,
+  auditAribaSupplier,
   type AribaQuestionnaireItem,
   type AribaQuestionnaireAnswersResponse,
 } from "@/lib/api";
@@ -30,9 +28,9 @@ interface SupplierAuditProps {
 }
 
 const STAGES = [
-  "Extracting user input",
-  "Extracting document evidence",
-  "Auditing the supplier",
+  "Downloading attachment files from SAP Ariba",
+  "Extracting PDF evidence via Gemini 3.5 Flash (QA Context Injected)",
+  "Running Python compliance auditor & persisting to Registry",
 ];
 
 export default function SupplierAudit({ onNavigateToRegistry }: SupplierAuditProps = {}) {
@@ -56,6 +54,7 @@ export default function SupplierAudit({ onNavigateToRegistry }: SupplierAuditPro
   const [running, setRunning] = useState(false);
   const [stage, setStage] = useState(-1);
   const [error, setError] = useState<string | null>(null);
+  const [auditResult, setAuditResult] = useState<any>(null);
 
   const fetched = useRef(false);
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -177,23 +176,32 @@ export default function SupplierAudit({ onNavigateToRegistry }: SupplierAuditPro
 
   const runVerification = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedSupplier || running) return;
+    if (!selectedSupplier || !selectedQuestionnaire || running) return;
+
+    const docId = selectedQuestionnaire.questionnaireId || selectedQuestionnaire.docId;
+    if (!docId) return;
+
     setError(null);
+    setAuditResult(null);
     setRunning(true);
     setStage(0);
 
-    timersRef.current.forEach(clearTimeout);
-    timersRef.current = [];
-    STAGES.forEach((_, i) => {
-      timersRef.current.push(setTimeout(() => setStage(i), i * 1800));
-    });
+    try {
+      setStage(1);
+      // Stage 1 & 2: Download attachments ➔ Gemini 3.5 Flash Vision OCR ➔ Python Auditor ➔ DB Log
+      const res = await auditAribaSupplier(selectedSupplier.sm_vendor_id, docId);
+      console.log("[Ariba 2-Stage Audit Result]:", res);
 
-    timersRef.current.push(
-      setTimeout(() => {
-        setRunning(false);
-        onNavigateToRegistry?.(selectedSupplier.supplier_name);
-      }, STAGES.length * 1800 + 600)
-    );
+      setStage(2);
+      await new Promise((r) => setTimeout(r, 600));
+
+      setAuditResult(res);
+      setRunning(false);
+    } catch (err: any) {
+      console.error("[Ariba 2-Stage Audit Error]:", err);
+      setError(err.message || "Failed to complete 2-stage Ariba audit pipeline.");
+      setRunning(false);
+    }
   };
 
   const isStageActive = (i: number) => i === stage;
@@ -224,6 +232,32 @@ export default function SupplierAudit({ onNavigateToRegistry }: SupplierAuditPro
     }
     return items;
   }, [answersData]);
+
+  // Format extracted QA data payload identically to browser extension output format
+  const extractedQAData = useMemo(() => {
+    if (!certifiedQuestionsWithAttachments.length) return [];
+
+    return certifiedQuestionsWithAttachments.map((qAns: any) => {
+      const certData = qAns.certificateData || {};
+      const attachment = certData.attachment || {};
+      const cleanLabel = (qAns.questionLabel || "").replace(/<[^>]*>?/gm, "").trim();
+
+      return {
+        sectionLabel: selectedQuestionnaire?.docTitle || selectedQuestionnaire?.title || "Certificates",
+        questionLabel: cleanLabel || certData.certificateType || "Certificate Question",
+        answers: [
+          { label: "Certificate Type", value: certData.certificateType || "" },
+          { label: "Issuer", value: certData.issuer || "" },
+          { label: "Year of publication", value: certData.yearOfPublication || "" },
+          { label: "Certificate Number", value: certData.certificateNumber || "" },
+          { label: "Certificate Location", value: certData.certificateLocation || "" },
+          { label: "Effective Date", value: certData.effectiveDate || "" },
+          { label: "Expiration Date", value: certData.expirationDate || "" },
+        ],
+        attachedFile: attachment.fileName || ""
+      };
+    });
+  }, [certifiedQuestionsWithAttachments, selectedQuestionnaire]);
 
   if (loadingInitialSuppliers) {
     return <SupplierAuditSkeleton />;
@@ -351,19 +385,12 @@ export default function SupplierAudit({ onNavigateToRegistry }: SupplierAuditPro
                 </h3>
               </div>
             </div>
-
-            {loadingQuestionnaires && (
-              <div className="flex items-center gap-2 text-xs text-[var(--text-tertiary)] font-medium">
-                <IconLoader2 className="w-4 h-4 animate-spin text-[var(--accent-primary-text)]" />
-                <span>Fetching questionnaires from Ariba…</span>
-              </div>
-            )}
           </div>
 
           {loadingQuestionnaires ? (
             <div className="py-8 flex flex-col items-center justify-center gap-3 text-sm text-[var(--text-tertiary)]">
               <IconLoader2 className="w-6 h-6 animate-spin text-[var(--accent-primary-text)]" />
-              <span>Querying Ariba API for supplier questionnaires...</span>
+              <span>Loading supplier questionnaires</span>
             </div>
           ) : questionnaires.length === 0 ? (
             <div className="py-6 px-4 rounded-xl border border-dashed border-[var(--border-subtle)] text-center text-xs text-[var(--text-tertiary)]">
@@ -415,6 +442,9 @@ export default function SupplierAudit({ onNavigateToRegistry }: SupplierAuditPro
                 <h3 className="text-base font-bold text-[var(--heading-color)]">
                   {selectedQuestionnaire.docTitle || selectedQuestionnaire.title}
                 </h3>
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-[var(--accent-success-soft)] text-[var(--match-text)] border border-[var(--accent-success-border)]">
+                  {certifiedQuestionsWithAttachments.length} certificate(s) to audit.
+                </span>
               </div>
             </div>
           </div>
@@ -428,15 +458,6 @@ export default function SupplierAudit({ onNavigateToRegistry }: SupplierAuditPro
             <div className="space-y-5">
               {/* Parsed Q&A Preview Cards for Certified Questions with Attachments */}
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-[var(--text-tertiary)]">
-                    Verified Certificates & Attachments
-                  </h4>
-                  <span className="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-[var(--accent-success-soft)] text-[var(--match-text)] border border-[var(--accent-success-border)]">
-                    {certifiedQuestionsWithAttachments.length} Certified Attachment(s)
-                  </span>
-                </div>
-
                 {certifiedQuestionsWithAttachments.length > 0 ? (
                   <div className="space-y-6">
                     {certifiedQuestionsWithAttachments.map((qAns: any, aIdx: number) => {
@@ -454,21 +475,11 @@ export default function SupplierAudit({ onNavigateToRegistry }: SupplierAuditPro
                             <h5 className="text-base font-bold text-[var(--heading-color)] tracking-tight">
                               {cleanLabel || certData.certificateType || `Question ${aIdx + 1}`}
                             </h5>
-                            <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-[var(--accent-success-soft)] text-[var(--match-text)] border border-[var(--accent-success-border)] flex items-center gap-1 shrink-0">
-                              <IconCheck className="w-3.5 h-3.5" />
-                              Certified: True
-                            </span>
                           </div>
 
                           {/* 2-Column Table */}
                           <div className="overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-card)]">
                             <table className="w-full text-left text-xs border-collapse">
-                              <thead>
-                                <tr className="border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-tertiary)] font-bold uppercase tracking-wider text-[10px]">
-                                  <th className="py-2.5 px-4 w-1/3 border-r border-[var(--border-subtle)]">Field</th>
-                                  <th className="py-2.5 px-4">Value</th>
-                                </tr>
-                              </thead>
                               <tbody className="divide-y divide-[var(--border-subtle)]/60 text-[var(--text-primary)]">
                                 <tr>
                                   <td className="py-2.5 px-4 font-semibold text-[var(--text-secondary)] bg-[var(--bg-surface)]/40 border-r border-[var(--border-subtle)]">
@@ -537,9 +548,6 @@ export default function SupplierAudit({ onNavigateToRegistry }: SupplierAuditPro
                                 <IconFileCheck className="w-4 h-4 text-[var(--accent-primary-text)] shrink-0" />
                                 <div className="truncate">
                                   <p className="font-bold text-[var(--heading-color)] truncate">{attachment.fileName}</p>
-                                  <p className="text-[10px] text-[var(--text-tertiary)] font-mono">
-                                    {attachment.mimeType || "Attachment"} {attachment.fileSize ? `(${(attachment.fileSize / 1024).toFixed(1)} KB)` : ""}
-                                  </p>
                                 </div>
                               </div>
                             </div>
@@ -565,8 +573,7 @@ export default function SupplierAudit({ onNavigateToRegistry }: SupplierAuditPro
                   disabled={running || certifiedQuestionsWithAttachments.length === 0}
                   className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-[var(--accent-success)] hover:bg-[var(--accent-success-hover)] text-white font-bold text-sm transition-all shadow-md shadow-[var(--accent-success-shadow)] active:scale-[0.98] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <IconCertificate className="w-4 h-4" />
-                  {running ? "Auditing Certificate…" : "Run Full CQ Audit Check"}
+                  {running ? "Auditing Certificate…" : "Run CQ Audit"}
                 </button>
               </div>
             </div>
@@ -619,6 +626,51 @@ export default function SupplierAudit({ onNavigateToRegistry }: SupplierAuditPro
               </div>
             </div>
           )}
+
+          {/* Audit Result Card */}
+          {auditResult && selectedSupplier && !running && (
+            <div className="mt-6 rounded-xl border border-[var(--border-visible)] bg-[var(--bg-surface)] p-6 space-y-4 shadow-xl animate-fade-in">
+              <div className="flex items-center justify-between gap-3 border-b border-[var(--border-subtle)] pb-4">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2.5 rounded-xl ${auditResult.audit_result === "Match" ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-amber-500/10 text-amber-600 dark:text-amber-400"}`}>
+                    <IconFileCheck className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h4 className="text-base font-bold text-[var(--heading-color)]">Audit Verification Completed</h4>
+                    <p className="text-xs text-[var(--text-tertiary)]">Audit ID: {auditResult.audit_id || "N/A"}</p>
+                  </div>
+                </div>
+
+                <div className={`px-3 py-1.5 rounded-full text-xs font-extrabold uppercase tracking-wide border ${
+                  auditResult.audit_result === "Match"
+                    ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400"
+                    : "bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400"
+                }`}>
+                  {auditResult.audit_result === "Match" ? "PASS / MATCH" : "MISMATCH DETECTED"}
+                </div>
+              </div>
+
+              {/* Suggested Comment / Discrepancies */}
+              <div className="space-y-2">
+                <p className="text-xs font-bold uppercase tracking-wider text-[var(--text-tertiary)]">Audit Verdict & Suggested Comment:</p>
+                <div className="p-4 rounded-xl bg-[var(--bg-input)] border border-[var(--border-subtle)] font-mono text-xs text-[var(--heading-color)] whitespace-pre-wrap leading-relaxed">
+                  {auditResult.suggested_comment || "All certificate requirements matched successfully."}
+                </div>
+              </div>
+
+              {/* Registry Navigation Button */}
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={() => onNavigateToRegistry?.(selectedSupplier.supplier_name)}
+                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-[var(--accent-primary)] text-white font-bold text-sm transition-all shadow-md active:scale-[0.98] cursor-pointer"
+                >
+                  View Record in Audit Registry
+                  <IconChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
         </section>
       )}
     </div>
@@ -660,7 +712,6 @@ function SupplierAuditSkeleton() {
         {/* Status Loading Bar */}
         <div className="flex items-center justify-center gap-2 pt-2 text-xs text-[var(--text-tertiary)] font-medium">
           <IconLoader2 className="w-4 h-4 animate-spin text-[var(--accent-primary-text)]" />
-          <span>Connecting to SAP Ariba OpenAPI & fetching live suppliers list…</span>
         </div>
       </section>
     </div>

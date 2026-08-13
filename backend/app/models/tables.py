@@ -251,7 +251,6 @@ class AuditLog(Base):
     supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=False)
     supplier_name = Column(String(255), nullable=False)
     workspace_title = Column(String(255), nullable=True, default="Ariba Workspace")
-    cert_type = Column(String(100), nullable=True, default="Relational evidence")
     complete_qa_data_dump = Column(Text, nullable=True, default="[]")
     compiled_extracted_data = Column(Text, nullable=False)
     result = Column(String(50), nullable=True, default="Mismatch")

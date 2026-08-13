@@ -390,10 +390,27 @@ export async function fetchDbSchema(): Promise<DbSchema> {
   return res.json();
 }
 
-export async function auditAribaSupplier(smVendorId: string): Promise<any> {
-  const res = await fetch(`${API_BASE}/audit/ariba-supplier?sm_vendor_id=${encodeURIComponent(smVendorId)}`, {
+export async function auditAribaSupplier(smVendorId: string, docId?: string): Promise<any> {
+  const url = docId
+    ? `${API_BASE}/audit/ariba-supplier?sm_vendor_id=${encodeURIComponent(smVendorId)}&doc_id=${encodeURIComponent(docId)}`
+    : `${API_BASE}/audit/ariba-supplier?sm_vendor_id=${encodeURIComponent(smVendorId)}`;
+  const res = await fetch(url, {
     method: "POST",
   });
+  if (!res.ok) throw new Error(await errorDetail(res));
+  return res.json();
+}
+
+export async function downloadAribaQuestionnaireAttachments(
+  smVendorId: string,
+  docId: string
+): Promise<any> {
+  const res = await fetch(
+    `${API_BASE}/ariba/suppliers/${encodeURIComponent(smVendorId)}/questionnaires/${encodeURIComponent(docId)}/download-attachments`,
+    {
+      method: "POST",
+    }
+  );
   if (!res.ok) throw new Error(await errorDetail(res));
   return res.json();
 }

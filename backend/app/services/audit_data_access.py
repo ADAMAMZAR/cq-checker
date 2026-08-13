@@ -487,7 +487,6 @@ async def log_audit_run(
                     existing_log.created_at = log_ts
                     existing_log.supplier_name = audit_log.supplier_name
                     existing_log.workspace_title = audit_log.workspace_title or "Ariba Workspace"
-                    existing_log.cert_type = audit_log.cert_type or "Relational evidence"
                     existing_log.complete_qa_data_dump = audit_log.complete_qa_data_dump or "[]"
                     existing_log.compiled_extracted_data = audit_log.compiled_extracted_data or ""
                     existing_log.result = audit_log.result or "Mismatch"
@@ -506,7 +505,6 @@ async def log_audit_run(
                         created_at=log_ts,
                         supplier_name=audit_log.supplier_name,
                         workspace_title=audit_log.workspace_title or "Ariba Workspace",
-                        cert_type=audit_log.cert_type or "Relational evidence",
                         complete_qa_data_dump=audit_log.complete_qa_data_dump or "[]",
                         compiled_extracted_data=audit_log.compiled_extracted_data or "",
                         result=audit_log.result or "Mismatch",
