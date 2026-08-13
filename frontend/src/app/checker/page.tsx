@@ -39,12 +39,13 @@ function CheckerPageContent() {
     }
   }, []);
 
+  // Lazy-load evidence logs ONLY when user opens registry or editor tabs
   useEffect(() => {
-    if (!evidenceFetched.current) {
+    if ((activeTab === "registry" || activeTab === "editor") && !evidenceFetched.current) {
       evidenceFetched.current = true;
       loadEvidence();
     }
-  }, [loadEvidence]);
+  }, [activeTab, loadEvidence]);
 
   useEffect(() => {
     const rawParam = searchParams.get("tab");
@@ -80,6 +81,10 @@ function CheckerPageContent() {
   const handleTabChange = useCallback(
     (newTab: MainTab) => {
       setActiveTab(newTab);
+      if ((newTab === "registry" || newTab === "editor") && !evidenceFetched.current) {
+        evidenceFetched.current = true;
+        loadEvidence();
+      }
       try {
         localStorage.setItem(STORAGE_KEY, newTab);
       } catch (err) {
@@ -87,7 +92,7 @@ function CheckerPageContent() {
       }
       router.push(`/checker?tab=${newTab}`, { scroll: false });
     },
-    [router]
+    [router, loadEvidence]
   );
 
   const handleRefresh = () => {

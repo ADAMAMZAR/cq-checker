@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     gemini_api_key: str = Field(default="", validation_alias="GEMINI_API_KEY")
 
     # ── AI Providers: endpoints / models ──────────────────────────
+    gemini_extraction_model: str = Field(default="gemini-3.5-flash", validation_alias="GEMINI_EXTRACTION_MODEL")
     gemini_chat_model: str = Field(default="gemini-2.5-flash-lite", validation_alias="GEMINI_CHAT_MODEL")
     gemini_embedding_model: str = Field(default="gemini-embedding-2", validation_alias="GEMINI_EMBEDDING_MODEL")
     gemini_embedding_dim: int = Field(default=1536, validation_alias="GEMINI_EMBEDDING_DIM")
@@ -19,6 +20,7 @@ class Settings(BaseSettings):
     ariba_client_secret: str = Field(default="", validation_alias="ARIBA_CLIENT_SECRET")
     ariba_realm: str = Field(default="", validation_alias="ARIBA_REALM")
     ariba_api_key: str = Field(default="", validation_alias="ARIBA_API_KEY")
+    ariba_verify_ssl: bool = Field(default=True, validation_alias="ARIBA_VERIFY_SSL")
 
     # ── Deprecated: Supabase (migration-only, remove after Phase 8) ─
     supabase_url: str = Field(default="", validation_alias="SUPABASE_URL")

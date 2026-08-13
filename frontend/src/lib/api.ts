@@ -70,9 +70,53 @@ export async function fetchSuppliers(): Promise<SupplierEntry[]> {
   return res.json();
 }
 
+export interface AribaQuestionnaireItem {
+  questionnaireId?: string;
+  docId?: string;
+  docTitle?: string;
+  title?: string;
+  hasCertificates?: boolean;
+  status?: string;
+  [key: string]: any;
+}
+
+export interface AribaQuestionnairesResponse {
+  status: string;
+  sm_vendor_id: string;
+  total: number;
+  questionnaires: AribaQuestionnaireItem[];
+}
+
+export interface AribaQuestionnaireAnswersResponse {
+  status: string;
+  sm_vendor_id: string;
+  doc_id: string;
+  qna_data: any;
+}
+
 export async function fetchAribaSuppliers(): Promise<SupplierEntry[]> {
-  const res = await fetch(`${API_BASE}/ariba/suppliers`);
+  const res = await fetch(`${API_BASE}/ariba/suppliers`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
   if (!res.ok) throw new Error(`Failed to load Ariba suppliers: HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function fetchAribaQuestionnaires(smVendorId: string): Promise<AribaQuestionnairesResponse> {
+  const res = await fetch(`${API_BASE}/ariba/suppliers/${encodeURIComponent(smVendorId)}/questionnaires`);
+  if (!res.ok) throw new Error(await errorDetail(res));
+  return res.json();
+}
+
+export async function fetchAribaQuestionnaireAnswers(
+  smVendorId: string,
+  docId: string
+): Promise<AribaQuestionnaireAnswersResponse> {
+  const res = await fetch(
+    `${API_BASE}/ariba/suppliers/${encodeURIComponent(smVendorId)}/questionnaires/${encodeURIComponent(docId)}/answers`
+  );
+  if (!res.ok) throw new Error(await errorDetail(res));
   return res.json();
 }
 

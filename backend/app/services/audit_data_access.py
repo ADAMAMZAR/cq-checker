@@ -19,7 +19,7 @@ from app.schemas import AuditLogEntry, DocumentEvidence, SupplierEntry
 
 logger = logging.getLogger(__name__)
 
-MYR_RATE = 4.70
+MYR_RATE = 4.10
 
 # GPO operates in UTC+8 (Singapore/Malaysia, no DST). Legacy audit timestamps
 # were stored as naive local wall-clock strings; preserve that wall-clock when

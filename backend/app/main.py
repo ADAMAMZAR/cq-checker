@@ -98,9 +98,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.get("/", tags=["System / Health"])
-def read_root():
-    return {"status": "healthy", "service": "GPO Automatic Certificate Auditor API"}
+def _cert_for_question(extracted_data: dict, target_q_label: str) -> dict:
+    certs = extracted_data.get("certificates", [])
+    if not certs:
+        return {}
+    target_norm = target_q_label.strip().lower()
+    for cert in certs:
+        m_label = (cert.get("matchedQuestionLabel") or "").strip().lower()
+        if m_label and (m_label == target_norm or target_norm in m_label or m_label in target_norm):
+            return cert
+    return certs[0]
+
 
 async def _process_uploaded_files(
     supplier_name: str,
@@ -122,7 +130,10 @@ async def _process_uploaded_files(
         raw = await file.read()
         content_type = file.content_type or "application/pdf"
         orig_filename = file.filename or "document"
-        q_pairs = _questions_for_file(qa_list, orig_filename)
+        target_qa_items = [
+            {"questionLabel": label, "supplierInputValue": answers}
+            for label, answers in q_pairs
+        ]
 
         fhash = hashlib.sha256(raw).hexdigest()
         cached_record = await audit_data_access.find_metadata_by_hash(fhash)
@@ -133,7 +144,13 @@ async def _process_uploaded_files(
                 metadata_dict = {}
             task = asyncio.to_thread(lambda md=metadata_dict: (md, 0, 0, 0.0))
         else:
-            task = asyncio.to_thread(extractor.extract_certificate_data, raw, content_type)
+            task = asyncio.to_thread(
+                extractor.extract_certificate_data,
+                raw,
+                content_type,
+                None,
+                target_qa_items,
+            )
 
         file_url = await storage.store_and_record(raw, safe_supplier_name, orig_filename, content_type)
 
@@ -154,31 +171,43 @@ async def _process_uploaded_files(
     total_cost = 0.0
 
     for entry, (extracted_data, in_t, out_t, cost) in zip(file_entries, extraction_results):
-        gemini_supp_name = _first_cert(extracted_data).get("certificateOwnerName", supplier_name)
         total_cost += cost
 
         # One evidence record per (file, question) so a merged file attached to
         # several questions is fully represented in the database.
         for q_label, q_answers in entry["q_pairs"]:
+            matched_cert = _cert_for_question(extracted_data, q_label)
+            gemini_supp_name = matched_cert.get("certificateOwnerName", supplier_name)
+            p_start = matched_cert.get("pageStart", 1)
+            p_end = matched_cert.get("pageEnd", 1)
+
+            # Create focused cert payload for this specific question
+            question_extracted_data = {
+                "certificates": [matched_cert] if matched_cert else extracted_data.get("certificates", [])
+            }
+
             doc_evidences.append(DocumentEvidence(
                 audit_id=temp_audit_id, supplier_id=0, timestamp=timestamp,
                 supplier_name=supplier_name, filename=entry["filename"],
                 ariba_question_label=q_label,
                 ariba_qa_answers=q_answers,
                 gemini_extracted_supplier_name=gemini_supp_name,
-                gemini_extracted_metadata=json.dumps(extracted_data),
+                gemini_extracted_metadata=json.dumps(question_extracted_data),
                 file_content_type=entry["content_type"],
                 input_tokens=in_t, output_tokens=out_t,
                 cost_usd=cost,
+                page_number_start=p_start,
+                page_number_end=p_end,
                 file_hash=entry["file_hash"], file_url=entry.get("file_url"),
             ))
             file_contexts.append({
                 "filename": entry["filename"], "content_type": entry["content_type"],
                 "ariba_question_label": q_label, "ariba_qa_answers": q_answers,
                 "file_hash": entry["file_hash"], "file_url": entry.get("file_url"),
+                "page_number_start": p_start, "page_number_end": p_end,
             })
             extracted_docs.append({
-                "filename": entry["filename"], "extracted_data": extracted_data,
+                "filename": entry["filename"], "extracted_data": question_extracted_data,
                 "input_tokens": in_t, "output_tokens": out_t, "cost_usd": cost,
             })
 
@@ -202,12 +231,18 @@ async def get_suppliers():
 
 
 @app.get("/api/ariba/suppliers", response_model=List[SupplierEntry], tags=["Supplier Audit — Single Phase Waterfall"])
-async def get_ariba_suppliers_endpoint():
+@app.post("/api/ariba/suppliers", response_model=List[SupplierEntry], tags=["Supplier Audit — Single Phase Waterfall"])
+async def get_ariba_suppliers_endpoint(
+    q: Optional[str] = Query(None, description="Optional search query to filter suppliers"),
+    payload: Optional[Dict[str, Any]] = None,
+):
     """
     Fetches live Ariba Step 1 suppliers ('InQualification' status) via app.services.supplier_search.
-    Excludes suppliers that have already been audited and saved to DB.
+    Supports POST/GET request. Sends POST request to SAP Ariba OpenAPI with Bearer token & apiKey.
+    Optionally filters by search query 'q' or 'payload.query'.
     """
     try:
+        search_query = q or (payload.get("query") if payload else None)
         ariba_suppliers = await asyncio.to_thread(supplier_search.get_ariba_suppliers)
         db_suppliers = await audit_data_access.list_suppliers()
         existing_names = {s.supplier_name.strip().lower() for s in db_suppliers}
@@ -224,10 +259,56 @@ async def get_ariba_suppliers_endpoint():
                     created_at=now_malaysia().strftime("%Y-%m-%d %H:%M:%S"),
                 ))
                 existing_names.add(s_name.lower())
+
+        if search_query and search_query.strip():
+            query_str = search_query.strip().lower()
+            results = [
+                s for s in results 
+                if query_str in s.supplier_name.lower() or (s.sm_vendor_id and query_str in s.sm_vendor_id.lower())
+            ]
+
         return results
     except Exception as e:
         logger.error(f"Error fetching Ariba suppliers: {e}")
         return []
+
+
+@app.get("/api/ariba/suppliers/{sm_vendor_id}/questionnaires", tags=["Supplier Audit — Single Phase Waterfall"])
+async def get_ariba_questionnaires_endpoint(sm_vendor_id: str):
+    """
+    Step 2: Fetches all questionnaires for a given SM Vendor ID from Ariba.
+    """
+    try:
+        token = await asyncio.to_thread(supplier_search.get_oauth_token)
+        questionnaires = await asyncio.to_thread(supplier_search.get_all_questionnaires, token, sm_vendor_id)
+        return {
+            "status": "success",
+            "sm_vendor_id": sm_vendor_id,
+            "total": len(questionnaires),
+            "questionnaires": questionnaires,
+        }
+    except Exception as e:
+        logger.error(f"Error fetching Ariba questionnaires for vendor {sm_vendor_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/ariba/suppliers/{sm_vendor_id}/questionnaires/{doc_id}/answers", tags=["Supplier Audit — Single Phase Waterfall"])
+async def get_ariba_questionnaire_answers_endpoint(sm_vendor_id: str, doc_id: str):
+    """
+    Step 3: Fetches Q&A answers and certificate inputs for a specific questionnaire doc_id.
+    """
+    try:
+        token = await asyncio.to_thread(supplier_search.get_oauth_token)
+        answers = await asyncio.to_thread(supplier_search.get_questionnaire_answers, token, sm_vendor_id, doc_id)
+        return {
+            "status": "success",
+            "sm_vendor_id": sm_vendor_id,
+            "doc_id": doc_id,
+            "qna_data": answers,
+        }
+    except Exception as e:
+        logger.error(f"Error fetching Q&A answers for vendor {sm_vendor_id}, doc {doc_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/audit/ariba-supplier", tags=["Supplier Audit — Single Phase Waterfall"])
