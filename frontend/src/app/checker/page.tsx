@@ -39,14 +39,6 @@ function CheckerPageContent() {
     }
   }, []);
 
-  // Lazy-load evidence logs ONLY when user opens registry or editor tabs
-  useEffect(() => {
-    if ((activeTab === "registry" || activeTab === "editor") && !evidenceFetched.current) {
-      evidenceFetched.current = true;
-      loadEvidence();
-    }
-  }, [activeTab, loadEvidence]);
-
   useEffect(() => {
     const rawParam = searchParams.get("tab");
     const paramTab = rawParam && VALID_TABS.includes(rawParam as MainTab) ? (rawParam as MainTab) : null;
@@ -81,10 +73,6 @@ function CheckerPageContent() {
   const handleTabChange = useCallback(
     (newTab: MainTab) => {
       setActiveTab(newTab);
-      if ((newTab === "registry" || newTab === "editor") && !evidenceFetched.current) {
-        evidenceFetched.current = true;
-        loadEvidence();
-      }
       try {
         localStorage.setItem(STORAGE_KEY, newTab);
       } catch (err) {
@@ -92,7 +80,7 @@ function CheckerPageContent() {
       }
       router.push(`/checker?tab=${newTab}`, { scroll: false });
     },
-    [router, loadEvidence]
+    [router]
   );
 
   const handleRefresh = () => {
@@ -142,12 +130,7 @@ function CheckerPageContent() {
       )}
       {activeTab === "editor" && (
         <div className="flex-1 flex flex-col">
-          <SupplierDataEditor
-            evidenceLogs={evidenceLogs}
-            isEvidenceLoading={isEvidenceLoading}
-            onRefreshEvidence={loadEvidence}
-            onRefreshLogs={handleRefresh}
-          />
+          <SupplierDataEditor onRefreshLogs={handleRefresh} />
         </div>
       )}
     </div>

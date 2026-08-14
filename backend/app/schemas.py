@@ -9,6 +9,7 @@ class SupplierEntry(BaseModel):
     sm_vendor_id: Optional[str] = Field(None, description="Ariba SM Vendor ID")
 
 class DocumentEvidence(BaseModel):
+    id: Optional[str] = Field(None, description="Document Evidence UUID primary key")
     audit_id: str = Field(..., description="Unique UUID for the audit run")
     supplier_id: int = Field(..., description="Supplier ID referencing SupplierEntry")
     created_at: str = Field(default="", description="Timestamp of the document log")
@@ -32,6 +33,23 @@ class DocumentEvidence(BaseModel):
         elif not self.timestamp and self.created_at:
             self.timestamp = self.created_at
 
+class DocumentEvidenceSummary(BaseModel):
+    id: str = Field(..., description="Document Evidence UUID primary key")
+    audit_id: str = Field(..., description="Audit ID referencing AuditLog")
+    supplier_id: int = Field(..., description="Supplier ID referencing SupplierEntry")
+    supplier_name: str = Field(..., description="Cleaned supplier name")
+    filename: str = Field(..., description="Filename of the downloaded document / cert")
+    ariba_question_label: str = Field(..., description="Label of the question where the file was attached")
+    gemini_extracted_supplier_name: str = Field(default="", description="Extracted supplier name from certificate")
+    created_at: str = Field(default="", description="Timestamp of the document log")
+    timestamp: Optional[str] = Field(default=None, description="Legacy alias for created_at")
+
+    def model_post_init(self, __context):
+        if not self.created_at and self.timestamp:
+            self.created_at = self.timestamp
+        elif not self.timestamp and self.created_at:
+            self.timestamp = self.created_at
+
 class AuditLogEntry(BaseModel):
     audit_id: str = Field(..., description="Unique UUID for the audit run")
     supplier_id: int = Field(..., description="Supplier ID referencing SupplierEntry")
@@ -39,7 +57,6 @@ class AuditLogEntry(BaseModel):
     timestamp: Optional[str] = Field(default=None, description="Legacy alias for created_at")
     supplier_name: str = Field(..., description="Supplier Name")
     workspace_title: Optional[str] = Field(default="Ariba Workspace", description="Workspace Title")
-    cert_type: Optional[str] = Field(default=None, description="Deprecated Certificate Type field")
     complete_qa_data_dump: Optional[str] = Field(default="[]", description="JSON string of all QA pairs scraped from the page")
     compiled_extracted_data: str = Field(..., description="JSON string of compiled metadata from all documents")
     result: Optional[str] = Field(default="Mismatch", description="Audit Result (Match/Mismatch)")
@@ -62,7 +79,6 @@ class AuditResultResponse(BaseModel):
     supplier_id: int
     supplier_name: str
     workspace_title: Optional[str] = "Ariba Workspace"
-    cert_type: Optional[str] = None
     filename: str
     result: Optional[str] = "Mismatch"
     suggested_comment: str
@@ -85,7 +101,21 @@ class AuditRegistryEntry(BaseModel):
     result: str
     created_at: str = ""
     timestamp: Optional[str] = None
-    cert_type: Optional[str] = None
+    document_count: int = 0
+
+    def model_post_init(self, __context):
+        if not self.created_at and self.timestamp:
+            self.created_at = self.timestamp
+        elif not self.timestamp and self.created_at:
+            self.timestamp = self.created_at
+
+class AuditRegistryDetail(BaseModel):
+    audit_id: str
+    supplier_id: int
+    supplier_name: str
+    result: str
+    created_at: str = ""
+    timestamp: Optional[str] = None
     document_count: int = 0
     suggested_comment: str = ""
     screenshot_url: Optional[str] = None

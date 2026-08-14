@@ -26,7 +26,6 @@ def make_log_entry() -> AuditLogEntry:
         timestamp="01/01/2026, 10:00:00",
         supplier_name="ACME Corp",
         workspace_title="Workspace",
-        cert_type="QSHE",
         complete_qa_data_dump="[]",
         compiled_extracted_data='[{"extracted_data": {"expirationDate": "31/12/2029", "certificateType": "QSHE"}}]',
         result="Match",
@@ -35,7 +34,7 @@ def make_log_entry() -> AuditLogEntry:
 
 
 def test_to_audit_log_entry_extracts_expiry():
-    """_to_audit_log_entry should pull expirationDate/certType from compiled data."""
+    """_to_audit_log_entry should parse compiled data."""
     from app.services.audit_data_access import _to_audit_log_entry
     from app.models.tables import AuditLog
 
@@ -49,8 +48,6 @@ def test_to_audit_log_entry_extracts_expiry():
         suggested_comment="OK",
     )
     entry = _to_audit_log_entry(model)
-    assert entry.expiration_date == "31/12/2029"
-    assert entry.cert_type == "ISO 9001"
     assert entry.audit_id == "AUDIT_0001"
 
 

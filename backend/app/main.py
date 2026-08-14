@@ -20,8 +20,8 @@ from fastapi.responses import Response, StreamingResponse
 
 from app.config import settings
 from app.schemas import (
-    SupplierEntry, AuditLogEntry, AuditResultResponse, DocumentEvidence, UpdateEvidenceRequest,
-    AuditRegistryEntry, CertificateVerificationResponse, CertificateVerifyResult,
+    SupplierEntry, AuditLogEntry, AuditResultResponse, DocumentEvidence, DocumentEvidenceSummary, UpdateEvidenceRequest,
+    AuditRegistryEntry, AuditRegistryDetail, CertificateVerificationResponse, CertificateVerifyResult,
     DocumentIngestResult, DocumentSummary, ChatRequest, ChatResponse, ChatSource,
     ChatHistoryResponse, FeedbackRequest, FeedbackResponse,
 )
@@ -395,18 +395,55 @@ async def audit_ariba_supplier_endpoint(sm_vendor_id: str, doc_id: Optional[str]
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/audit-registry", response_model=List[AuditRegistryEntry], tags=["Supplier Audit — Read / Update"])
-async def get_audit_registry():
+async def get_audit_registry(limit: int = 1000, offset: int = 0):
     """
-    Consolidated audit registry with supplier info, result, and document counts.
+    Consolidated audit registry summary list with supplier info, result, and document counts.
     """
-    return await audit_data_access.get_audit_registry()
+    return await audit_data_access.get_audit_registry(limit=limit, offset=offset)
+
+@app.get("/api/audit-registry/{audit_id}", response_model=AuditRegistryDetail, tags=["Supplier Audit — Read / Update"])
+async def get_audit_registry_detail(audit_id: str):
+    """
+    Fetches full audit registry details (comparison table, suggested comments, screenshot URL) for a specific audit run.
+    """
+    detail = await audit_data_access.get_audit_registry_detail(audit_id)
+    if not detail:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Audit record not found.")
+    return detail
+
+@app.get("/api/evidence/summary", response_model=List[DocumentEvidenceSummary], tags=["Supplier Audit — Read / Update"])
+async def get_evidence_summary(
+    supplier_name: Optional[str] = None,
+    supplier_id: Optional[int] = None,
+    audit_id: Optional[str] = None,
+):
+    """
+    Fetches lightweight evidence summary list (document id, filename, question label, supplier info, created date)
+    for listing supplier certificates without loading heavy metadata payloads.
+    """
+    return await audit_data_access.get_document_evidence_summary(
+        supplier_name=supplier_name,
+        supplier_id=supplier_id,
+        audit_id=audit_id,
+    )
+
+@app.get("/api/evidence/{document_id}", response_model=DocumentEvidence, tags=["Supplier Audit — Read / Update"])
+async def get_evidence_document(document_id: str):
+    """
+    Fetches entire document evidence data (full extracted metadata, raw OCR, tokens, etc.) for a single document ID.
+    """
+    evidence = await audit_data_access.get_document_evidence_by_id(document_id)
+    if not evidence:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document evidence record not found.")
+    return evidence
 
 @app.get("/api/evidence", response_model=List[DocumentEvidence], tags=["Supplier Audit — Read / Update"])
-async def get_evidence():
+async def get_evidence(audit_id: Optional[str] = None):
     """
-    Fetches all historical document evidence logs (extracted file details) from Neon.
+    Fetches historical document evidence logs (extracted file details) from Neon.
+    Optionally filter by audit_id.
     """
-    evidence = await audit_data_access.get_document_evidence_logs()
+    evidence = await audit_data_access.get_document_evidence_logs(audit_id=audit_id)
     return evidence
 
 @app.put("/api/evidence", tags=["Supplier Audit — Read / Update"])

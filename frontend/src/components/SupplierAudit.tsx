@@ -118,8 +118,11 @@ export default function SupplierAudit({ onNavigateToRegistry }: SupplierAuditPro
     setLoadingQuestionnaires(true);
     try {
       const res = await fetchAribaQuestionnaires(smId);
-      setQuestionnaires(res.questionnaires || []);
-      if (!res.questionnaires || res.questionnaires.length === 0) {
+      const activeQuestionnaires = (res.questionnaires || []).filter(
+        (q) => q.status?.toLowerCase() !== "notresponded"
+      );
+      setQuestionnaires(activeQuestionnaires);
+      if (activeQuestionnaires.length === 0) {
         setError(`No submitted questionnaires found for Vendor: ${smId}`);
       }
     } catch (err: any) {
@@ -132,7 +135,8 @@ export default function SupplierAudit({ onNavigateToRegistry }: SupplierAuditPro
 
   // Step 3: Fetch questionnaire answers when questionnaire is clicked
   const handleSelectQuestionnaire = async (q: AribaQuestionnaireItem) => {
-    if (!selectedSupplier?.sm_vendor_id) return;
+    const smVendorId = selectedSupplier?.sm_vendor_id;
+    if (!smVendorId) return;
     const docId = q.questionnaireId || q.docId;
     if (!docId) return;
 
@@ -142,11 +146,11 @@ export default function SupplierAudit({ onNavigateToRegistry }: SupplierAuditPro
     setError(null);
 
     try {
-      const res = await fetchAribaQuestionnaireAnswers(selectedSupplier.sm_vendor_id, docId);
+      const res = await fetchAribaQuestionnaireAnswers(smVendorId, docId);
       setAnswersData(res);
     } catch (err: any) {
       console.error("Failed to load questionnaire answers:", err);
-      setError(`Could not fetch questionnaire answers for doc ID ${docId}.`);
+      setError(`Could not fetch questionnaire answers for ${docId}.`);
     } finally {
       setLoadingAnswers(false);
     }
@@ -176,7 +180,8 @@ export default function SupplierAudit({ onNavigateToRegistry }: SupplierAuditPro
 
   const runVerification = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedSupplier || !selectedQuestionnaire || running) return;
+    const smVendorId = selectedSupplier?.sm_vendor_id;
+    if (!selectedSupplier || !smVendorId || !selectedQuestionnaire || running) return;
 
     const docId = selectedQuestionnaire.questionnaireId || selectedQuestionnaire.docId;
     if (!docId) return;
@@ -189,7 +194,7 @@ export default function SupplierAudit({ onNavigateToRegistry }: SupplierAuditPro
     try {
       setStage(1);
       // Stage 1 & 2: Download attachments ➔ Gemini 3.5 Flash Vision OCR ➔ Python Auditor ➔ DB Log
-      const res = await auditAribaSupplier(selectedSupplier.sm_vendor_id, docId);
+      const res = await auditAribaSupplier(smVendorId, docId);
       console.log("[Ariba 2-Stage Audit Result]:", res);
 
       setStage(2);
@@ -273,7 +278,7 @@ export default function SupplierAudit({ onNavigateToRegistry }: SupplierAuditPro
           </div>
           <div>
             <h2 className="text-lg font-bold text-[var(--heading-color)] tracking-tight">
-              SAP Ariba Supplier Search & CQ Audit
+              CQ Checker
             </h2>
             <p className="text-xs text-[var(--text-tertiary)]">
               Search by supplier name or SM Vendor ID to retrieve live Ariba questionnaires & answers
@@ -401,7 +406,7 @@ export default function SupplierAudit({ onNavigateToRegistry }: SupplierAuditPro
               {questionnaires.map((q, idx) => {
                 const docId = q.questionnaireId || q.docId || `Q-${idx}`;
                 const title = q.title || q.docTitle || "Questionnaire";
-                const isSelected = selectedQuestionnaire && (selectedQuestionnaire.questionnaireId === docId || selectedQuestionnaire.docId === docId);
+                const isSelected = Boolean(selectedQuestionnaire && (selectedQuestionnaire.questionnaireId === docId || selectedQuestionnaire.docId === docId));
 
                 return (
                   <button
@@ -413,8 +418,8 @@ export default function SupplierAudit({ onNavigateToRegistry }: SupplierAuditPro
                       : "border-[var(--border-subtle)] bg-[var(--bg-input)] hover:border-[var(--border-visible)] hover:bg-[var(--bg-surface-hover)]"
                       }`}
                   >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
                         <IconFileCheck className={`w-4 h-4 shrink-0 ${isSelected ? "text-[var(--match-text)]" : "text-[var(--accent-primary-text)]"}`} />
                         <span className="font-bold text-sm text-[var(--heading-color)] line-clamp-1">
                           {title}
@@ -641,11 +646,10 @@ export default function SupplierAudit({ onNavigateToRegistry }: SupplierAuditPro
                   </div>
                 </div>
 
-                <div className={`px-3 py-1.5 rounded-full text-xs font-extrabold uppercase tracking-wide border ${
-                  auditResult.audit_result === "Match"
-                    ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400"
-                    : "bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400"
-                }`}>
+                <div className={`px-3 py-1.5 rounded-full text-xs font-extrabold uppercase tracking-wide border ${auditResult.audit_result === "Match"
+                  ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400"
+                  : "bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400"
+                  }`}>
                   {auditResult.audit_result === "Match" ? "PASS / MATCH" : "MISMATCH DETECTED"}
                 </div>
               </div>

@@ -1,7 +1,9 @@
 import type {
   AuditLog,
   AuditRegistryEntry,
+  AuditRegistryDetail,
   DocumentEvidence,
+  DocumentEvidenceSummary,
   SupplierEntry,
   SupplierAssets,
   CostAnalyticsData,
@@ -126,6 +128,12 @@ export async function fetchAuditRegistry(): Promise<AuditRegistryEntry[]> {
   return res.json();
 }
 
+export async function fetchAuditRegistryDetail(auditId: string): Promise<AuditRegistryDetail> {
+  const res = await fetch(`${API_BASE}/audit-registry/${encodeURIComponent(auditId)}`);
+  if (!res.ok) throw new Error(`Failed to load audit registry detail: HTTP ${res.status}`);
+  return res.json();
+}
+
 export async function fetchSupplierEvidence(supplierId: number): Promise<SupplierAssets> {
   const res = await fetch(`${API_BASE}/logs/${supplierId}/evidence`);
   if (!res.ok) throw new Error(`Failed to load supplier evidence: HTTP ${res.status}`);
@@ -140,9 +148,31 @@ export async function fetchCostAnalytics(): Promise<CostAnalyticsData> {
   return res.json();
 }
 
-export async function fetchEvidenceLogs(): Promise<DocumentEvidence[]> {
-  const res = await fetch(`${API_BASE}/evidence`);
+export async function fetchEvidenceLogs(auditId?: string): Promise<DocumentEvidence[]> {
+  const url = auditId ? `${API_BASE}/evidence?audit_id=${encodeURIComponent(auditId)}` : `${API_BASE}/evidence`;
+  const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to load evidence logs: HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function fetchEvidenceSummary(opts?: {
+  supplierName?: string;
+  supplierId?: number;
+  auditId?: string;
+}): Promise<DocumentEvidenceSummary[]> {
+  const params = new URLSearchParams();
+  if (opts?.supplierName) params.append("supplier_name", opts.supplierName);
+  if (opts?.supplierId) params.append("supplier_id", opts.supplierId.toString());
+  if (opts?.auditId) params.append("audit_id", opts.auditId);
+  const queryStr = params.toString() ? `?${params.toString()}` : "";
+  const res = await fetch(`${API_BASE}/evidence/summary${queryStr}`);
+  if (!res.ok) throw new Error(`Failed to load evidence summary: HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function fetchEvidenceDocument(documentId: string): Promise<DocumentEvidence> {
+  const res = await fetch(`${API_BASE}/evidence/${encodeURIComponent(documentId)}`);
+  if (!res.ok) throw new Error(`Failed to load document evidence details: HTTP ${res.status}`);
   return res.json();
 }
 

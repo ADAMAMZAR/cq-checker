@@ -10,12 +10,13 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import select
+from sqlalchemy import select, func
+from sqlalchemy.orm import joinedload
 
 from app.db.session import get_session_factory
 from app.models.tables import Supplier, AuditLog, DocumentEvidence as NeonDocumentEvidence
 from app.repositories.supplier_audit import SupplierRepository, AuditLogRepository, DocumentEvidenceRepository
-from app.schemas import AuditLogEntry, DocumentEvidence, SupplierEntry
+from app.schemas import AuditLogEntry, DocumentEvidence, DocumentEvidenceSummary, SupplierEntry
 
 logger = logging.getLogger(__name__)
 
@@ -112,19 +113,10 @@ async def get_next_audit_id() -> str:
 # ── Audit logs ───────────────────────────────────────────────────────────────
 
 def _to_audit_log_entry(r: AuditLog) -> AuditLogEntry:
-    cert_type = "Relational evidence"
     compiled = r.compiled_extracted_data or ""
-    try:
-        import json
-        extracted_docs = json.loads(compiled)
-        if isinstance(extracted_docs, list) and extracted_docs:
-            first = extracted_docs[0].get("extracted_data", {})
-            cert_type = first.get("certificateType", "Relational evidence")
-    except Exception:
-        pass
     ts_val = getattr(r, "created_at", None) or getattr(r, "timestamp", None)
     disp_ts = _display_timestamp(ts_val)
-    sup_name = r.supplier.supplier_name if (hasattr(r, "supplier") and r.supplier) else r.supplier_name
+    sup_name = r.supplier_name or ""
     return AuditLogEntry(
         audit_id=r.audit_id,
         supplier_id=r.supplier_id,
@@ -132,7 +124,6 @@ def _to_audit_log_entry(r: AuditLog) -> AuditLogEntry:
         timestamp=disp_ts,
         supplier_name=sup_name,
         workspace_title=r.workspace_title or "Ariba Workspace",
-        cert_type=cert_type,
         complete_qa_data_dump=r.complete_qa_data_dump or "[]",
         compiled_extracted_data=compiled,
         result=r.result or "Mismatch",
@@ -157,34 +148,77 @@ async def get_audit_logs(audit_id: Optional[str] = None) -> List[AuditLogEntry]:
     return [_to_audit_log_entry(log) for log in logs]
 
 
-async def get_audit_registry() -> List[dict]:
+async def get_audit_registry(limit: int = 1000, offset: int = 0) -> List[dict]:
     factory = get_session_factory()
     async with factory() as session:
-        repo = AuditLogRepository(session)
-        logs = await repo.list_all(limit=10000)
-        ev_repo = DocumentEvidenceRepository(session)
-        counts: dict = {}
-        for audit in await ev_repo.list_all(limit=100000):
-            counts[audit.audit_id] = counts.get(audit.audit_id, 0) + 1
-    result = []
-    for r in logs:
+        doc_count_sub = (
+            select(func.count(NeonDocumentEvidence.id))
+            .where(NeonDocumentEvidence.audit_id == AuditLog.audit_id)
+            .scalar_subquery()
+        )
+        stmt = (
+            select(
+                AuditLog.audit_id,
+                AuditLog.supplier_id,
+                AuditLog.supplier_name,
+                AuditLog.result,
+                AuditLog.created_at,
+                doc_count_sub.label("document_count"),
+            )
+            .order_by(AuditLog.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        res = await session.execute(stmt)
+        rows = res.all()
+
+        result = []
+        for r in rows:
+            disp_ts = _display_timestamp(r.created_at)
+            result.append({
+                "audit_id": r.audit_id,
+                "supplier_id": r.supplier_id,
+                "supplier_name": r.supplier_name or "",
+                "result": r.result or "Mismatch",
+                "created_at": disp_ts,
+                "timestamp": disp_ts,
+                "document_count": r.document_count or 0,
+            })
+        return result
+
+
+async def get_audit_registry_detail(audit_id: str) -> Optional[dict]:
+    factory = get_session_factory()
+    async with factory() as session:
+        doc_count_sub = (
+            select(func.count(NeonDocumentEvidence.id))
+            .where(NeonDocumentEvidence.audit_id == AuditLog.audit_id)
+            .scalar_subquery()
+        )
+        stmt = (
+            select(AuditLog, doc_count_sub.label("document_count"))
+            .where(AuditLog.audit_id == audit_id)
+        )
+        res = await session.execute(stmt)
+        row = res.first()
+        if not row:
+            return None
+
+        r, doc_count = row
         ts_val = getattr(r, "created_at", None) or getattr(r, "timestamp", None)
         disp_ts = _display_timestamp(ts_val)
-        sup_name = r.supplier.supplier_name if (hasattr(r, "supplier") and r.supplier) else r.supplier_name
-        result.append({
+        return {
             "audit_id": r.audit_id,
             "supplier_id": r.supplier_id,
-            "supplier_name": sup_name,
+            "supplier_name": r.supplier_name or "",
             "result": r.result or "Mismatch",
             "created_at": disp_ts,
             "timestamp": disp_ts,
-            "cert_type": "Relational evidence",
-            "document_count": counts.get(r.audit_id, 0),
+            "document_count": doc_count or 0,
             "suggested_comment": r.suggested_comment or "",
             "screenshot_url": r.screenshot_url,
             "comparison_table": r.comparison_table,
-        })
-    return result
+        }
 
 
 async def update_audit_result(
@@ -212,8 +246,9 @@ async def update_audit_result(
 def _to_document_evidence(r: NeonDocumentEvidence) -> DocumentEvidence:
     ts_val = getattr(r, "created_at", None) or getattr(r, "timestamp", None)
     disp_ts = _display_timestamp(ts_val)
-    sup_name = r.supplier.supplier_name if (hasattr(r, "supplier") and r.supplier) else r.supplier_name
+    sup_name = r.supplier_name or ""
     return DocumentEvidence(
+        id=str(r.id),
         audit_id=r.audit_id,
         supplier_id=r.supplier_id,
         created_at=disp_ts,
@@ -231,6 +266,70 @@ def _to_document_evidence(r: NeonDocumentEvidence) -> DocumentEvidence:
         file_hash=r.file_hash,
         file_url=r.file_url,
     )
+
+
+async def get_document_evidence_summary(
+    audit_id: Optional[str] = None,
+    supplier_name: Optional[str] = None,
+    supplier_id: Optional[int] = None,
+) -> List[DocumentEvidenceSummary]:
+    factory = get_session_factory()
+    async with factory() as session:
+        stmt = select(
+            NeonDocumentEvidence.id,
+            NeonDocumentEvidence.audit_id,
+            NeonDocumentEvidence.supplier_id,
+            NeonDocumentEvidence.supplier_name,
+            NeonDocumentEvidence.filename,
+            NeonDocumentEvidence.ariba_question_label,
+            NeonDocumentEvidence.gemini_extracted_supplier_name,
+            NeonDocumentEvidence.created_at,
+        )
+        if audit_id:
+            stmt = stmt.where(NeonDocumentEvidence.audit_id == audit_id)
+        if supplier_id:
+            stmt = stmt.where(NeonDocumentEvidence.supplier_id == supplier_id)
+        if supplier_name:
+            stmt = stmt.where(func.lower(NeonDocumentEvidence.supplier_name).like(f"%{supplier_name.lower()}%"))
+
+        result = await session.execute(stmt)
+        rows = result.all()
+
+    return [
+        DocumentEvidenceSummary(
+            id=str(r.id),
+            audit_id=r.audit_id,
+            supplier_id=r.supplier_id,
+            supplier_name=r.supplier_name or "",
+            filename=r.filename,
+            ariba_question_label=r.ariba_question_label,
+            gemini_extracted_supplier_name=r.gemini_extracted_supplier_name or "",
+            created_at=_display_timestamp(r.created_at),
+            timestamp=_display_timestamp(r.created_at),
+        )
+        for r in rows
+    ]
+
+
+async def get_document_evidence_by_id(document_id: str) -> Optional[DocumentEvidence]:
+    factory = get_session_factory()
+    async with factory() as session:
+        stmt = (
+            select(NeonDocumentEvidence)
+            .options(joinedload(NeonDocumentEvidence.supplier), joinedload(NeonDocumentEvidence.object_storage))
+        )
+        try:
+            doc_uuid = uuid.UUID(document_id)
+            stmt = stmt.where(NeonDocumentEvidence.id == doc_uuid)
+        except ValueError:
+            stmt = stmt.where(NeonDocumentEvidence.audit_id == document_id)
+
+        result = await session.execute(stmt.limit(1))
+        record = result.scalars().first()
+
+    if not record:
+        return None
+    return _to_document_evidence(record)
 
 
 async def get_document_evidence_logs(

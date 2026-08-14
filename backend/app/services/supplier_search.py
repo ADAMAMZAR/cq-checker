@@ -231,6 +231,11 @@ def get_all_questionnaires(token: Optional[str], sm_vendor_id: str) -> List[Dict
         for item in items:
             q = item.get("questionnaire") or item.get("questionnaireApi") or {}
             if q:
+                status = q.get("status")
+                if status and str(status).strip().lower() == "notresponded":
+                    logger.info(f"[Step 2] Skipping questionnaire '{q.get('docTitle') or q.get('title')}' ({q.get('questionnaireId') or q.get('docId')}) with status: {status}")
+                    continue
+
                 all_questionnaires.append({
                     "questionnaireId": q.get("questionnaireId") or q.get("docId"),
                     "workspaceId": q.get("workspaceId"),

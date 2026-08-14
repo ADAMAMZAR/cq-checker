@@ -5,7 +5,7 @@ export interface AuditLog {
   timestamp: string;
   supplier_name: string;
   workspace_title: string;
-  cert_type: string;
+  cert_type?: string;
   complete_qa_data_dump: string;
   compiled_extracted_data: string;
   result: string;
@@ -33,6 +33,7 @@ export interface SupplierAssets {
 }
 
 export interface DocumentEvidence {
+  id?: string;
   audit_id: string;
   supplier_id: number;
   created_at?: string;
@@ -49,6 +50,18 @@ export interface DocumentEvidence {
   cost_usd: number;
   cost_myr: number;
   file_url?: string;
+}
+
+export interface DocumentEvidenceSummary {
+  id: string;
+  audit_id: string;
+  supplier_id: number;
+  supplier_name: string;
+  filename: string;
+  ariba_question_label: string;
+  gemini_extracted_supplier_name: string;
+  created_at?: string;
+  timestamp: string;
 }
 
 export interface ComparisonTable {
@@ -142,8 +155,11 @@ export interface AuditRegistryEntry {
   result: string;
   created_at?: string;
   timestamp: string;
-  cert_type: string;
+  cert_type?: string;
   document_count: number;
+}
+
+export interface AuditRegistryDetail extends AuditRegistryEntry {
   suggested_comment: string;
   screenshot_url?: string;
   comparison_table?: any;
