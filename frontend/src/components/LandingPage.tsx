@@ -65,6 +65,16 @@ const pageContainers: PageContainerItem[] = [
     targetTab: "audit",
     routePath: "/checker?tab=audit",
   },
+  {
+    id: "e-auction-generator",
+    title: "E-Auction Generator",
+    subtitle: "Event Document Center",
+    description: "Issue and generate official E-Auction Event Information documents & lot structures.",
+    iconClass: "fa-thin fa-gavel fa-solid",
+    anchor: "/auction",
+    isExternal: false,
+    routePath: "/auction",
+  },
 ];
 
 export default function LandingPage({ onNavigate }: LandingPageProps) {
@@ -131,8 +141,8 @@ export default function LandingPage({ onNavigate }: LandingPageProps) {
         </div>
       </section>
 
-      {/* ── 4 Main Page Containers Grid ── */}
-      <section className="max-w-7xl mx-auto w-full grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* ── 5 Main Page Containers Grid ── */}
+      <section className="max-w-7xl mx-auto w-full grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
         {pageContainers.map((item) => {
           return (
             <a

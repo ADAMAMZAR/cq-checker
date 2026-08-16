@@ -32,7 +32,6 @@ from app.services.timezones import now_malaysia, to_malaysia
 
 logger = logging.getLogger(__name__)
 
-
 def _first_cert(meta: dict) -> dict:
     """Return the first certificate dict from nested ``{"certificates": [...]}``
     extraction output, or the dict itself when it is already a flat single cert."""
