@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState, memo, useMemo } from "react";
 import dynamic from "next/dynamic";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Group, Panel, Separator } from "react-resizable-panels";
 import {
   IconRobot,
   IconSend,
@@ -17,9 +16,28 @@ import {
   IconCheck,
   IconPlayerStop,
   IconX,
+  IconFiles,
+  IconFileText,
+  IconSearch,
+  IconRefresh,
+  IconLoader2,
+  IconFolder,
+  IconFolderPlus,
+  IconChevronDown,
+  IconChevronRight,
 } from "@tabler/icons-react";
-import { sendChat, fetchChatHistory, fetchDocuments, buildFileUrl, submitFeedback } from "@/lib/api";
-import type { ChatSource, FeedbackRating } from "@/types";
+import {
+  sendChat,
+  fetchChatHistory,
+  fetchDocuments,
+  buildFileUrl,
+  submitFeedback,
+  fetchFolders,
+  createFolder,
+  deleteFolder,
+  moveDocumentFolder,
+} from "@/lib/api";
+import type { ChatSource, FeedbackRating, DocumentSummary, DocumentFolder } from "@/types";
 
 const CitationSidePanel = dynamic(() => import("@/components/CitationSidePanel"), { ssr: false });
 
@@ -38,6 +56,7 @@ interface ChatMessage {
   isStreaming?: boolean;
   dbMessageId?: string;
   feedbackGiven?: FeedbackRating;
+  debugTracing?: any;
 }
 
 const SESSION_KEY = "cq_chat_session";
@@ -190,7 +209,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
       <div className={`flex flex-col gap-2 ${msg.sender === "user" ? "items-end" : "items-start"}`}>
         <div className="flex items-center gap-2 text-[11px] text-[var(--text-tertiary)] px-1">
           <span className="font-semibold">{msg.sender === "user" ? "You" : "Procurement Assistant"}</span>
-          <span>{msg.timestamp}</span>
+          {/* <span>{msg.timestamp}</span> */}
           {/* {msg.costUsd !== undefined && msg.sender === "ai" && !msg.isStreaming && (
             <span className="px-2 py-0.5 rounded-full text-[9px] font-bold border bg-[var(--accent-primary-soft)] text-[var(--accent-primary-text)] border-[var(--accent-primary-border)]">
               ${msg.costUsd.toFixed(6)}
@@ -285,13 +304,12 @@ const ChatMessageItem = memo(function ChatMessageItem({
                 <button
                   onClick={() => onFeedback(msg, "satisfied")}
                   disabled={!!msg.feedbackGiven}
-                  className={`p-1.5 rounded-lg transition-all ${
-                    msg.feedbackGiven === "satisfied"
-                      ? "bg-[var(--accent-success)] text-white"
-                      : msg.feedbackGiven
+                  className={`p-1.5 rounded-lg transition-all ${msg.feedbackGiven === "satisfied"
+                    ? "bg-[var(--accent-success)] text-white"
+                    : msg.feedbackGiven
                       ? "text-[var(--text-tertiary)] opacity-40 cursor-not-allowed"
                       : "text-[var(--text-secondary)] hover:text-[var(--accent-success)] hover:bg-[var(--accent-primary-soft)] cursor-pointer"
-                  }`}
+                    }`}
                   title="Satisfied"
                   aria-label="Mark as satisfied"
                 >
@@ -300,13 +318,12 @@ const ChatMessageItem = memo(function ChatMessageItem({
                 <button
                   onClick={() => onFeedback(msg, "not_satisfied")}
                   disabled={!!msg.feedbackGiven}
-                  className={`p-1.5 rounded-lg transition-all ${
-                    msg.feedbackGiven === "not_satisfied"
-                      ? "bg-[var(--accent-danger)] text-white"
-                      : msg.feedbackGiven
+                  className={`p-1.5 rounded-lg transition-all ${msg.feedbackGiven === "not_satisfied"
+                    ? "bg-[var(--accent-danger)] text-white"
+                    : msg.feedbackGiven
                       ? "text-[var(--text-tertiary)] opacity-40 cursor-not-allowed"
                       : "text-[var(--text-secondary)] hover:text-[var(--accent-danger-text)] hover:bg-[var(--accent-primary-soft)] cursor-pointer"
-                  }`}
+                    }`}
                   title="Not satisfied"
                   aria-label="Mark as not satisfied"
                 >
@@ -321,10 +338,86 @@ const ChatMessageItem = memo(function ChatMessageItem({
             )}
           </div>
         )}
+        {msg.sender === "ai" && msg.debugTracing && (
+          <DebugTracingAccordion debugTracing={msg.debugTracing} />
+        )}
       </div>
     </div>
   );
 });
+
+function DebugTracingAccordion({ debugTracing }: { debugTracing: any }) {
+  const [isOpen, setIsOpen] = useState(false);
+  if (!debugTracing) return null;
+
+  return (
+    <div className="mt-2.5 pt-2 border-t border-[var(--border-subtle)] text-xs">
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        className="flex items-center gap-1.5 px-2 py-1 rounded bg-[var(--bg-input)] hover:bg-[var(--bg-surface-hover)] border border-[var(--border-subtle)] text-[10px] font-bold text-[var(--accent-primary-text)] cursor-pointer transition-all"
+      >
+        <span>🔍 Debug PostgreSQL Retrieval & Citation Tracing</span>
+        {isOpen ? <IconChevronDown className="w-3 h-3" /> : <IconChevronRight className="w-3 h-3" />}
+      </button>
+
+      {isOpen && (
+        <div className="mt-2 p-2.5 rounded-xl bg-[var(--bg-input)]/90 border border-[var(--border-subtle)] space-y-3 text-[11px] font-mono text-[var(--text-primary)]">
+          {/* Section 1: PostgreSQL Retrieved Chunks */}
+          <div>
+            <h5 className="font-bold text-[var(--heading-color)] flex items-center gap-1 mb-1.5 text-[11px]">
+              📊 PostgreSQL Retrieved Chunks ({debugTracing.retrieved_chunks_count ?? 0})
+            </h5>
+            <div className="space-y-1.5">
+              {(debugTracing.postgres_chunks || []).map((chunk: any) => (
+                <div key={chunk.chunk_index} className="p-2 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)]">
+                  <div className="flex items-center justify-between text-[10px] font-bold text-[var(--accent-primary-text)] mb-1">
+                    <span>Chunk #{chunk.chunk_index}: {chunk.document_title} ({chunk.page_range})</span>
+                    <span className="px-1.5 py-0.5 rounded bg-[var(--accent-primary-soft)] border border-[var(--accent-primary-border)] text-emerald-400">
+                      Score: {chunk.combined_score}
+                    </span>
+                  </div>
+                  <pre className="whitespace-pre-wrap break-words text-[10px] text-[var(--text-secondary)] font-sans leading-relaxed bg-[var(--bg-surface)] p-2 rounded border border-[var(--border-subtle)] max-h-96 overflow-y-auto">
+                    {chunk.content_snippet}
+                  </pre>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Section 2: Citation Mapping */}
+          {debugTracing.citation_mapping && debugTracing.citation_mapping.length > 0 && (
+            <div>
+              <h5 className="font-bold text-[var(--heading-color)] mb-1 text-[11px]">
+                🔗 Citation Mapping
+              </h5>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 text-[10px]">
+                {debugTracing.citation_mapping.map((c: any, i: number) => (
+                  <div key={i} className="flex items-center gap-1.5 p-1.5 rounded bg-[var(--bg-card)] border border-[var(--border-subtle)]">
+                    <span className="font-bold text-[var(--accent-primary-text)]">{c.citation}</span>
+                    <span className="truncate">{c.title} (pg.{c.page_number})</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Section 3: Prompt Context */}
+          {debugTracing.prompt_context_fed_to_gemini && (
+            <div>
+              <h5 className="font-bold text-[var(--heading-color)] mb-1 text-[11px]">
+                📝 Context Fed to Gemini Prompt
+              </h5>
+              <pre className="whitespace-pre-wrap break-words text-[10px] text-[var(--text-secondary)] bg-[var(--bg-surface)] p-2 rounded border border-[var(--border-subtle)] max-h-96 overflow-y-auto">
+                {debugTracing.prompt_context_fed_to_gemini}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function FeedbackModal({
   messageId,
@@ -360,7 +453,7 @@ function FeedbackModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fade-in">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
       <div className="bg-[var(--bg-card)] border border-[var(--border-visible)] rounded-2xl shadow-2xl w-full max-w-md mx-4 animate-slide-up">
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border-subtle)]">
           <h3 className="text-base font-bold text-[var(--heading-color)]">
@@ -383,11 +476,10 @@ function FeedbackModal({
               <button
                 key={reason}
                 onClick={() => toggleReason(reason)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all border ${
-                  selectedReasons.includes(reason)
-                    ? "bg-[var(--accent-primary)] text-white border-[var(--accent-primary-border-strong)]"
-                    : "bg-[var(--bg-surface)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:border-[var(--accent-primary-border)] hover:text-[var(--accent-primary-text)]"
-                } cursor-pointer`}
+                className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all border ${selectedReasons.includes(reason)
+                  ? "bg-[var(--accent-primary)] text-white border-[var(--accent-primary-border-strong)]"
+                  : "bg-[var(--bg-surface)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:border-[var(--accent-primary-border)] hover:text-[var(--accent-primary-text)]"
+                  } cursor-pointer`}
               >
                 {reason}
               </button>
@@ -426,9 +518,128 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
-  const [pdfView, setPdfView] = useState<{ fileUrl: string; page: number; title: string } | null>(null);
+  const [pdfView, setPdfView] = useState<{ fileUrl: string; page: number; title: string; documentId?: string | null; contentType?: string | null } | null>(null);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [feedbackModal, setFeedbackModal] = useState<{ messageId: string } | null>(null);
+
+  const [systemDocs, setSystemDocs] = useState<DocumentSummary[]>([]);
+  const [folders, setFolders] = useState<DocumentFolder[]>([]);
+  const [loadingDocs, setLoadingDocs] = useState(false);
+  const [docFilter, setDocFilter] = useState("");
+  const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
+  const [leftWidth, setLeftWidth] = useState<number>(28); // 28% default width (min 25%, max 60%)
+  const isDraggingRef = useRef(false);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isDraggingRef.current = true;
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      if (!isDraggingRef.current) return;
+      const container = document.getElementById("chatbot-container");
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      const relativeX = moveEvent.clientX - rect.left;
+      const newPct = (relativeX / rect.width) * 100;
+      // Clamp between 25% minimum and 60% maximum
+      const clamped = Math.min(60, Math.max(25, newPct));
+      setLeftWidth(clamped);
+    };
+
+    const onMouseUp = () => {
+      isDraggingRef.current = false;
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  }, []);
+
+  const loadSystemDocsAndFolders = useCallback(async () => {
+    setLoadingDocs(true);
+    try {
+      const [docs, fList] = await Promise.all([fetchDocuments(), fetchFolders()]);
+      setSystemDocs(docs);
+      setFolders(fList);
+    } catch (err) {
+      console.error("Failed to load system documents/folders:", err);
+    } finally {
+      setLoadingDocs(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadSystemDocsAndFolders();
+  }, [loadSystemDocsAndFolders]);
+
+  const [showCreateFolderModal, setShowCreateFolderModal] = useState(false);
+
+  const handleMoveDoc = async (docId: string, folderId: string) => {
+    try {
+      await moveDocumentFolder(docId, folderId || null);
+      loadSystemDocsAndFolders();
+    } catch (err) {
+      console.error("Failed to move document:", err);
+    }
+  };
+
+  const toggleFolderExpand = (folderName: string) => {
+    setExpandedFolders((prev) => ({
+      ...prev,
+      [folderName]: prev[folderName] === undefined ? true : !prev[folderName],
+    }));
+  };
+
+  const folderGroupedDocs = useMemo(() => {
+    const sorted = [...systemDocs].sort((a, b) =>
+      a.title.localeCompare(b.title, undefined, { sensitivity: "base", numeric: true })
+    );
+    const q = docFilter.trim().toLowerCase();
+    const filtered = q ? sorted.filter((d) => d.title.toLowerCase().includes(q)) : sorted;
+
+    const groups: Record<string, DocumentSummary[]> = {};
+    folders.forEach((f) => {
+      groups[f.name] = [];
+    });
+    if (!groups["General"]) groups["General"] = [];
+
+    filtered.forEach((doc) => {
+      const fname = doc.folder_name || "General";
+      if (!groups[fname]) groups[fname] = [];
+      groups[fname].push(doc);
+    });
+
+    return groups;
+  }, [systemDocs, folders, docFilter]);
+
+  const handleOpenCitation = useCallback((src: ChatSource) => {
+    const url = buildFileUrl(src.file_url);
+    if (!url) return;
+    setPdfView({
+      fileUrl: url,
+      page: src.page_number ?? 1,
+      title: src.title,
+      documentId: src.document_id,
+      contentType: src.content_type,
+    });
+  }, []);
+
+  const handleSelectSourceDoc = useCallback((doc: DocumentSummary) => {
+    const url = buildFileUrl(doc.file_url);
+    if (!url) return;
+    setPdfView({
+      fileUrl: url,
+      page: 1,
+      title: doc.title,
+      documentId: doc.id,
+      contentType: (doc as any).content_type || "",
+    });
+  }, []);
   const sessionRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -663,6 +874,7 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
                 costUsd: result.cost_usd,
                 isStreaming: false,
                 dbMessageId: result.message_id ?? undefined,
+                debugTracing: result.debug_tracing ?? undefined,
               }
               : m
           )
@@ -708,10 +920,199 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
   };
   return (
     <>
-    <Group orientation="horizontal" className="flex-1 min-h-0" id="chat-citation-panels">
-      <Panel defaultSize={pdfView ? 50 : 100} minSize={30}>
-        <div className="flex flex-col h-[calc(100vh-140px)] min-h-[550px] rounded-2xl border border-[var(--border-visible)] bg-[var(--bg-card)] shadow-2xl overflow-hidden animate-fade-in">
-          {/* ── Top Header ── */}
+      <div
+        id="chatbot-container"
+        className="flex flex-col lg:flex-row w-full h-[calc(100vh-140px)] min-h-[550px] animate-fade-in relative"
+      >
+        {/* ── Left Sidebar (User Resizable: 25% min to 60% max) ── */}
+        <aside
+          style={{ width: `${leftWidth}%` }}
+          className="w-full shrink-0 flex flex-col h-full rounded-2xl border border-[var(--border-visible)] bg-[var(--bg-card)] shadow-xl overflow-hidden transition-all duration-75"
+        >
+          {pdfView ? (
+            /* When a source or citation is clicked, show Document Citation Viewer with Back Button on the Left */
+            <CitationSidePanel
+              key={`${pdfView.fileUrl}:${pdfView.page}:${pdfView.documentId}`}
+              fileUrl={pdfView.fileUrl}
+              documentId={pdfView.documentId}
+              contentType={pdfView.contentType}
+              initialPage={pdfView.page}
+              title={pdfView.title}
+              onClose={() => setPdfView(null)}
+            />
+          ) : (
+            /* Default: System Sources List */
+            <>
+              {/* Header */}
+              <div className="px-4 py-3.5 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="p-2 rounded-xl bg-[var(--accent-primary-soft)] border border-[var(--accent-primary-border)] text-[var(--accent-primary-text)] shrink-0">
+                    <IconFiles className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="font-sans text-xs font-bold text-[var(--heading-color)] truncate">
+                      System Sources
+                    </h3>
+                    <p className="text-[10px] text-[var(--text-tertiary)] font-mono">
+                      {systemDocs.length} doc{systemDocs.length === 1 ? "" : "s"} across {folders.length} folder{folders.length === 1 ? "" : "s"}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setShowCreateFolderModal(true)}
+                    className="p-1.5 rounded-lg border border-[var(--border-subtle)] text-[var(--text-tertiary)] hover:text-[var(--heading-color)] hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer"
+                    title="Create New Folder"
+                  >
+                    <IconFolderPlus className="w-3.5 h-3.5 text-[var(--accent-primary-text)]" />
+                  </button>
+                  <button
+                    onClick={loadSystemDocsAndFolders}
+                    disabled={loadingDocs}
+                    className="p-1.5 rounded-lg border border-[var(--border-subtle)] text-[var(--text-tertiary)] hover:text-[var(--heading-color)] hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer disabled:opacity-40"
+                    title="Refresh sources list"
+                  >
+                    <IconRefresh className={`w-3.5 h-3.5 ${loadingDocs ? "animate-spin" : ""}`} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Filter Search Input */}
+              <div className="p-2.5 border-b border-[var(--border-subtle)] bg-[var(--bg-input)]/40 shrink-0">
+                <div className="relative">
+                  <IconSearch className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" />
+                  <input
+                    type="text"
+                    value={docFilter}
+                    onChange={(e) => setDocFilter(e.target.value)}
+                    placeholder="Search sources…"
+                    className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-[var(--bg-input)] border border-[var(--border-subtle)] text-xs text-[var(--heading-color)] placeholder-[var(--text-tertiary)] outline-none focus:border-[var(--accent-primary-border)]"
+                  />
+                </div>
+              </div>
+
+              {/* Folder Grouped Documents List */}
+              <div className="flex-1 overflow-y-auto p-2 space-y-2">
+                {loadingDocs ? (
+                  <div className="py-12 text-center text-xs text-[var(--text-tertiary)] flex flex-col items-center gap-2">
+                    <IconLoader2 className="w-5 h-5 animate-spin text-[var(--accent-primary-text)]" />
+                    <span>Loading system sources…</span>
+                  </div>
+                ) : Object.keys(folderGroupedDocs).length === 0 ? (
+                  <div className="py-12 text-center text-xs text-[var(--text-tertiary)] px-4">
+                    No system sources found.
+                  </div>
+                ) : (
+                  Object.entries(folderGroupedDocs).map(([fName, docsInFolder]) => {
+                    const isExpanded = expandedFolders[fName] !== false; // expanded by default
+                    const folderMeta = folders.find((f) => f.name === fName);
+
+                    return (
+                      <div key={fName} className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)]/40 overflow-hidden">
+                        {/* Folder Header */}
+                        <div
+                          onClick={() => toggleFolderExpand(fName)}
+                          className="flex items-center justify-between px-3 py-2 bg-[var(--bg-surface)] hover:bg-[var(--accent-primary-soft)]/30 transition-colors cursor-pointer select-none group"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            {isExpanded ? (
+                              <IconChevronDown className="w-3.5 h-3.5 text-[var(--text-tertiary)] shrink-0" />
+                            ) : (
+                              <IconChevronRight className="w-3.5 h-3.5 text-[var(--text-tertiary)] shrink-0" />
+                            )}
+                            <IconFolder className="w-4 h-4 text-[var(--accent-primary-text)] shrink-0" />
+                            <span className="font-sans text-xs font-bold text-[var(--heading-color)] truncate">
+                              {fName}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <span className="font-mono bg-[var(--bg-input)] px-1.5 py-0.5 rounded text-[9px] font-bold text-[var(--text-tertiary)]">
+                              {docsInFolder.length}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Document List inside Folder */}
+                        {isExpanded && (
+                          <div className="p-1.5 space-y-1 bg-[var(--bg-card)]/50">
+                            {docsInFolder.length === 0 ? (
+                              <p className="py-3 text-center text-[10px] text-[var(--text-tertiary)] italic">
+                                Empty folder. Upload or move files here.
+                              </p>
+                            ) : (
+                              docsInFolder.map((doc) => (
+                                <div
+                                  key={doc.id}
+                                  className="flex flex-col gap-1.5 p-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)]/60 hover:border-[var(--accent-primary-border)] hover:bg-[var(--accent-primary-soft)]/40 transition-all group"
+                                >
+                                  <button
+                                    onClick={() => handleSelectSourceDoc(doc)}
+                                    className="flex items-start gap-2 text-left cursor-pointer w-full"
+                                  >
+                                    <IconFileText className="w-4 h-4 text-[var(--accent-primary-text)] shrink-0 mt-0.5" />
+                                    <div className="min-w-0 flex-1">
+                                      <h4 className="font-semibold text-xs text-[var(--heading-color)] line-clamp-2 leading-snug group-hover:text-[var(--accent-primary-text)] transition-colors">
+                                        {doc.title}
+                                      </h4>
+                                      <div className="flex items-center justify-between gap-1 mt-1 text-[10px] text-[var(--text-tertiary)]">
+                                        <span className="font-mono bg-[var(--bg-input)] px-1.5 py-0.5 rounded text-[9px] font-bold">
+                                          {doc.page_count ?? 1} page{doc.page_count === 1 ? "" : "s"}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </button>
+
+                                  {/* Inline Move Folder Selector */}
+                                  <div className="flex items-center justify-between gap-1 pt-1 border-t border-[var(--border-subtle)]/60 text-[10px]">
+                                    <span className="text-[9px] text-[var(--text-tertiary)]">Folder:</span>
+                                    {(() => {
+                                      const generalFolder = folders.find((f) => f.name.toLowerCase() === "general");
+                                      const hasGeneralInDb = !!generalFolder;
+                                      const selectedValue = doc.folder_id || (generalFolder ? generalFolder.id : "");
+
+                                      return (
+                                        <select
+                                          value={selectedValue}
+                                          onChange={(e) => handleMoveDoc(doc.id, e.target.value)}
+                                          onClick={(e) => e.stopPropagation()}
+                                          className="px-1.5 py-0.5 rounded bg-[var(--bg-input)] border border-[var(--border-subtle)] text-[10px] font-medium text-[var(--heading-color)] outline-none cursor-pointer focus:border-[var(--accent-primary-border)]"
+                                        >
+                                          {!hasGeneralInDb && <option value="">General</option>}
+                                          {folders.map((f) => (
+                                            <option key={f.id} value={f.id}>
+                                              {f.name}
+                                            </option>
+                                          ))}
+                                        </select>
+                                      );
+                                    })()}
+                                  </div>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </>
+          )}
+        </aside>
+
+        {/* ── Resizable Drag Handle Divider ── */}
+        <div
+          onMouseDown={handleMouseDown}
+          className="hidden lg:flex w-3 items-center justify-center cursor-col-resize group shrink-0 select-none hover:bg-[var(--accent-primary-soft)] transition-colors rounded-full mx-1"
+          title="Drag left/right to resize panels (Min 25%, Max 60%)"
+        >
+          <div className="w-1 h-10 rounded-full bg-[var(--border-subtle)] group-hover:bg-[var(--accent-primary-text)] group-active:bg-[var(--accent-primary)] transition-colors" />
+        </div>
+
+        {/* ── Center Chat Panel (Remaining ~70-75% space) ── */}
+        <div className="flex-1 min-w-0 flex flex-col h-full rounded-2xl border border-[var(--border-visible)] bg-[var(--bg-card)] shadow-2xl overflow-hidden">
+          {/* Top Header */}
           <header className="px-6 py-4 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] flex items-center justify-between shrink-0">
             <div className="flex items-center gap-3.5">
               <div className="relative p-2.5 rounded-xl bg-[var(--accent-primary-soft)] border border-[var(--accent-primary-border)] text-[var(--accent-primary-text)]">
@@ -735,7 +1136,8 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
               </button>
             </div>
           </header>
-          {/* ── Messages ── */}
+
+          {/* Messages */}
           <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-4 sm:p-6 flex flex-col gap-6">
             {!historyLoaded ? (
               <div className="flex justify-center pt-12">
@@ -748,6 +1150,8 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
             )}
             <div ref={chatEndRef} />
           </div>
+
+          {/* Footer Input */}
           <footer className="p-4 border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] shrink-0">
             {messages.length <= 1 && (
               <div className="flex flex-wrap gap-2 mb-3">
@@ -787,7 +1191,7 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
                     }
                   }
                 }}
-                placeholder="Ask about the manuals… (Shift + Enter for new line)"
+                placeholder="Ask about procurement… (Shift + Enter for new line)"
                 disabled={isTyping}
                 aria-label="Ask Procurement Assistant"
                 className="flex-1 bg-transparent px-3 py-1.5 text-sm text-[var(--heading-color)] placeholder-[var(--text-tertiary)] outline-none border-none resize-none h-[38px] min-h-[38px] max-h-36 overflow-y-auto leading-relaxed"
@@ -806,11 +1210,10 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
                 <button
                   type="submit"
                   disabled={!input.trim()}
-                  className={`icon-action p-2.5 rounded-xl font-bold text-white transition-all flex items-center justify-center shrink-0 cursor-pointer mb-0.5 ${
-                    input.trim()
-                      ? "bg-[var(--accent-primary)] hover:bg-[var(--accent-primary-hover)] shadow-md shadow-[var(--accent-primary-shadow)] active:scale-95"
-                      : "bg-[var(--accent-neutral-bg)] text-[var(--accent-neutral-text)] cursor-not-allowed"
-                  }`}
+                  className={`icon-action p-2.5 rounded-xl font-bold text-white transition-all flex items-center justify-center shrink-0 cursor-pointer mb-0.5 ${input.trim()
+                    ? "bg-[var(--accent-primary)] hover:bg-[var(--accent-primary-hover)] shadow-md shadow-[var(--accent-primary-shadow)] active:scale-95"
+                    : "bg-[var(--accent-neutral-bg)] text-[var(--accent-neutral-text)] cursor-not-allowed"
+                    }`}
                   title="Send message (Enter)"
                   aria-label="Send message"
                 >
@@ -820,29 +1223,114 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
             </form>
           </footer>
         </div>
-      </Panel>
-      {pdfView && (
-        <Separator className="w-1 bg-[var(--border-subtle)] hover:bg-[var(--accent-primary-border-focus)] transition-colors cursor-col-resize" />
+      </div>
+
+      {feedbackModal && (
+        <FeedbackModal
+          messageId={feedbackModal.messageId}
+          onClose={() => setFeedbackModal(null)}
+          onSubmit={handleSubmitFeedback}
+        />
       )}
-      {pdfView && (
-        <Panel defaultSize={50} minSize={25}>
-          <CitationSidePanel
-            key={`${pdfView.fileUrl}:${pdfView.page}`}
-            fileUrl={pdfView.fileUrl}
-            initialPage={pdfView.page}
-            title={pdfView.title}
-            onClose={() => setPdfView(null)}
-          />
-        </Panel>
+
+      {showCreateFolderModal && (
+        <CreateFolderModal
+          onClose={() => setShowCreateFolderModal(false)}
+          onConfirm={async (name) => {
+            await createFolder(name);
+            loadSystemDocsAndFolders();
+          }}
+        />
       )}
-    </Group>
-    {feedbackModal && (
-      <FeedbackModal
-        messageId={feedbackModal.messageId}
-        onClose={() => setFeedbackModal(null)}
-        onSubmit={handleSubmitFeedback}
-      />
-    )}
-  </>
+    </>
+  );
+}
+
+function CreateFolderModal({
+  onClose,
+  onConfirm,
+}: {
+  onClose: () => void;
+  onConfirm: (name: string) => Promise<void>;
+}) {
+  const [name, setName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!name.trim() || submitting) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await onConfirm(name.trim());
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create folder.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-sm rounded-2xl border border-[var(--border-visible)] bg-[var(--bg-card)] p-5 shadow-2xl space-y-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 rounded-lg bg-[var(--accent-primary-soft)] text-[var(--accent-primary-text)]">
+              <IconFolderPlus className="w-4 h-4" />
+            </div>
+            <h3 className="font-sans text-sm font-bold text-[var(--heading-color)]">Create New Folder</h3>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--heading-color)] hover:bg-[var(--bg-surface-hover)] transition-colors"
+          >
+            <IconX className="w-4 h-4" />
+          </button>
+        </div>
+
+        {error && (
+          <p className="text-xs font-medium text-rose-400 bg-rose-500/10 p-2.5 rounded-xl border border-rose-500/20">
+            ⚠️ {error}
+          </p>
+        )}
+
+        <input
+          type="text"
+          autoFocus
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") handleSubmit();
+            if (e.key === "Escape") onClose();
+          }}
+          placeholder="e.g. Safety Manuals, QA Checklists"
+          className="w-full px-3 py-2 rounded-xl bg-[var(--bg-input)] border border-[var(--border-subtle)] text-xs text-[var(--heading-color)] placeholder-[var(--text-tertiary)] outline-none focus:border-[var(--accent-primary-border)] shadow-xs"
+        />
+
+        <div className="flex items-center justify-end gap-2 pt-1">
+          <button
+            onClick={onClose}
+            disabled={submitting}
+            className="px-3.5 py-1.5 rounded-xl border border-[var(--border-subtle)] text-xs font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={!name.trim() || submitting}
+            className="px-4 py-1.5 rounded-xl bg-[var(--accent-primary)] hover:bg-[var(--accent-primary-hover)] text-xs font-bold text-white shadow-md transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+          >
+            {submitting ? <IconLoader2 className="w-3.5 h-3.5 animate-spin" /> : "Create Folder"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

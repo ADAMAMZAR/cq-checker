@@ -13,6 +13,7 @@ import type {
   ChatSource,
   DocumentIngestResult,
   DocumentSummary,
+  DocumentFolder,
   CertificateVerifyResult,
   SupplierAuditResponse,
   DbTableMeta,
@@ -283,6 +284,7 @@ export async function sendChat(
     cache_hit: !!done.cache_hit,
     session_id: done.session_id ?? sessionId,
     message_id: done.message_id ?? null,
+    debug_tracing: (done as any).debug_tracing ?? null,
   };
 }
 
@@ -353,6 +355,84 @@ export async function fetchDocuments(): Promise<DocumentSummary[]> {
   return res.json();
 }
 
+export async function fetchFolders(): Promise<DocumentFolder[]> {
+  const res = await fetch(`${API_BASE}/folders`);
+  if (!res.ok) throw new Error(await errorDetail(res));
+  return res.json();
+}
+
+export async function createFolder(name: string): Promise<DocumentFolder> {
+  const res = await fetch(`${API_BASE}/folders`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) throw new Error(await errorDetail(res));
+  return res.json();
+}
+
+export async function updateFolder(folderId: string, name: string): Promise<DocumentFolder> {
+  const res = await fetch(`${API_BASE}/folders/${encodeURIComponent(folderId)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) throw new Error(await errorDetail(res));
+  return res.json();
+}
+
+export async function deleteFolder(folderId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/folders/${encodeURIComponent(folderId)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(await errorDetail(res));
+}
+
+export async function moveDocumentFolder(documentId: string, folderId: string | null): Promise<any> {
+  const res = await fetch(`${API_BASE}/documents/${encodeURIComponent(documentId)}/folder`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ folder_id: folderId }),
+  });
+  if (!res.ok) throw new Error(await errorDetail(res));
+  return res.json();
+}
+
+export async function updateDocumentRegion(documentId: string, region: string): Promise<any> {
+  const res = await fetch(`${API_BASE}/documents/${encodeURIComponent(documentId)}/region`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ region }),
+  });
+  if (!res.ok) throw new Error(await errorDetail(res));
+  return res.json();
+}
+
+export async function fetchDocumentContent(documentId: string): Promise<any> {
+  const res = await fetch(`${API_BASE}/documents/${encodeURIComponent(documentId)}/content`);
+  if (!res.ok) throw new Error(await errorDetail(res));
+  return res.json();
+}
+
+export interface RetrievalTestPayload {
+  query: string;
+  k?: number;
+  window_size?: number;
+  vector_weight?: number;
+  bm25_weight?: number;
+  region_filter?: string;
+}
+
+export async function testRetrieval(payload: RetrievalTestPayload): Promise<any> {
+  const res = await fetch(`${API_BASE}/retrieval/test`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await errorDetail(res));
+  return res.json();
+}
+
 // ── Certificate Verification ─────────────────────────────────────────────────
 
 export interface VerifyCertificateOptions {
@@ -413,6 +493,23 @@ export async function deleteDbRow(table: string, pk: Record<string, string>): Pr
   });
   if (!res.ok) throw new Error(await errorDetail(res));
 }
+
+export async function updateDbCell(
+  table: string,
+  pk: Record<string, string>,
+  column: string,
+  value: string
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/db/tables/${encodeURIComponent(table)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pk, column, value }),
+  });
+  if (!res.ok) throw new Error(await errorDetail(res));
+}
+
+
+
 
 export async function fetchDbSchema(): Promise<DbSchema> {
   const res = await fetch(`${API_BASE}/db/schema`);

@@ -118,7 +118,7 @@ export default function IngestTestPlayground() {
         };
       });
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Commit failed.");
+      setError(err instanceof Error ? err.message : "Commit failed.");
     } finally {
       setCommittingMap((prev) => ({ ...prev, [page.page_number]: false }));
     }
@@ -127,6 +127,7 @@ export default function IngestTestPlayground() {
   const handleCommitAll = async () => {
     if (!testData || !testData.results.length) return;
     setCommitAllLoading(true);
+    setError(null);
     try {
       const payload = testData.results.map((r) => ({
         page_number: r.page_number,
@@ -141,7 +142,7 @@ export default function IngestTestPlayground() {
         };
       });
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Commit all failed.");
+      setError(err instanceof Error ? err.message : "Commit all failed.");
     } finally {
       setCommitAllLoading(false);
     }

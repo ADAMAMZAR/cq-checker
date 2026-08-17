@@ -413,6 +413,50 @@ async def delete_row(table: str, pk: Dict[str, Any]) -> int:
         return result.rowcount or 0
 
 
+async def update_cell(table: str, pk: Dict[str, Any], column: str, value: Any) -> int:
+    """Update a single cell in a row identified by its primary key values."""
+    pk_cols = await get_primary_keys(table)
+    if not pk_cols:
+        raise ValueError("Table has no primary key — cannot update rows.")
+
+    all_cols = await get_columns(table)
+    if column not in all_cols:
+        raise ValueError(f"Column '{column}' does not exist in table '{table}'.")
+
+    factory = get_session_factory()
+    async with factory() as session:
+        col_udt_res = await session.execute(
+            text(
+                "SELECT udt_name FROM information_schema.columns "
+                "WHERE table_schema = 'public' AND table_name = :t AND column_name = :c"
+            ),
+            {"t": table, "c": column},
+        )
+        row = col_udt_res.first()
+        if not row:
+            raise ValueError(f"Could not find column '{column}' in table '{table}'.")
+        target_udt = row[0]
+
+        where = []
+        params: Dict[str, Any] = {}
+        for pk_col in pk_cols:
+            name = pk_col["name"]
+            if name not in pk:
+                raise ValueError(f"Missing primary key value for column '{name}'.")
+            cast = _cast_for(pk_col["udt"])
+            where.append(f'"{name}" = CAST(:pk_{name} AS {cast})')
+            params[f"pk_{name}"] = _coerce_value(pk_col["udt"], pk[name])
+
+        target_cast = _cast_for(target_udt)
+        params["new_val"] = _coerce_value(target_udt, value)
+
+        sql = f'UPDATE "{table}" SET "{column}" = CAST(:new_val AS {target_cast}) WHERE ' + " AND ".join(where)
+        result = await session.execute(text(sql), params)
+        await session.commit()
+        return result.rowcount or 0
+
+
+
 def _stringify(value: Any) -> str:
     """Render a cell value as a display string, flattening JSON/dates/vectors."""
     if value is None:

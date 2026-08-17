@@ -466,11 +466,11 @@ export default function ComparisonMatrix() {
     }
   };
 
+  const [showResetConfirmModal, setShowResetConfirmModal] = useState(false);
+
   // Reset to default cases
   const handleResetDefaults = () => {
-    if (confirm("Reset all test cases back to original system defaults? Custom rows will be cleared.")) {
-      saveCategories(DEFAULT_CATEGORIES);
-    }
+    setShowResetConfirmModal(true);
   };
 
   // Update specific row cell
@@ -1011,6 +1011,50 @@ export default function ComparisonMatrix() {
           ))
         )}
       </div>
+
+      {showResetConfirmModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60"
+          onClick={() => setShowResetConfirmModal(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl border border-[var(--border-visible)] bg-[var(--bg-card)] p-5 shadow-2xl space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
+              <h3 className="font-sans text-sm font-bold text-[var(--heading-color)]">Reset Test Cases?</h3>
+              <button
+                onClick={() => setShowResetConfirmModal(false)}
+                className="p-1 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--heading-color)] transition-colors"
+              >
+                <IconX className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
+              Reset all matrix test cases back to original system defaults? Any custom added rows or edits will be cleared.
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                onClick={() => setShowResetConfirmModal(false)}
+                className="px-3.5 py-1.5 rounded-xl border border-[var(--border-subtle)] text-xs font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  saveCategories(DEFAULT_CATEGORIES);
+                  setShowResetConfirmModal(false);
+                }}
+                className="px-4 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-xs font-bold text-white shadow-md transition-all cursor-pointer"
+              >
+                Reset Defaults
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -194,6 +194,8 @@ export interface ChatSource {
   page_number?: number | null;
   snippet?: string | null;
   file_url?: string | null;
+  document_id?: string | null;
+  content_type?: string | null;
 }
 
 export interface ChatResponse {
@@ -203,6 +205,7 @@ export interface ChatResponse {
   cache_hit: boolean;
   session_id?: string | null;
   message_id?: string | null;
+  debug_tracing?: any;
 }
 
 export interface ChatHistoryResponse {
@@ -217,6 +220,7 @@ export interface ChatStreamDone {
   cache_hit: boolean;
   session_id?: string | null;
   message_id?: string | null;
+  debug_tracing?: any;
   error?: string;
 }
 
@@ -252,6 +256,13 @@ export interface DocumentIngestResult {
   message: string;
 }
 
+export interface DocumentFolder {
+  id: string;
+  name: string;
+  document_count: number;
+  created_at?: string | null;
+}
+
 export interface DocumentSummary {
   id: string;
   title: string;
@@ -259,6 +270,8 @@ export interface DocumentSummary {
   page_count?: number;
   parent_count?: number;
   child_count?: number;
+  folder_id?: string | null;
+  folder_name?: string | null;
   created_at?: string | null;
 }
 

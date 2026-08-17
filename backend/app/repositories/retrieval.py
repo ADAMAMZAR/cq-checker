@@ -16,19 +16,14 @@ async def hybrid_search(
     query_text: str,
     k: int = 3,
     window_size: int = 4,
+    target_regions: Optional[List[str]] = None,
 ) -> List[dict]:
     """Return top-k matching document pages expanded into contiguous multi-page sub-workflows.
 
     Parameters:
         k: Number of seed matching pages to retrieve.
         window_size: Number of forward adjacent pages to include for multi-page procedures.
-
-    Each result:
-      {
-        "page_id", "page_content", "parent_content", "page_number",
-        "page_number_start", "page_number_end", "document_id", "title",
-        "file_url", "combined_score",
-      }
+        target_regions: Optional list of region codes (e.g. ["VN", "GENERAL"]) to filter documents.
     """
     embedding_str = "[" + ",".join(str(v) for v in query_embedding) + "]"
 
@@ -38,6 +33,13 @@ async def hybrid_search(
     if re.search(r"\b(rfq|rfp|rft|sourcing|tender|quotation|proposal)\b", query_text.lower()):
         search_q = query_text + " RFP RFT RFQ Sourcing Tender"
 
+    # Region filter SQL clause
+    region_clause = ""
+    params = {"q": search_q, "k": k}
+    if target_regions:
+        region_clause = "AND (d.region = ANY(:target_regions) OR d.region = 'GENERAL')"
+        params["target_regions"] = list(target_regions)
+
     # Stage 1: Retrieve top-k seed page hits
     sql = text(f"""
         SELECT
@@ -46,17 +48,20 @@ async def hybrid_search(
             dp.page_number AS page_number,
             d.id AS document_id,
             d.title AS title,
+            d.region AS region,
             COALESCE(os.file_url, '') AS file_url,
+            COALESCE(os.content_type, '') AS content_type,
             (0.6 * (1 - (dp.embedding <=> '{embedding_str}'::vector(1536)))
-             + 0.4 * COALESCE(ts_rank_cd(dp.tsv_content, plainto_tsquery('english', :q)), 0)) AS combined_score
+             + 0.4 * COALESCE(ts_rank_cd(dp.tsv_content, websearch_to_tsquery('english', :q)), 0)) AS combined_score
         FROM document_pages dp
         JOIN documents d ON d.id = dp.document_id
         LEFT JOIN object_storage os ON os.id = d.object_id
         WHERE dp.embedding IS NOT NULL
+        {region_clause}
         ORDER BY combined_score DESC
         LIMIT :k
     """)
-    result = await session.execute(sql, {"q": search_q, "k": k})
+    result = await session.execute(sql, params)
     seed_hits = []
     for r in result:
         seed_hits.append({
@@ -65,7 +70,9 @@ async def hybrid_search(
             "page_number": r.page_number,
             "document_id": r.document_id,
             "title": r.title,
+            "region": getattr(r, "region", "GENERAL") or "GENERAL",
             "file_url": r.file_url,
+            "content_type": r.content_type,
             "combined_score": float(r.combined_score or 0.0),
         })
 
@@ -99,27 +106,34 @@ async def hybrid_search(
             doc_pages_map[d_id] = {}
         doc_pages_map[d_id][wr.page_number] = wr.page_content or ""
 
-    # Build final results with stitched multi-page parent_content
-    results = []
-    processed_ranges = set()
-
+    # Group seed hits by document_id to merge overlapping page ranges and seed page lists
+    doc_seeds_map = {}
     for s in seed_hits:
         d_id = s["document_id"]
-        seed_p = s["page_number"]
-        p_start = max(1, seed_p - 1)
-        p_end = seed_p + window_size
+        if d_id not in doc_seeds_map:
+            doc_seeds_map[d_id] = {
+                "top_seed_hit": s,
+                "seed_pages": [s["page_number"]],
+            }
+        else:
+            doc_seeds_map[d_id]["seed_pages"].append(s["page_number"])
+
+    # Build final results with deduplicated multi-page parent_content
+    results = []
+    for d_id, info in doc_seeds_map.items():
+        s = info["top_seed_hit"]
+        seed_pages = info["seed_pages"]
 
         avail_pages = doc_pages_map.get(d_id, {})
-        contiguous_nums = [p for p in sorted(avail_pages.keys()) if p_start <= p <= p_end]
-
-        range_key = (d_id, min(contiguous_nums or [seed_p]), max(contiguous_nums or [seed_p]))
-        if range_key in processed_ranges:
+        if not avail_pages:
             continue
-        processed_ranges.add(range_key)
+
+        p_start = min(avail_pages.keys())
+        p_end = max(avail_pages.keys())
 
         stitched_parts = []
-        for p in contiguous_nums:
-            txt = avail_pages.get(p, "").strip()
+        for p in sorted(avail_pages.keys()):
+            txt = avail_pages[p].strip()
             if txt:
                 stitched_parts.append(f"--- Page {p} ---\n{txt}")
 
@@ -129,12 +143,15 @@ async def hybrid_search(
             "page_id": s["page_id"],
             "page_content": s["page_content"],
             "parent_content": stitched_content,
-            "page_number": seed_p,
-            "page_number_start": min(contiguous_nums or [seed_p]),
-            "page_number_end": max(contiguous_nums or [seed_p]),
+            "page_number": s["page_number"],
+            "seed_pages": seed_pages,
+            "page_number_start": p_start,
+            "page_number_end": p_end,
             "document_id": d_id,
             "title": s["title"],
+            "region": s.get("region", "GENERAL"),
             "file_url": s["file_url"],
+            "content_type": s.get("content_type", ""),
             "combined_score": s["combined_score"],
         })
 

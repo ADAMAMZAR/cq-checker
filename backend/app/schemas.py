@@ -158,13 +158,39 @@ class DocumentIngestResult(BaseModel):
     message: str = ""
 
 
+class DocumentFolderSummary(BaseModel):
+    id: str
+    name: str
+    document_count: int = 0
+    created_at: Optional[str] = None
+
+
+class CreateFolderRequest(BaseModel):
+    name: str
+
+
+class UpdateFolderRequest(BaseModel):
+    name: str
+
+
+class MoveDocumentRequest(BaseModel):
+    folder_id: Optional[str] = None
+
+
+class UpdateDocumentRegionRequest(BaseModel):
+    region: str
+
+
 class DocumentSummary(BaseModel):
     id: str
     title: str
     file_url: str
+    region: str = "GENERAL"
     page_count: int = 0
     parent_count: int = 0
     child_count: int = 0
+    folder_id: Optional[str] = None
+    folder_name: Optional[str] = "General"
     created_at: Optional[str] = None
 
 
@@ -174,11 +200,22 @@ class ChatRequest(BaseModel):
     stream: bool = False
 
 
+class RetrievalTestRequest(BaseModel):
+    query: str
+    k: int = 5
+    window_size: int = 4
+    vector_weight: float = 0.6
+    bm25_weight: float = 0.4
+    region_filter: Optional[str] = None
+
+
 class ChatSource(BaseModel):
     title: str
     page_number: Optional[int] = None
     snippet: Optional[str] = None
     file_url: Optional[str] = None
+    document_id: Optional[str] = None
+    content_type: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
@@ -188,6 +225,7 @@ class ChatResponse(BaseModel):
     cache_hit: bool = False
     session_id: Optional[str] = None
     message_id: Optional[str] = None
+    debug_tracing: Optional[dict] = None
 
 
 class ChatHistoryResponse(BaseModel):

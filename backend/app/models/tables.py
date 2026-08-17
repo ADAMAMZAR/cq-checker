@@ -53,18 +53,31 @@ _new_uuid = uuid7
 
 # ── Document Ingestion & RAG ────────────────────────────────────────────────
 
+class DocumentFolder(Base):
+    __tablename__ = "document_folders"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
+    name = Column(String(255), nullable=False, unique=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    documents = relationship("Document", back_populates="folder")
+
+
 class Document(Base):
     __tablename__ = "documents"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
     object_id = Column(UUID(as_uuid=True), ForeignKey("object_storage.id", ondelete="SET NULL"), nullable=True, index=True)
+    folder_id = Column(UUID(as_uuid=True), ForeignKey("document_folders.id", ondelete="SET NULL"), nullable=True, index=True)
     title = Column(String(255), nullable=False)
+    region = Column(String(20), nullable=False, default="GENERAL", index=True)
     input_tokens = Column(Integer, nullable=False, default=0)
     output_tokens = Column(Integer, nullable=False, default=0)
     cost_usd = Column(Numeric(12, 6), nullable=False, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     object_storage = relationship("ObjectStorage")
+    folder = relationship("DocumentFolder", back_populates="documents")
     pages = relationship("DocumentPage", back_populates="document", cascade="all, delete-orphan")
 
     @property
@@ -74,6 +87,10 @@ class Document(Base):
     @property
     def file_hash(self) -> Optional[str]:
         return self.object_storage.checksum if self.object_storage else None
+
+    @property
+    def folder_name(self) -> Optional[str]:
+        return self.folder.name if self.folder else "General"
 
 
 class DocumentPage(Base):

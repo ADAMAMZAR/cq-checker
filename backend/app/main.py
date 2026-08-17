@@ -10,8 +10,12 @@ import hashlib
 import json
 import asyncio
 import logging
+import re
 import requests
+import time
 import uuid
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from app.models.tables import uuid7
 from typing import List, Optional
 from fastapi import FastAPI, UploadFile, File, Form, Query, HTTPException, status
@@ -22,7 +26,8 @@ from app.config import settings
 from app.schemas import (
     SupplierEntry, AuditLogEntry, AuditResultResponse, DocumentEvidence, DocumentEvidenceSummary, UpdateEvidenceRequest,
     AuditRegistryEntry, AuditRegistryDetail, CertificateVerificationResponse, CertificateVerifyResult,
-    DocumentIngestResult, DocumentSummary, ChatRequest, ChatResponse, ChatSource,
+    DocumentIngestResult, DocumentSummary, DocumentFolderSummary, CreateFolderRequest, UpdateFolderRequest, MoveDocumentRequest, UpdateDocumentRegionRequest,
+    ChatRequest, ChatResponse, ChatSource, RetrievalTestRequest,
     ChatHistoryResponse, FeedbackRequest, FeedbackResponse,
 )
 from app.services import audit_data_access, extractor, storage, supplier_search
@@ -81,11 +86,61 @@ API_TAGS = [
     {"name": "File Serving", "description": "Serve uploaded files (local disk and legacy Supabase proxy)."},
 ]
 
+async def init_db_tables():
+    """Ensure document_folders table and documents.folder_id column exist on startup."""
+    from sqlalchemy import text
+    from app.db.session import get_session_factory
+
+    factory = get_session_factory()
+    async with factory() as session:
+        await session.execute(text("""
+            CREATE TABLE IF NOT EXISTS document_folders (
+                id UUID PRIMARY KEY,
+                name VARCHAR(255) NOT NULL UNIQUE,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            );
+        """))
+        await session.execute(text("""
+            ALTER TABLE documents 
+            ADD COLUMN IF NOT EXISTS folder_id UUID REFERENCES document_folders(id) ON DELETE SET NULL;
+        """))
+        await session.execute(text("""
+            ALTER TABLE documents 
+            ADD COLUMN IF NOT EXISTS region VARCHAR(20) NOT NULL DEFAULT 'GENERAL';
+        """))
+
+        # Auto-classify existing document regions by title
+        await session.execute(text("UPDATE documents SET region = 'VN' WHERE (title ILIKE '%vietnam%' OR title ILIKE '%vn%') AND region = 'GENERAL';"))
+        await session.execute(text("UPDATE documents SET region = 'TW' WHERE (title ILIKE '%taiwan%' OR title ILIKE '%tw%' OR title LIKE '%台灣%' OR title LIKE '%臺灣%') AND region = 'GENERAL';"))
+        await session.execute(text("UPDATE documents SET region = 'MY' WHERE (title ILIKE '%malaysia%' OR title ILIKE '%my%') AND region = 'GENERAL';"))
+        await session.execute(text("UPDATE documents SET region = 'AU' WHERE (title ILIKE '%australia%' OR title ILIKE '%au%') AND region = 'GENERAL';"))
+
+        res = await session.execute(text("SELECT COUNT(*) FROM document_folders;"))
+        cnt = res.scalar() or 0
+        if cnt == 0:
+            import uuid
+            default_id = str(uuid.uuid4())
+            await session.execute(text(
+                "INSERT INTO document_folders (id, name) VALUES (:id, 'General') ON CONFLICT DO NOTHING;"
+            ), {"id": default_id})
+        await session.commit()
+
+
+@asynccontextmanager
+async def lifespan(app_instance: FastAPI):
+    try:
+        await init_db_tables()
+    except Exception as e:
+        logger.error(f"Failed to initialize database tables: {e}")
+    yield
+
+
 app = FastAPI(
     title="GPO Automatic Certificate Auditor API",
     description="Backend API for auditing certificates and logging results to Neon PostgreSQL",
     version="1.0.0",
     openapi_tags=API_TAGS,
+    lifespan=lifespan,
 )
 
 # Configure CORS so the Chrome Extension and Next.js can connect
@@ -793,7 +848,8 @@ async def upload_document(
     file_bytes = await file.read()
     filename = file.filename or "manual.pdf"
     content_type = file.content_type or ("text/markdown" if filename.lower().endswith((".md", ".markdown", ".txt")) else "application/pdf")
-    doc_title = title or filename
+    raw_title = title or filename
+    doc_title = re.sub(r'\.(pdf|pptx|docx|doc|ppt|xlsx|xls|png|jpg|jpeg|txt|md)$', '', raw_title, flags=re.IGNORECASE).strip() or raw_title
 
     result = await ingest_document(file_bytes, doc_title, filename, content_type, overwrite=overwrite)
     if result.status == "failed":
@@ -905,12 +961,367 @@ async def list_documents(limit: int = 50, offset: int = 0):
                 id=str(doc.id),
                 title=doc.title,
                 file_url=doc.file_url,
+                region=doc.region or "GENERAL",
                 page_count=p_cnt,
                 parent_count=p_cnt,
                 child_count=p_cnt,
+                folder_id=str(doc.folder_id) if doc.folder_id else None,
+                folder_name=doc.folder_name,
                 created_at=to_malaysia(doc.created_at).strftime("%d/%m/%Y, %H:%M:%S") if doc.created_at else None,
             ))
     return summaries
+
+
+@app.get("/api/documents/{document_id}/content", tags=["Document Ingestion / RAG"])
+async def get_document_content(document_id: str):
+    """Retrieve full structured page contents and metadata for a document."""
+    from uuid import UUID
+    from app.db.session import get_session_factory
+    from app.repositories.documents import DocumentRepository, PageRepository
+
+    try:
+        d_uuid = UUID(document_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid document_id UUID.")
+
+    factory = get_session_factory()
+    async with factory() as session:
+        doc_repo = DocumentRepository(session)
+        page_repo = PageRepository(session)
+        doc = await doc_repo.get_by_id(d_uuid)
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found.")
+
+        pages = await page_repo.list_pages(d_uuid)
+        content_type = ""
+        if doc.object_storage:
+            content_type = doc.object_storage.content_type or ""
+
+        page_list = []
+        for p in pages:
+            page_list.append({
+                "page_number": p.page_number,
+                "content": p.content or "",
+            })
+
+        return {
+            "id": str(doc.id),
+            "title": doc.title,
+            "file_url": doc.file_url,
+            "region": doc.region,
+            "content_type": content_type,
+            "page_count": len(page_list),
+            "pages": page_list,
+        }
+
+
+# ── Document Folders API Endpoints ──────────────────────────────────────────
+
+@app.get("/api/folders", response_model=List[DocumentFolderSummary], tags=["Document Ingestion / RAG"])
+async def list_folders():
+    """List all document folders with document counts."""
+    from app.db.session import get_session_factory
+    from app.repositories.documents import FolderRepository
+
+    factory = get_session_factory()
+    async with factory() as session:
+        repo = FolderRepository(session)
+        folders = await repo.list_all()
+        return [DocumentFolderSummary(**f) for f in folders]
+
+
+@app.post("/api/folders", response_model=DocumentFolderSummary, tags=["Document Ingestion / RAG"])
+async def create_folder(payload: CreateFolderRequest):
+    """Create a new document folder."""
+    from app.db.session import get_session_factory
+    from app.repositories.documents import FolderRepository
+
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Folder name cannot be empty.")
+
+    factory = get_session_factory()
+    async with factory() as session:
+        repo = FolderRepository(session)
+        existing = await repo.get_by_name(name)
+        if existing:
+            raise HTTPException(status_code=400, detail=f"Folder '{name}' already exists.")
+        folder = await repo.create(name)
+        return DocumentFolderSummary(
+            id=str(folder.id),
+            name=folder.name,
+            document_count=0,
+            created_at=to_malaysia(folder.created_at).strftime("%d/%m/%Y, %H:%M:%S") if folder.created_at else None,
+        )
+
+
+@app.put("/api/folders/{folder_id}", response_model=DocumentFolderSummary, tags=["Document Ingestion / RAG"])
+async def update_folder(folder_id: str, payload: UpdateFolderRequest):
+    """Rename a document folder."""
+    from uuid import UUID
+    from app.db.session import get_session_factory
+    from app.repositories.documents import FolderRepository
+
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Folder name cannot be empty.")
+
+    try:
+        f_uuid = UUID(folder_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid folder_id UUID.")
+
+    factory = get_session_factory()
+    async with factory() as session:
+        repo = FolderRepository(session)
+        updated = await repo.update(f_uuid, name)
+        if not updated:
+            raise HTTPException(status_code=404, detail="Folder not found.")
+        all_folders = await repo.list_all()
+        found = next((f for f in all_folders if f["id"] == str(f_uuid)), None)
+        cnt = found["document_count"] if found else 0
+        return DocumentFolderSummary(
+            id=str(updated.id),
+            name=updated.name,
+            document_count=cnt,
+            created_at=to_malaysia(updated.created_at).strftime("%d/%m/%Y, %H:%M:%S") if updated.created_at else None,
+        )
+
+
+@app.delete("/api/folders/{folder_id}", tags=["Document Ingestion / RAG"])
+async def delete_folder(folder_id: str):
+    """Delete a document folder."""
+    from uuid import UUID
+    from app.db.session import get_session_factory
+    from app.repositories.documents import FolderRepository
+
+    try:
+        f_uuid = UUID(folder_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid folder_id UUID.")
+
+    factory = get_session_factory()
+    async with factory() as session:
+        repo = FolderRepository(session)
+        success = await repo.delete(f_uuid)
+        if not success:
+            raise HTTPException(status_code=404, detail="Folder not found.")
+        return {"status": "success", "message": "Folder deleted."}
+
+
+@app.patch("/api/documents/{document_id}/folder", tags=["Document Ingestion / RAG"])
+async def move_document_folder(document_id: str, payload: MoveDocumentRequest):
+    """Move a document to a folder or uncategorize it (folder_id=None)."""
+    from uuid import UUID
+    from app.db.session import get_session_factory
+    from app.repositories.documents import DocumentRepository, FolderRepository
+
+    try:
+        d_uuid = UUID(document_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid document_id UUID.")
+
+    f_uuid = None
+    if payload.folder_id:
+        try:
+            f_uuid = UUID(payload.folder_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid folder_id UUID.")
+
+    factory = get_session_factory()
+    async with factory() as session:
+        doc_repo = DocumentRepository(session)
+        if f_uuid:
+            folder_repo = FolderRepository(session)
+            folder = await folder_repo.get_by_id(f_uuid)
+            if not folder:
+                raise HTTPException(status_code=404, detail="Target folder not found.")
+
+        doc = await doc_repo.move_to_folder(d_uuid, f_uuid)
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found.")
+        return {
+            "status": "success",
+            "document_id": str(doc.id),
+            "folder_id": str(doc.folder_id) if doc.folder_id else None,
+            "folder_name": doc.folder_name,
+        }
+
+
+@app.patch("/api/documents/{document_id}/region", tags=["Document Ingestion / RAG"])
+async def update_document_region(document_id: str, payload: UpdateDocumentRegionRequest):
+    """Update a document's region classification (VN, TW, MY, AU, GENERAL)."""
+    from uuid import UUID
+    from app.db.session import get_session_factory
+    from app.repositories.documents import DocumentRepository
+
+    try:
+        d_uuid = UUID(document_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid document_id UUID.")
+
+    new_region = payload.region.upper().strip()
+    if new_region not in ("VN", "TW", "MY", "AU", "GENERAL"):
+        raise HTTPException(status_code=400, detail="Invalid region. Must be one of: VN, TW, MY, AU, GENERAL.")
+
+    factory = get_session_factory()
+    async with factory() as session:
+        doc_repo = DocumentRepository(session)
+        doc = await doc_repo.update_region(d_uuid, new_region)
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found.")
+        return {
+            "status": "success",
+            "document_id": str(doc.id),
+            "region": doc.region,
+        }
+
+
+@app.post("/api/retrieval/test", tags=["Document Ingestion / RAG"])
+async def test_retrieval(payload: RetrievalTestRequest):
+    """
+    Test PostgreSQL Hybrid Retrieval Playground.
+    Allows testing vector vs keyword weights, Top-K seed hits, and window sizes.
+    """
+    import time
+    from sqlalchemy import text
+    from app.services import embeddings
+    from app.db.session import get_session_factory
+
+    query_text = payload.query.strip()
+    if not query_text:
+        raise HTTPException(status_code=400, detail="Query text cannot be empty.")
+
+    start_time = time.monotonic()
+    query_embedding = embeddings.embed_text(query_text)
+    embedding_str = "[" + ",".join(str(v) for v in query_embedding) + "]"
+
+    factory = get_session_factory()
+    async with factory() as session:
+        vw = float(payload.vector_weight)
+        bw = float(payload.bm25_weight)
+        k = max(1, min(50, payload.k))
+        w_size = max(0, min(10, payload.window_size))
+
+        from app.services.region_router import classify_query_intent
+        intent = classify_query_intent(query_text)
+
+        # Determine region filter SQL clause
+        target_regions = intent["target_regions"]
+        if payload.region_filter and payload.region_filter.upper() != "AUTO":
+            if payload.region_filter.upper() == "ALL":
+                target_regions = None
+            else:
+                target_regions = [payload.region_filter.upper(), "GENERAL"]
+
+        region_clause = ""
+        params = {"q": query_text, "vw": vw, "bw": bw, "k": k}
+        if target_regions:
+            region_clause = "AND (d.region = ANY(:target_regions) OR d.region = 'GENERAL')"
+            params["target_regions"] = list(target_regions)
+
+        sql_seed = text(f"""
+            SELECT
+                dp.id AS page_id,
+                dp.content AS page_content,
+                dp.page_number AS page_number,
+                d.id AS document_id,
+                d.title AS title,
+                d.region AS region,
+                COALESCE(os.file_url, '') AS file_url,
+                (1 - (dp.embedding <=> '{embedding_str}'::vector(1536))) AS vector_similarity,
+                COALESCE(ts_rank_cd(dp.tsv_content, websearch_to_tsquery('english', :q)), 0) AS bm25_rank,
+                (:vw * (1 - (dp.embedding <=> '{embedding_str}'::vector(1536)))
+                 + :bw * COALESCE(ts_rank_cd(dp.tsv_content, websearch_to_tsquery('english', :q)), 0)) AS combined_score
+            FROM document_pages dp
+            JOIN documents d ON d.id = dp.document_id
+            LEFT JOIN object_storage os ON os.id = d.object_id
+            WHERE dp.embedding IS NOT NULL
+            {region_clause}
+            ORDER BY combined_score DESC
+            LIMIT :k
+        """)
+
+        res_seed = await session.execute(sql_seed, params)
+        seed_hits = []
+        for r in res_seed:
+            seed_hits.append({
+                "page_id": str(r.page_id),
+                "page_content": r.page_content or "",
+                "page_number": r.page_number,
+                "document_id": str(r.document_id),
+                "title": r.title,
+                "region": getattr(r, "region", "GENERAL") or "GENERAL",
+                "file_url": r.file_url,
+                "vector_similarity": round(float(r.vector_similarity or 0.0), 4),
+                "bm25_rank": round(float(r.bm25_rank or 0.0), 4),
+                "combined_score": round(float(r.combined_score or 0.0), 4),
+            })
+
+        final_results = []
+        if seed_hits:
+            conditions = []
+            for s in seed_hits:
+                p_start = max(1, s["page_number"] - 1)
+                p_end = s["page_number"] + w_size
+                conditions.append(f"(dp.document_id = '{s['document_id']}' AND dp.page_number BETWEEN {p_start} AND {p_end})")
+
+            where_clause = " OR ".join(conditions)
+            sql_window = text(f"""
+                SELECT
+                    dp.document_id,
+                    d.title,
+                    COALESCE(os.file_url, '') AS file_url,
+                    MIN(dp.page_number) AS page_start,
+                    MAX(dp.page_number) AS page_end,
+                    string_agg(dp.content, E'\n\n--- Page Break ---\n\n' ORDER BY dp.page_number) AS window_content
+                FROM document_pages dp
+                JOIN documents d ON d.id = dp.document_id
+                LEFT JOIN object_storage os ON os.id = d.object_id
+                WHERE {where_clause}
+                GROUP BY dp.document_id, d.title, os.file_url
+            """)
+            res_win = await session.execute(sql_window)
+            win_map = {str(r.document_id): (r.page_start, r.page_end, r.window_content) for r in res_win}
+
+            # Group seed hits by document_id to merge overlapping page ranges
+            doc_seeds_map = {}
+            for s in seed_hits:
+                d_id = s["document_id"]
+                if d_id not in doc_seeds_map:
+                    doc_seeds_map[d_id] = {
+                        "top_seed_hit": s,
+                        "seed_pages": [s["page_number"]],
+                    }
+                else:
+                    doc_seeds_map[d_id]["seed_pages"].append(s["page_number"])
+
+            for d_id, info in doc_seeds_map.items():
+                s = info["top_seed_hit"]
+                seed_pages = info["seed_pages"]
+                w_info = win_map.get(d_id)
+                p_start, p_end, w_content = w_info if w_info else (s["page_number"], s["page_number"], s["page_content"])
+                final_results.append({
+                    **s,
+                    "seed_pages": seed_pages,
+                    "page_number_start": p_start,
+                    "page_number_end": p_end,
+                    "window_content": w_content,
+                })
+
+    latency_ms = round((time.monotonic() - start_time) * 1000, 2)
+    return {
+        "query": query_text,
+        "latency_ms": latency_ms,
+        "k": k,
+        "window_size": w_size,
+        "vector_weight": vw,
+        "bm25_weight": bw,
+        "detected_region": intent["detected_region"],
+        "output_lang_name": intent["output_lang_name"],
+        "seed_hits_count": len(seed_hits),
+        "results": final_results,
+    }
 
 
 @app.post("/api/chat", response_model=ChatResponse, tags=["RAG Chatbot"])
@@ -1144,5 +1555,41 @@ async def db_delete_row(table_name: str, payload: dict):
     if not deleted:
         raise HTTPException(status_code=404, detail="Row not found.")
     return {"deleted": deleted}
+
+
+@app.put("/api/db/tables/{table_name}", tags=["Database Browser"])
+async def db_update_row(table_name: str, payload: dict):
+    """
+    Update a single cell in a row identified by its primary key.
+
+    Body: ``{"pk": {"<primary_key_column>": "<value>", ...}, "column": "<column_name>", "value": "<new_value>"}``.
+    """
+    from app.services import database_inspector
+
+    valid = await database_inspector.list_tables()
+    names = {t["name"] for t in valid}
+    if table_name not in names:
+        raise HTTPException(status_code=404, detail=f"Table '{table_name}' not found.")
+
+    pk = (payload or {}).get("pk")
+    column = (payload or {}).get("column")
+    value = (payload or {}).get("value")
+
+    if not isinstance(pk, dict) or not pk:
+        raise HTTPException(status_code=400, detail="Body must include an object 'pk' with primary key values.")
+    if not column or not isinstance(column, str):
+        raise HTTPException(status_code=400, detail="Body must include a string 'column'.")
+
+    try:
+        updated = await database_inspector.update_cell(table_name, pk, column, value)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if not updated:
+        raise HTTPException(status_code=404, detail="Row not found or no changes made.")
+    return {"updated": updated}
+
+
+
 
 

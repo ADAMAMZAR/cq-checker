@@ -12,8 +12,9 @@ import SubNavTabs from "@/components/SubNavTabs";
 const SupplierDataEditor = dynamic(() => import("@/components/SupplierDataEditor"), { ssr: false });
 const SupplierAudit = dynamic(() => import("@/components/SupplierAudit"), { ssr: false });
 const AuditRegistry = dynamic(() => import("@/components/AuditRegistry"), { ssr: false });
+const RetrievalPlayground = dynamic(() => import("@/components/RetrievalPlayground"), { ssr: false });
 
-const VALID_TABS: MainTab[] = ["audit", "registry", "editor"];
+const VALID_TABS: MainTab[] = ["audit", "registry", "editor", "retrieval"];
 const STORAGE_KEY = "checker_active_tab";
 
 function CheckerPageContent() {
@@ -131,6 +132,11 @@ function CheckerPageContent() {
       {activeTab === "editor" && (
         <div className="flex-1 flex flex-col">
           <SupplierDataEditor onRefreshLogs={handleRefresh} />
+        </div>
+      )}
+      {activeTab === "retrieval" && (
+        <div className="flex-1 flex flex-col">
+          <RetrievalPlayground />
         </div>
       )}
     </div>
