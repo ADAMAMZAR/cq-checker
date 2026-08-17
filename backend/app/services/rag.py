@@ -147,14 +147,20 @@ def _reindex_citations(answer: str, results: List[dict]) -> Tuple[str, List[dict
 
     Guarantees that citation [N] in the text maps 1-to-1 with ordered_sources[N - 1].
     """
+def _reindex_citations(answer: str, results: List[dict]) -> tuple[str, List[dict]]:
+    """Reindex bracket citations e.g. [1], [2], [75] in LLM answer to sequential citation chips."""
     import re
     answer = _sanitize_text(answer)
     if not results or not answer:
         return answer, []
 
-    # If the response is an out-of-scope refusal or contains no citations, do not attach sources.
-    if answer.startswith("I apologize, but my assistance is limited to vendor onboarding and Ariba-related queries. Please let me know if you have a question regarding a supplier's registration guide, profile maintenance or policy."):
-        return answer, []
+    def find_result_by_num(num: int) -> Optional[dict]:
+        if 1 <= num <= len(results):
+            return results[num - 1]
+        for r in results:
+            if r.get("page_number") == num:
+                return r
+        return None
 
     bracket_matches = re.findall(r'\[([\d\s,]+)\]', answer)
     raw_nums = []
@@ -162,18 +168,31 @@ def _reindex_citations(answer: str, results: List[dict]) -> Tuple[str, List[dict
         for n_str in match.split(','):
             if n_str.strip().isdigit():
                 num = int(n_str.strip())
-                if 1 <= num <= len(results) and num not in raw_nums:
+                r_found = find_result_by_num(num)
+                if r_found and num not in raw_nums:
                     raw_nums.append(num)
 
     if not raw_nums:
-        return answer, []
+        ordered_sources = []
+        for r in results[:3]:
+            ordered_sources.append({
+                "title": r["title"],
+                "page_number": r["page_number"],
+                "snippet": (r["parent_content"] or "")[:300],
+                "file_url": r.get("file_url"),
+                "document_id": str(r["document_id"]) if r.get("document_id") else None,
+                "content_type": r.get("content_type", ""),
+            })
+        return answer, ordered_sources
 
     ordered_sources = []
     seen_keys = {}
     old_to_new = {}
 
     for old_num in raw_nums:
-        r = results[old_num - 1]
+        r = find_result_by_num(old_num)
+        if not r:
+            continue
         key = (r["title"], r["page_number"])
         if key not in seen_keys:
             new_idx = len(ordered_sources) + 1
@@ -198,7 +217,7 @@ def _reindex_citations(answer: str, results: List[dict]) -> Tuple[str, List[dict
             if n in old_to_new:
                 valid_new_nums.append(str(old_to_new[n]))
         if not valid_new_nums:
-            return ""
+            return match_obj.group(0)
         return f"[{', '.join(valid_new_nums)}]"
 
     reindexed_answer = re.sub(r'\[([\d\s,]+)\]', replace_bracket, answer)

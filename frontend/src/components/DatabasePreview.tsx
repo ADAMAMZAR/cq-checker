@@ -332,9 +332,9 @@ export default function DatabasePreview() {
         </div>
       )}
 
-      <div className="flex flex-1 gap-6 min-h-[520px]">
+      <div className="flex flex-1 gap-6 min-h-[520px] items-start">
         {/* Left: table list */}
-        <aside className="w-64 shrink-0 flex flex-col rounded-xl border border-[var(--border-visible)] bg-[var(--bg-card)] overflow-hidden">
+        <aside className="w-64 shrink-0 flex flex-col rounded-xl border border-[var(--border-visible)] bg-[var(--bg-card)] overflow-hidden sticky top-4 self-start max-h-[calc(100vh-140px)] shadow-lg">
           <div className="p-3 border-b border-[var(--border-subtle)]">
             <div className="relative">
               <IconSearch className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--text-tertiary)]" />

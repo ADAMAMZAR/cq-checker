@@ -25,6 +25,7 @@ interface CitationSidePanelProps {
   documentId?: string | null;
   contentType?: string | null;
   initialPage?: number;
+  snippet?: string | null;
   title?: string;
   onClose: () => void;
 }
@@ -48,6 +49,7 @@ export default memo(function CitationSidePanel({
   documentId,
   contentType,
   initialPage = 1,
+  snippet,
   title,
   onClose,
 }: CitationSidePanelProps) {
@@ -230,6 +232,7 @@ export default memo(function CitationSidePanel({
           documentId={documentId}
           fileUrl={fileUrl}
           initialPage={initialPage}
+          snippet={snippet}
           title={title}
           fontScale={scale}
           onPageChange={(p, total) => {

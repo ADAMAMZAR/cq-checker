@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { fetchDocumentContent } from "@/lib/api";
@@ -28,6 +28,61 @@ function cleanMarkdownText(content: string): string {
     .join("\n");
 }
 
+interface QaBlock {
+  block_id: string;
+  page_number: number;
+  qa_index: number;
+  content: string;
+}
+
+function parseQaBlocks(pages: { page_number: number; content: string }[]): QaBlock[] {
+  const blocks: QaBlock[] = [];
+  let activeSectionHeader = "";
+
+  pages.forEach((p) => {
+    const cleaned = cleanMarkdownText(p.content);
+    // Split by any Markdown header (#, ##, ###)
+    const rawParts = cleaned.split(/(?=\n#{1,3}\s+)/g).map((s) => s.trim()).filter(Boolean);
+
+    rawParts.forEach((part) => {
+      let cleanPart = part.replace(/^---\s*/gm, "").trim();
+      if (!cleanPart) return;
+
+      const lines = cleanPart.split("\n");
+      const firstLine = lines[0] || "";
+
+      // Check if this part starts with a Level 1 Section Header (# Title)
+      if (/^#\s+/.test(firstLine) && !/Q\d+:/i.test(firstLine)) {
+        activeSectionHeader = firstLine.trim();
+        cleanPart = lines.slice(1).join("\n").trim();
+      }
+
+      // Strip any trailing level 1 section headers at the end of a block
+      cleanPart = cleanPart.replace(/---\s*#\s+.*$/s, "").trim();
+      cleanPart = cleanPart.replace(/\n#\s+[^#\n]+$/s, "").trim();
+
+      if (!cleanPart) return;
+
+      let blockContent = cleanPart;
+      if (activeSectionHeader && !blockContent.startsWith(activeSectionHeader)) {
+        blockContent = `${activeSectionHeader}\n\n${blockContent}`;
+      }
+
+      // Ensure sequential page numbering even if loaded from single raw fileUrl
+      const resolvedPageNum = pages.length === 1 ? blocks.length + 1 : p.page_number;
+
+      blocks.push({
+        block_id: `p${resolvedPageNum}_qa${blocks.length + 1}`,
+        page_number: resolvedPageNum,
+        qa_index: blocks.length + 1,
+        content: blockContent,
+      });
+    });
+  });
+
+  return blocks;
+}
+
 export default function MarkdownViewer({
   documentId,
   fileUrl,
@@ -38,7 +93,7 @@ export default function MarkdownViewer({
   snippet,
 }: MarkdownViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const pageRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const blockRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -51,24 +106,17 @@ export default function MarkdownViewer({
       setLoading(true);
       setError(null);
       try {
-        if (documentId) {
-          const data = await fetchDocumentContent(documentId);
-          if (isMounted) {
-            setDocData(data);
-            if (onPageChange) onPageChange(initialPage, data.pages?.length || 1);
-          }
-        } else {
-          // Fallback if documentId is missing: try fetching raw text fileUrl
-          const res = await fetch(fileUrl);
-          const rawText = await res.text();
-          if (isMounted) {
-            const data = {
-              page_count: 1,
-              pages: [{ page_number: 1, content: rawText }],
-            };
-            setDocData(data);
-            if (onPageChange) onPageChange(1, 1);
-          }
+        // Single unified data loader for both citation clicks & system sources list
+        const data = documentId
+          ? await fetchDocumentContent(documentId)
+          : await fetch(fileUrl).then(async (res) => {
+              const text = await res.text();
+              return { page_count: 1, pages: [{ page_number: 1, content: text }] };
+            });
+
+        if (isMounted) {
+          setDocData(data);
+          if (onPageChange) onPageChange(initialPage, data.pages?.length || 1);
         }
       } catch (err) {
         if (isMounted) {
@@ -85,15 +133,44 @@ export default function MarkdownViewer({
     };
   }, [documentId, fileUrl]);
 
-  // Scroll to initialPage when content loaded
+  const qaBlocks = useMemo(() => parseQaBlocks(docData?.pages || []), [docData]);
+
+  // Target exact Q&A card using initialPage first, matching snippet text if multiple blocks on same page
+  const targetBlockId = useMemo(() => {
+    if (!qaBlocks.length) return null;
+
+    // 1. Match by initialPage (the exact chunk page_number from PostgreSQL)
+    const pageBlocks = qaBlocks.filter((b) => b.page_number === initialPage);
+    if (pageBlocks.length === 1) {
+      return pageBlocks[0].block_id;
+    }
+
+    if (pageBlocks.length > 1 && snippet && snippet.trim()) {
+      const cleanSnippet = snippet.toLowerCase().replace(/[^a-z0-9]/g, "");
+      for (const block of pageBlocks) {
+        const cleanBlock = block.content.toLowerCase().replace(/[^a-z0-9]/g, "");
+        const sub = cleanBlock.slice(15, 60);
+        if (sub && (cleanSnippet.includes(sub) || cleanBlock.includes(cleanSnippet.slice(15, 60)))) {
+          return block.block_id;
+        }
+      }
+      return pageBlocks[0].block_id;
+    }
+
+    // 2. Fallback if initialPage is not found directly
+    const fallbackBlock = qaBlocks.find((b) => b.page_number === initialPage);
+    return fallbackBlock ? fallbackBlock.block_id : qaBlocks[0].block_id;
+  }, [qaBlocks, snippet, initialPage]);
+
+  // Scroll smoothly to exact target Q&A block when ready
   useEffect(() => {
-    if (docData && initialPage && pageRefs.current[initialPage]) {
+    if (targetBlockId && blockRefs.current[targetBlockId]) {
       const timer = setTimeout(() => {
-        pageRefs.current[initialPage]?.scrollIntoView({ behavior: "smooth", block: "start" });
+        blockRefs.current[targetBlockId]?.scrollIntoView({ behavior: "smooth", block: "start" });
       }, 150);
       return () => clearTimeout(timer);
     }
-  }, [docData, initialPage]);
+  }, [targetBlockId]);
 
   // Track active page while scrolling
   useEffect(() => {
@@ -109,7 +186,7 @@ export default function MarkdownViewer({
               const p = parseInt(pStr, 10);
               if (!isNaN(p)) {
                 setActivePage(p);
-                if (onPageChange) onPageChange(p, docData.pages.length);
+                if (onPageChange) onPageChange(p, qaBlocks.length);
               }
             }
           }
@@ -122,12 +199,12 @@ export default function MarkdownViewer({
       }
     );
 
-    Object.values(pageRefs.current).forEach((el) => {
+    Object.values(blockRefs.current).forEach((el) => {
       if (el) observer.observe(el);
     });
 
     return () => observer.disconnect();
-  }, [docData, onPageChange]);
+  }, [docData, qaBlocks, onPageChange]);
 
   if (loading) {
     return (
@@ -157,34 +234,33 @@ export default function MarkdownViewer({
   return (
     <div
       ref={containerRef}
-      className="flex-1 min-h-0 overflow-y-auto p-4 bg-[var(--bg-page)] space-y-6 select-text"
+      className="flex-1 min-h-0 overflow-y-auto p-4 bg-[var(--bg-page)] space-y-5 select-text"
       style={{ fontSize: `${fontScale * 100}%` }}
     >
-      {docData.pages.map((p) => {
-        const isCitedPage = p.page_number === initialPage;
-        const cleanedText = cleanMarkdownText(p.content);
+      {qaBlocks.map((block) => {
+        const isCitedBlock = block.block_id === targetBlockId;
 
         return (
           <div
-            key={`doc_page_${p.page_number}`}
-            data-page-number={p.page_number}
+            key={block.block_id}
+            data-page-number={block.page_number}
             ref={(el) => {
-              pageRefs.current[p.page_number] = el;
+              blockRefs.current[block.block_id] = el;
             }}
             className={`p-5 rounded-2xl bg-[var(--bg-card-solid)] border shadow-md transition-all ${
-              isCitedPage
-                ? "border-[var(--accent-primary-border)] ring-2 ring-[var(--accent-primary-ring)]"
+              isCitedBlock
+                ? "border-[var(--accent-primary-border)] ring-2 ring-[var(--accent-primary-ring)] bg-[var(--accent-primary-soft)]/20"
                 : "border-[var(--border-subtle)]"
             }`}
           >
-            {/* Page Header */}
+            {/* Uniform Card Header */}
             <div className="pb-3 mb-4 border-b border-[var(--border-subtle)] flex items-center justify-between">
-              <span className="text-xs font-bold text-[var(--heading-color)] font-mono">
-                📄 Page {p.page_number} of {docData.pages.length}
+              <span className="text-xs font-bold text-[var(--heading-color)] font-mono flex items-center gap-2">
+                <span>📄 Q&A Pair #{block.page_number} of {qaBlocks.length}</span>
               </span>
-              {isCitedPage && (
-                <span className="px-2 py-0.5 rounded-full bg-[var(--accent-primary-soft)] text-[var(--accent-primary-text)] border border-[var(--accent-primary-border)] text-[10px] font-sans font-bold">
-                  Cited Page
+              {isCitedBlock && (
+                <span className="px-2.5 py-0.5 rounded-full bg-[var(--accent-primary-soft)] text-[var(--accent-primary-text)] border border-[var(--accent-primary-border)] text-[10px] font-sans font-extrabold animate-pulse">
+                  Cited Q&A Pair
                 </span>
               )}
             </div>
@@ -205,8 +281,8 @@ export default function MarkdownViewer({
                   td: ({ node, ...props }) => (
                     <td className="px-3 py-1.5 border border-[var(--border-subtle)] text-[var(--heading-color)]" {...props} />
                   ),
-                  h1: ({ node, ...props }) => <h1 className="text-base font-extrabold my-2 text-[var(--accent-primary-text)] border-b border-[var(--border-subtle)] pb-1" {...props} />,
-                  h2: ({ node, ...props }) => <h2 className="text-sm font-extrabold my-2 text-[var(--accent-primary-text)] border-b border-[var(--border-subtle)] pb-1" {...props} />,
+                  h1: ({ node, ...props }) => <h1 className="text-sm font-black my-2.5 text-[var(--accent-primary-text)] bg-[var(--accent-primary-soft)] p-2 rounded-xl border border-[var(--accent-primary-border)] font-sans" {...props} />,
+                  h2: ({ node, ...props }) => <h2 className="text-xs font-extrabold my-2 text-[var(--accent-primary-text)] border-b border-[var(--border-subtle)] pb-1 font-sans" {...props} />,
                   h3: ({ node, ...props }) => <h3 className="text-xs font-bold my-1.5 text-[var(--heading-color)]" {...props} />,
                   strong: ({ node, ...props }) => <strong className="font-bold text-[var(--heading-color)]" {...props} />,
                   p: ({ node, ...props }) => <p className="my-1.5 leading-relaxed text-[var(--heading-color)]" {...props} />,
@@ -220,7 +296,7 @@ export default function MarkdownViewer({
                     ),
                 }}
               >
-                {cleanedText}
+                {block.content}
               </ReactMarkdown>
             </div>
           </div>

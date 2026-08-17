@@ -161,19 +161,24 @@ const ChatMessageItem = memo(function ChatMessageItem({
       },
       a({ href, children, ...props }: any) {
         if (href?.startsWith("#cite-")) {
-          const idx = parseInt(href.replace("#cite-", ""), 10) - 1;
-          const src = msg.sources?.[idx];
+          const num = parseInt(href.replace("#cite-", ""), 10);
+          // 1. Try 1-based index (e.g. #cite-1 -> msg.sources[0])
+          let src = msg.sources?.[num - 1];
+          // 2. Fallback: match by page_number or first source if out-of-bounds
+          if (!src && msg.sources && msg.sources.length > 0) {
+            src = msg.sources.find((s) => s.page_number === num) || msg.sources[0];
+          }
+          if (!src) return <span>{children}</span>;
+
           return (
             <button
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                if (src) onOpenCitation(src);
+                onOpenCitation(src);
               }}
-              disabled={!src}
-              className="inline-flex items-center justify-center px-1.5 py-0.5 mx-0.5 text-[10px] font-black rounded-full bg-[var(--accent-primary-soft)] text-[var(--accent-primary-text)] border border-[var(--accent-primary-border)] hover:bg-[var(--accent-primary)] hover:text-white hover:border-[var(--accent-primary-border-strong)] transition-all transform hover:scale-110 cursor-pointer shadow-xs align-middle inline-block select-none disabled:opacity-40 disabled:cursor-not-allowed"
-              title={src ? `${src.title || "Source"} (Page ${src.page_number ?? "?"})` : `Citation [${idx + 1}]`}
-              type="button"
+              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-[var(--accent-primary-soft)] text-[var(--accent-primary-text)] font-bold text-[11px] hover:bg-[var(--accent-primary-hover)] hover:text-white transition-all border border-[var(--accent-primary-border)] cursor-pointer mx-0.5 font-mono"
+              title={`${src.title || "Source"} — Page ${src.page_number ?? num}`}
             >
               {children}
             </button>
@@ -183,8 +188,8 @@ const ChatMessageItem = memo(function ChatMessageItem({
           <a
             href={href}
             target="_blank"
-            rel="noreferrer"
-            className="text-[var(--accent-primary-text)] underline font-medium hover:opacity-80"
+            rel="noopener noreferrer"
+            className="text-[var(--accent-primary-text)] underline hover:text-[var(--accent-primary-hover)] font-medium"
             {...props}
           >
             {children}
@@ -518,7 +523,7 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
-  const [pdfView, setPdfView] = useState<{ fileUrl: string; page: number; title: string; documentId?: string | null; contentType?: string | null } | null>(null);
+  const [pdfView, setPdfView] = useState<{ fileUrl: string; page: number; title: string; documentId?: string | null; contentType?: string | null; snippet?: string | null } | null>(null);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [feedbackModal, setFeedbackModal] = useState<{ messageId: string } | null>(null);
 
@@ -626,6 +631,7 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
       title: src.title,
       documentId: src.document_id,
       contentType: src.content_type,
+      snippet: src.snippet,
     });
   }, []);
 
@@ -932,11 +938,12 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
           {pdfView ? (
             /* When a source or citation is clicked, show Document Citation Viewer with Back Button on the Left */
             <CitationSidePanel
-              key={`${pdfView.fileUrl}:${pdfView.page}:${pdfView.documentId}`}
+              key={`${pdfView.fileUrl}:${pdfView.page}:${pdfView.documentId}:${pdfView.snippet?.slice(0, 20)}`}
               fileUrl={pdfView.fileUrl}
               documentId={pdfView.documentId}
               contentType={pdfView.contentType}
               initialPage={pdfView.page}
+              snippet={pdfView.snippet}
               title={pdfView.title}
               onClose={() => setPdfView(null)}
             />

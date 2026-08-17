@@ -48,14 +48,16 @@ class ChatMessageRepository:
         await self.session.refresh(record)
         return record
 
-    async def recent(self, session_id: str, limit: int = 20) -> List[ChatMessage]:
+    async def recent(self, session_id: str, limit: int = 50) -> List[ChatMessage]:
         result = await self.session.execute(
             select(ChatMessage)
             .where(ChatMessage.session_id == session_id)
-            .order_by(ChatMessage.created_at.asc())
+            .order_by(ChatMessage.created_at.desc())
             .limit(limit)
         )
-        return list(result.scalars().all())
+        msgs = list(result.scalars().all())
+        msgs.reverse()
+        return msgs
 
 
 class ChatLogRepository:
