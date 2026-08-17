@@ -5,7 +5,7 @@
          into unified multi-page context blocks for Gemini.
 """
 
-from typing import List
+from typing import List, Optional
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 

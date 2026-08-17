@@ -58,8 +58,8 @@ function parseQaBlocks(pages: { page_number: number; content: string }[]): QaBlo
       }
 
       // Strip any trailing level 1 section headers at the end of a block
-      cleanPart = cleanPart.replace(/---\s*#\s+.*$/s, "").trim();
-      cleanPart = cleanPart.replace(/\n#\s+[^#\n]+$/s, "").trim();
+      cleanPart = cleanPart.replace(/---\s*#\s+[\s\S]*$/, "").trim();
+      cleanPart = cleanPart.replace(/\n#\s+[^#\n]+$/, "").trim();
 
       if (!cleanPart) return;
 

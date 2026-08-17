@@ -1019,21 +1019,29 @@ export default function Chatbot({ onGoHome }: ChatbotProps = {}) {
                         {/* Folder Header */}
                         <div
                           onClick={() => toggleFolderExpand(fName)}
-                          className="flex items-center justify-between px-3 py-2 bg-[var(--bg-surface)] hover:bg-[var(--accent-primary-soft)]/30 transition-colors cursor-pointer select-none group"
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              toggleFolderExpand(fName);
+                            }
+                          }}
+                          role="button"
+                          tabIndex={0}
+                          className="w-full flex items-center justify-between px-3 py-2.5 bg-[var(--bg-surface)] hover:bg-[var(--accent-primary-soft)]/40 active:scale-[0.99] transition-all cursor-pointer select-none group border-b border-[var(--border-subtle)]"
                         >
-                          <div className="flex items-center gap-2 min-w-0">
+                          <div className="flex items-center gap-2 min-w-0 pointer-events-none">
                             {isExpanded ? (
-                              <IconChevronDown className="w-3.5 h-3.5 text-[var(--text-tertiary)] shrink-0" />
+                              <IconChevronDown className="w-4 h-4 text-[var(--accent-primary-text)] shrink-0 transition-transform" />
                             ) : (
-                              <IconChevronRight className="w-3.5 h-3.5 text-[var(--text-tertiary)] shrink-0" />
+                              <IconChevronRight className="w-4 h-4 text-[var(--text-tertiary)] group-hover:text-[var(--accent-primary-text)] shrink-0 transition-transform" />
                             )}
                             <IconFolder className="w-4 h-4 text-[var(--accent-primary-text)] shrink-0" />
                             <span className="font-sans text-xs font-bold text-[var(--heading-color)] truncate">
                               {fName}
                             </span>
                           </div>
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <span className="font-mono bg-[var(--bg-input)] px-1.5 py-0.5 rounded text-[9px] font-bold text-[var(--text-tertiary)]">
+                          <div className="flex items-center gap-1.5 shrink-0 pointer-events-none">
+                            <span className="font-mono bg-[var(--bg-input)] px-2 py-0.5 rounded-full text-[10px] font-bold text-[var(--text-tertiary)] group-hover:text-[var(--accent-primary-text)] transition-colors">
                               {docsInFolder.length}
                             </span>
                           </div>

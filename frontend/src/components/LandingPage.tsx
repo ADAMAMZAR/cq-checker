@@ -130,7 +130,7 @@ export default function LandingPage({ onNavigate }: LandingPageProps) {
         <div className="relative z-20 max-w-7xl mx-auto w-full flex flex-col lg:flex-row lg:items-center justify-between gap-6">
           <div className="max-w-3xl flex flex-col items-start gap-4">
             {/* Main Title */}
-            <h1 className="font-sans text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-extrabold tracking-tight text-white leading-[1.1] drop-shadow-md">
+            <h1 className="font-display text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-extrabold tracking-tight text-white leading-[1.1] drop-shadow-md">
               Operations Deck <br className="hidden sm:inline" />
               <span className="text-blue-400">
                 Group Procurement Office
@@ -145,8 +145,8 @@ export default function LandingPage({ onNavigate }: LandingPageProps) {
         </div>
       </section>
 
-      {/* ── 5 Main Page Containers Grid ── */}
-      <section className="max-w-7xl mx-auto w-full grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+      {/* ── 5 Main Page Containers Grid (Occupies Entire Width) ── */}
+      <section className="w-full grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 sm:gap-6">
         {pageContainers.map((item) => {
           return (
             <a
