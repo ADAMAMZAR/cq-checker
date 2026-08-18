@@ -127,7 +127,7 @@ export default function SupplierAudit({ onNavigateToRegistry }: SupplierAuditPro
       }
     } catch (err: any) {
       console.error("Failed to load questionnaires:", err);
-      setError(`Could not retrieve questionnaires for ${sup.supplier_name} (${smId}).`);
+      setError(`Could not retrieve questionnaires for ${sup.supplier_name}.`);
     } finally {
       setLoadingQuestionnaires(false);
     }

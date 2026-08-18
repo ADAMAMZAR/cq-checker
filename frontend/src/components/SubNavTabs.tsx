@@ -14,7 +14,6 @@ const tabs: { key: MainTab; label: string; icon: typeof IconFiles }[] = [
   { key: "audit", label: "Audit", icon: IconSearch },
   { key: "registry", label: "Audit Registry", icon: IconFiles },
   { key: "editor", label: "Supplier Data Editor", icon: IconEdit },
-  { key: "retrieval", label: "RAG Retrieval Playground", icon: IconSparkles },
 ];
 
 export default function SubNavTabs({ active, onChange, onGoHome }: SubNavTabsProps) {

@@ -1,16 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Image from "next/image";
 import {
   IconArrowRight,
   IconExternalLink,
 } from "@tabler/icons-react";
 import { useRouter } from "next/navigation";
-import type { MainTab } from "./SubNavTabs";
-
-interface LandingPageProps {
-  onNavigate: (tab: MainTab) => void;
-}
 
 interface PageContainerItem {
   id: string;
@@ -20,7 +16,6 @@ interface PageContainerItem {
   iconClass: string;
   anchor: string;
   isExternal: boolean;
-  targetTab?: MainTab;
   routePath?: string;
 }
 
@@ -44,7 +39,6 @@ const pageContainers: PageContainerItem[] = [
     isExternal: true,
     // anchor: "/assistant",
     // isExternal: false,
-    // targetTab: "assistant",
     // routePath: "/assistant",
   },
   {
@@ -64,10 +58,9 @@ const pageContainers: PageContainerItem[] = [
     iconClass: "fa-thin fa-certificate fa-solid",
     anchor: "https://chromewebstore.google.com/detail/lhcookcbhcmgbohajfncncpcihdjnjbo?utm_source=item-share-cb",
     isExternal: true,
-    // anchor: "/checker?tab=audit",
+    // anchor: "/checker/?tab=audit",
     // isExternal: false,
-    // targetTab: "audit",
-    // routePath: "/checker?tab=audit",
+    // routePath: "/checker/?tab=audit",
   },
   {
     id: "e-auction-generator",
@@ -81,7 +74,7 @@ const pageContainers: PageContainerItem[] = [
   },
 ];
 
-export default function LandingPage({ onNavigate }: LandingPageProps) {
+export default function LandingPage() {
   const router = useRouter();
   const HERO_IMAGES = [
     "/hero/hero1.jpg",
@@ -99,13 +92,9 @@ export default function LandingPage({ onNavigate }: LandingPageProps) {
   }, [HERO_IMAGES.length]);
 
   const handleContainerClick = (e: React.MouseEvent<HTMLAnchorElement>, item: PageContainerItem) => {
-    if (!item.isExternal) {
+    if (!item.isExternal && item.routePath) {
       e.preventDefault();
-      if (item.routePath) {
-        router.push(item.routePath);
-      } else if (item.targetTab) {
-        onNavigate(item.targetTab);
-      }
+      router.push(item.routePath);
     }
   };
 
@@ -113,21 +102,29 @@ export default function LandingPage({ onNavigate }: LandingPageProps) {
     <div className="flex-1 flex flex-col gap-8 animate-fade-in w-full">
       {/* ── Hero Section (Full Width Edge-to-Edge) ── */}
       <section className="relative w-[calc(100%+2rem)] md:w-[calc(100%+4rem)] -mx-4 md:-mx-8 -mt-2 overflow-hidden min-h-[300px] sm:min-h-[380px] flex items-center shadow-xl transition-all duration-300 bg-slate-900 px-6 sm:px-12 md:px-16 py-10 sm:py-14">
-        {/* Rotating Background Images */}
+        {/* Rotating Background Images (Next.js Image Optimized) */}
         {HERO_IMAGES.map((src, index) => (
           <div
             key={src}
-            className={`absolute inset-0 bg-cover bg-center transition-opacity duration-1000 ease-in-out ${index === currentImageIndex ? "opacity-100 scale-105 transition-transform duration-[7000ms]" : "opacity-0 scale-100"
+            className={`absolute inset-0 transition-opacity duration-1000 ease-in-out ${index === currentImageIndex ? "opacity-100 scale-105 transition-transform duration-[7000ms]" : "opacity-0 scale-100"
               }`}
-            style={{ backgroundImage: `url('${src}')` }}
-          />
+          >
+            <Image
+              src={src}
+              alt="Hero slide background"
+              fill
+              priority={index === 0}
+              sizes="100vw"
+              className="object-cover object-center"
+            />
+          </div>
         ))}
 
         {/* Gradient Overlay for Text Legibility */}
         <div className="absolute inset-0 bg-gradient-to-r from-black/85 via-black/60 to-black/30 z-10 pointer-events-none" />
 
-        {/* Inner Content Container */}
-        <div className="relative z-20 max-w-7xl mx-auto w-full flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+        {/* Inner Content Container (Full Width Aligned) */}
+        <div className="relative z-20 w-full flex flex-col lg:flex-row lg:items-center justify-between gap-6">
           <div className="max-w-3xl flex flex-col items-start gap-4">
             {/* Main Title */}
             <h1 className="font-display text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-extrabold tracking-tight text-white leading-[1.1] drop-shadow-md">

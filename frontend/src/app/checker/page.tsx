@@ -12,9 +12,8 @@ import SubNavTabs from "@/components/SubNavTabs";
 const SupplierDataEditor = dynamic(() => import("@/components/SupplierDataEditor"), { ssr: false });
 const SupplierAudit = dynamic(() => import("@/components/SupplierAudit"), { ssr: false });
 const AuditRegistry = dynamic(() => import("@/components/AuditRegistry"), { ssr: false });
-const RetrievalPlayground = dynamic(() => import("@/components/RetrievalPlayground"), { ssr: false });
 
-const VALID_TABS: MainTab[] = ["audit", "registry", "editor", "retrieval"];
+const VALID_TABS: MainTab[] = ["audit", "registry", "editor"];
 const STORAGE_KEY = "checker_active_tab";
 
 function CheckerPageContent() {
@@ -64,7 +63,7 @@ function CheckerPageContent() {
 
       if (savedTab) {
         setActiveTab(savedTab);
-        router.replace(`/checker?tab=${savedTab}`, { scroll: false });
+        router.replace(`/checker/?tab=${savedTab}`, { scroll: false });
       } else {
         setActiveTab("audit");
       }
@@ -79,7 +78,7 @@ function CheckerPageContent() {
       } catch (err) {
         // Ignore localStorage errors
       }
-      router.push(`/checker?tab=${newTab}`, { scroll: false });
+      router.push(`/checker/?tab=${newTab}`, { scroll: false });
     },
     [router]
   );
@@ -132,11 +131,6 @@ function CheckerPageContent() {
       {activeTab === "editor" && (
         <div className="flex-1 flex flex-col">
           <SupplierDataEditor onRefreshLogs={handleRefresh} />
-        </div>
-      )}
-      {activeTab === "retrieval" && (
-        <div className="flex-1 flex flex-col">
-          <RetrievalPlayground />
         </div>
       )}
     </div>
