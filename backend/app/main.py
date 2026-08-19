@@ -123,7 +123,48 @@ async def init_db_tables():
             await session.execute(text(
                 "INSERT INTO document_folders (id, name) VALUES (:id, 'General') ON CONFLICT DO NOTHING;"
             ), {"id": default_id})
+        
+        # Ensure RBAC tables exist for roles & features
+        await session.execute(text("""
+            CREATE TABLE IF NOT EXISTS roles (
+                id UUID PRIMARY KEY,
+                name VARCHAR(50) NOT NULL UNIQUE,
+                display_name VARCHAR(100) NOT NULL,
+                description TEXT
+            );
+        """))
+        await session.execute(text("""
+            CREATE TABLE IF NOT EXISTS features (
+                id VARCHAR(50) PRIMARY KEY,
+                display_name VARCHAR(100) NOT NULL,
+                description TEXT,
+                route_path VARCHAR(200),
+                is_external VARCHAR(1) NOT NULL DEFAULT '0',
+                sort_order INTEGER NOT NULL DEFAULT 0
+            );
+        """))
+        await session.execute(text("""
+            CREATE TABLE IF NOT EXISTS user_roles (
+                user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+                role_id UUID REFERENCES roles(id) ON DELETE CASCADE,
+                granted_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                PRIMARY KEY (user_id, role_id)
+            );
+        """))
+        await session.execute(text("""
+            CREATE TABLE IF NOT EXISTS role_features (
+                role_id UUID REFERENCES roles(id) ON DELETE CASCADE,
+                feature_id VARCHAR(50) REFERENCES features(id) ON DELETE CASCADE,
+                PRIMARY KEY (role_id, feature_id)
+            );
+        """))
         await session.commit()
+
+        try:
+            from app.auth.seed import seed
+            await seed()
+        except Exception as seed_err:
+            logger.warning(f"Auto-seed warning: {seed_err}")
 
 
 @asynccontextmanager
@@ -1588,6 +1629,79 @@ async def db_update_row(table_name: str, payload: dict):
     if not updated:
         raise HTTPException(status_code=404, detail="Row not found or no changes made.")
     return {"updated": updated}
+
+
+# ── Auth & RBAC Endpoints ───────────────────────────────────────────────────
+
+@app.get("/api/v1/auth/roles", tags=["Auth & RBAC"])
+@app.get("/api/auth/roles", tags=["Auth & RBAC"])
+async def get_roles_and_features():
+    """Return all system roles, registered features, and role-feature permissions."""
+    from sqlalchemy import select
+    from app.db.session import get_session_factory
+    from app.models.tables import Role, Feature, RoleFeature
+    from app.auth.seed import ROLES, FEATURES, ROLE_FEATURES, TEST_USERS
+
+    try:
+        factory = get_session_factory()
+        async with factory() as session:
+            roles_db = (await session.execute(select(Role))).scalars().all()
+            features_db = (await session.execute(select(Feature))).scalars().all()
+            rf_rows = (await session.execute(select(RoleFeature))).scalars().all()
+
+            if roles_db:
+                role_features_map = {}
+                for rf in rf_rows:
+                    role_features_map.setdefault(str(rf.role_id), []).append(rf.feature_id)
+
+                roles_list = []
+                for r in roles_db:
+                    f_ids = role_features_map.get(str(r.id), ROLE_FEATURES.get(r.name, []))
+                    test_u = next((u["email"] for u in TEST_USERS if r.name in u["roles"]), None)
+                    roles_list.append({
+                        "id": str(r.id),
+                        "name": r.name,
+                        "display_name": r.display_name,
+                        "description": r.description,
+                        "feature_ids": f_ids,
+                        "test_user": test_u,
+                    })
+
+                features_list = [
+                    {
+                        "id": f.id,
+                        "display_name": f.display_name,
+                        "description": f.description,
+                        "route_path": f.route_path,
+                        "is_external": f.is_external == "1",
+                        "sort_order": f.sort_order,
+                    }
+                    for f in features_db
+                ]
+                return {"roles": roles_list, "features": features_list}
+    except Exception as e:
+        logger.warning(f"Error fetching roles from DB: {e}")
+
+    roles_list = []
+    for r in ROLES:
+        roles_list.append({
+            "name": r["name"],
+            "display_name": r["display_name"],
+            "description": r["description"],
+            "feature_ids": ROLE_FEATURES.get(r["name"], []),
+            "test_user": next((u["email"] for u in TEST_USERS if r["name"] in u["roles"]), None),
+        })
+    return {"roles": roles_list, "features": FEATURES}
+
+
+@app.post("/api/v1/auth/seed", tags=["Auth & RBAC"])
+@app.post("/api/auth/seed", tags=["Auth & RBAC"])
+async def trigger_seed():
+    """Trigger database seed for roles, features, and test users."""
+    from app.auth.seed import seed
+    await seed()
+    return {"status": "success", "message": "Roles, features, and test users seeded successfully"}
+
 
 
 

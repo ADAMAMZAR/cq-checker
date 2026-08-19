@@ -172,6 +172,45 @@ class User(Base):
     role = Column(String(50), nullable=False, default="employee")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    roles = relationship("Role", secondary="user_roles", lazy="selectin")
+
+
+class Role(Base):
+    __tablename__ = "roles"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
+    name = Column(String(50), unique=True, nullable=False)
+    display_name = Column(String(100), nullable=False)
+    description = Column(Text, nullable=True)
+
+    features = relationship("Feature", secondary="role_features", lazy="selectin")
+
+
+class UserRole(Base):
+    __tablename__ = "user_roles"
+
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    role_id = Column(UUID(as_uuid=True), ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True)
+    granted_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class Feature(Base):
+    __tablename__ = "features"
+
+    id = Column(String(50), primary_key=True)
+    display_name = Column(String(100), nullable=False)
+    description = Column(Text, nullable=True)
+    route_path = Column(String(200), nullable=True)
+    is_external = Column(String(1), nullable=False, default="0")  # SQLite compat for boolean
+    sort_order = Column(Integer, nullable=False, default=0)
+
+
+class RoleFeature(Base):
+    __tablename__ = "role_features"
+
+    role_id = Column(UUID(as_uuid=True), ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True)
+    feature_id = Column(String(50), ForeignKey("features.id", ondelete="CASCADE"), primary_key=True)
+
 
 class ChatSession(Base):
     __tablename__ = "chat_sessions"

@@ -21,6 +21,7 @@ import type {
   DbSchema,
   FeedbackRating,
   FeedbackResponse,
+  RolesAndFeaturesResponse,
 } from "@/types";
 
 // Single seam for backend routing.
@@ -576,4 +577,17 @@ export async function commitIngestPages(
   return res.json();
 }
 
+export async function fetchRolesAndFeatures(): Promise<RolesAndFeaturesResponse> {
+  try {
+    const res = await fetch(`${API_BASE}/v1/auth/roles`);
+    if (res.ok) return await res.json();
+  } catch {
+    // try secondary path
+  }
+  const res = await fetch(`${API_BASE}/auth/roles`);
+  if (!res.ok) throw new Error(`Failed to fetch roles & features: HTTP ${res.status}`);
+  return res.json();
+}
+
 export type { ChatSource };
+

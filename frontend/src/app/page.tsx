@@ -14,7 +14,7 @@ export default function Dashboard() {
         isLoading={false}
         isEvidenceLoading={false}
         onRefresh={() => {}}
-        onGoHome={() => router.push("/")}
+        hideHomeIcon={true}
       />
       <div className="flex-1 flex flex-col">
         <LandingPage />

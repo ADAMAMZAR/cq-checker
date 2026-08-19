@@ -348,3 +348,29 @@ export interface DbSchema {
   tables: DbTableSchema[];
   relationships: DbRelationship[];
 }
+
+// ── Auth & RBAC ──────────────────────────────────────────────────────────────
+
+export interface RoleInfo {
+  id?: string;
+  name: string;
+  display_name: string;
+  description: string;
+  feature_ids: string[];
+  test_user?: string | null;
+}
+
+export interface FeatureInfo {
+  id: string;
+  display_name: string;
+  description: string;
+  route_path?: string | null;
+  is_external?: boolean;
+  sort_order?: number;
+}
+
+export interface RolesAndFeaturesResponse {
+  roles: RoleInfo[];
+  features: FeatureInfo[];
+}
+

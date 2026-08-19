@@ -124,6 +124,7 @@ def get_in_qualification_suppliers(token: Optional[str] = None) -> list:
     
     body = {
         "outputFormat": "JSON",
+        "withQuestionnaire": True,
         "qualificationStatusList": [
             "PendingQualificationApproval", 
             "PendingQualificationResubmit",
