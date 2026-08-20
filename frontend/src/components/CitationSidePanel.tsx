@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState, useMemo } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import {
   IconChevronLeft,
@@ -14,8 +14,10 @@ import {
 import MarkdownViewer from "./citation-viewers/MarkdownViewer";
 import ImageViewer from "./citation-viewers/ImageViewer";
 
-// Set worker URL matching exact react-pdf pdfjs.version
-pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+// Worker configuration matching exact react-pdf pdfjs.version
+if (typeof window !== "undefined" && !pdfjs.GlobalWorkerOptions.workerSrc) {
+  pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+}
 
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
@@ -44,6 +46,111 @@ function detectFileType(fileUrl: string, contentType?: string | null): "pdf" | "
   return "pdf"; // Default fallback
 }
 
+// Optimized PDF Page Item with Viewport Canvas Virtualization
+const PdfPageItem = memo(function PdfPageItem({
+  pNum,
+  pageNumber,
+  initialPage,
+  numPages,
+  width,
+  scale,
+  containerEl,
+  onRegisterRef,
+}: {
+  pNum: number;
+  pageNumber: number;
+  initialPage: number;
+  numPages: number;
+  width: number;
+  scale: number;
+  containerEl: HTMLDivElement | null;
+  onRegisterRef: (pNum: number, el: HTMLDivElement | null) => void;
+}) {
+  const itemRef = useRef<HTMLDivElement | null>(null);
+  const [isVisible, setIsVisible] = useState(pNum === initialPage || pNum <= 3);
+  const [aspectRatio, setAspectRatio] = useState<number | null>(null);
+
+  useEffect(() => {
+    const el = itemRef.current;
+    if (!el || !containerEl) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            setIsVisible(true);
+          } else {
+            // Keep initially cited page or active page mounted to avoid flicker
+            if (pNum !== initialPage && Math.abs(pNum - pageNumber) > 3) {
+              setIsVisible(false);
+            }
+          }
+        }
+      },
+      {
+        root: containerEl,
+        rootMargin: "400px 0px 400px 0px", // Preload pages 400px before scrolling into view
+        threshold: 0.01,
+      }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [containerEl, pNum, initialPage, pageNumber]);
+
+  const pageWidth = Math.max(260, width - 24);
+  const placeholderHeight = aspectRatio ? Math.floor(pageWidth * aspectRatio * scale) : Math.floor(200 * scale);
+
+  return (
+    <div
+      key={`pdf_page_${pNum}`}
+      data-page-number={pNum}
+      ref={(el) => {
+        itemRef.current = el;
+        onRegisterRef(pNum, el);
+      }}
+      className={`shadow-lg rounded-xl overflow-hidden bg-[var(--bg-card-solid)] border transition-all flex flex-col w-fit h-auto mx-auto ${
+        pNum === pageNumber
+          ? "border-[var(--accent-primary-border)] ring-2 ring-[var(--accent-primary-ring)]"
+          : "border-[var(--border-subtle)]"
+      }`}
+    >
+      {isVisible ? (
+        <Page
+          pageNumber={pNum}
+          width={pageWidth}
+          scale={scale}
+          renderTextLayer={false}
+          renderAnnotationLayer={false}
+          onLoadSuccess={(pdfPage) => {
+            if (pdfPage.originalWidth && pdfPage.originalHeight) {
+              setAspectRatio(pdfPage.originalHeight / pdfPage.originalWidth);
+            }
+          }}
+        />
+      ) : (
+        <div
+          style={{ width: `${pageWidth}px`, height: `${placeholderHeight}px` }}
+          className="flex items-center justify-center bg-[var(--bg-input)] text-xs text-[var(--text-tertiary)] font-mono animate-pulse"
+        >
+          <span>Page {pNum} (Scroll to render)</span>
+        </div>
+      )}
+
+      <div className="py-1 px-3 bg-[var(--bg-surface)] border-t border-[var(--border-subtle)] text-center text-[10px] font-mono font-semibold text-[var(--text-tertiary)] flex items-center justify-between w-full">
+        <span>
+          Page {pNum} of {numPages}
+        </span>
+        {pNum === initialPage && (
+          <span className="px-1.5 py-0.5 rounded bg-[var(--accent-primary-soft)] text-[var(--accent-primary-text)] font-sans font-bold text-[9px]">
+            Cited Page
+          </span>
+        )}
+      </div>
+    </div>
+  );
+});
+
 export default memo(function CitationSidePanel({
   fileUrl,
   documentId,
@@ -53,7 +160,11 @@ export default memo(function CitationSidePanel({
   title,
   onClose,
 }: CitationSidePanelProps) {
-  const viewerType = detectFileType(fileUrl, contentType);
+  // Memoized file type detection
+  const viewerType = useMemo(
+    () => detectFileType(fileUrl, contentType),
+    [fileUrl, contentType]
+  );
 
   const containerRef = useRef<HTMLDivElement>(null);
   const pageRefs = useRef<Record<number, HTMLDivElement | null>>({});
@@ -63,14 +174,26 @@ export default memo(function CitationSidePanel({
   const [scale, setScale] = useState(1.0);
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  // Throttled ResizeObserver using requestAnimationFrame to eliminate layout thrashing
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
+
+    let animationFrameId: number | null = null;
     const ro = new ResizeObserver((entries) => {
-      for (const entry of entries) setWidth(Math.floor(entry.contentRect.width));
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      animationFrameId = requestAnimationFrame(() => {
+        for (const entry of entries) {
+          setWidth(Math.floor(entry.contentRect.width));
+        }
+      });
     });
+
     ro.observe(el);
-    return () => ro.disconnect();
+    return () => {
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      ro.disconnect();
+    };
   }, []);
 
   const handleLoadSuccess = useCallback(({ numPages: n }: { numPages: number }) => {
@@ -105,6 +228,7 @@ export default memo(function CitationSidePanel({
     }
   }, [numPages, initialPage]);
 
+  // Active page IntersectionObserver tracking
   useEffect(() => {
     const container = containerRef.current;
     if (!container || !numPages || viewerType !== "pdf") return;
@@ -116,7 +240,7 @@ export default memo(function CitationSidePanel({
             const pStr = entry.target.getAttribute("data-page-number");
             if (pStr) {
               const p = parseInt(pStr, 10);
-              if (!isNaN(p)) {
+              if (!Number.isNaN(p)) {
                 setPageNumber(p);
               }
             }
@@ -137,6 +261,10 @@ export default memo(function CitationSidePanel({
     return () => observer.disconnect();
   }, [numPages, viewerType]);
 
+  const handleRegisterPageRef = useCallback((pNum: number, el: HTMLDivElement | null) => {
+    pageRefs.current[pNum] = el;
+  }, []);
+
   return (
     <div className="flex flex-col h-full min-h-0 bg-[var(--bg-card)]">
       {/* Header with Back to Sources Button */}
@@ -155,7 +283,10 @@ export default memo(function CitationSidePanel({
               {title || "Source Document"}
             </p>
             <p className="text-[10px] text-[var(--text-tertiary)] font-mono flex items-center gap-1">
-              <span>Page {pageNumber}{numPages ? ` of ${numPages}` : ""}</span>
+              <span>
+                Page {pageNumber}
+                {numPages ? ` of ${numPages}` : ""}
+              </span>
               <span className="uppercase text-[9px] px-1 rounded bg-[var(--bg-input)] text-[var(--accent-primary-text)] font-bold">
                 {viewerType}
               </span>
@@ -260,34 +391,17 @@ export default memo(function CitationSidePanel({
               {Array.from(new Array(numPages || 0), (_, index) => {
                 const pNum = index + 1;
                 return (
-                  <div
+                  <PdfPageItem
                     key={`pdf_page_${pNum}`}
-                    data-page-number={pNum}
-                    ref={(el) => {
-                      pageRefs.current[pNum] = el;
-                    }}
-                    className={`shadow-lg rounded-xl overflow-hidden bg-[var(--bg-card-solid)] border transition-all ${
-                      pNum === pageNumber
-                        ? "border-[var(--accent-primary-border)] ring-2 ring-[var(--accent-primary-ring)]"
-                        : "border-[var(--border-subtle)]"
-                    }`}
-                  >
-                    <Page
-                      pageNumber={pNum}
-                      width={Math.max(260, width - 24)}
-                      scale={scale}
-                      renderTextLayer={false}
-                      renderAnnotationLayer={false}
-                    />
-                    <div className="py-1 px-3 bg-[var(--bg-surface)] border-t border-[var(--border-subtle)] text-center text-[10px] font-mono font-semibold text-[var(--text-tertiary)] flex items-center justify-between">
-                      <span>Page {pNum} of {numPages}</span>
-                      {pNum === initialPage && (
-                        <span className="px-1.5 py-0.5 rounded bg-[var(--accent-primary-soft)] text-[var(--accent-primary-text)] font-sans font-bold text-[9px]">
-                          Cited Page
-                        </span>
-                      )}
-                    </div>
-                  </div>
+                    pNum={pNum}
+                    pageNumber={pageNumber}
+                    initialPage={initialPage}
+                    numPages={numPages || 0}
+                    width={width}
+                    scale={scale}
+                    containerEl={containerRef.current}
+                    onRegisterRef={handleRegisterPageRef}
+                  />
                 );
               })}
             </Document>

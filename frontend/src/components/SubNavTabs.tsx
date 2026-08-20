@@ -10,17 +10,21 @@ interface SubNavTabsProps {
   onGoHome?: () => void;
 }
 
-const tabs: { key: MainTab; label: string; icon: typeof IconFiles }[] = [
+const allTabs: { key: MainTab; label: string; icon: typeof IconFiles }[] = [
   { key: "audit", label: "Audit", icon: IconSearch },
   { key: "registry", label: "Audit Registry", icon: IconFiles },
   { key: "editor", label: "Supplier Data Editor", icon: IconEdit },
 ];
 
 export default function SubNavTabs({ active, onChange, onGoHome }: SubNavTabsProps) {
+  const isEnabled = process.env.NEXT_PUBLIC_ENABLE_INTERNAL_MODULES !== "false";
+
+  if (!isEnabled) return null;
+
   return (
     <div className="flex items-center justify-between gap-6 mb-8 border-b border-white/5 pb-0.5">
       <div className="flex items-center gap-6 overflow-x-auto">
-        {tabs.map(({ key, label, icon: Icon }) => (
+        {allTabs.map(({ key, label, icon: Icon }) => (
           <button
             key={key}
             onClick={() => onChange(key)}
