@@ -34,6 +34,35 @@ export const UPLOAD_API_BASE =
     ? "http://127.0.0.1:8000/api"
     : API_BASE);
 
+import { getStoredUserEmail, setStoredUserEmail } from "./securityStore";
+
+const INTERNAL_SECRET = process.env.NEXT_PUBLIC_INTERNAL_API_SECRET || "dev-internal-secret-cq-checker";
+
+export function getAuthHeaders(extraHeaders: HeadersInit = {}): HeadersInit {
+  const headers = new Headers(extraHeaders);
+  if (INTERNAL_SECRET) {
+    headers.set("X-Internal-Secret", INTERNAL_SECRET);
+  }
+  const userEmail = getStoredUserEmail();
+  if (userEmail) {
+    headers.set("X-User-Email", userEmail);
+  }
+  return headers;
+}
+
+export async function authFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+  const headers = getAuthHeaders(init.headers);
+  const res = await fetch(input, { ...init, headers });
+  if (res.status === 403 && typeof window !== "undefined") {
+    res.clone().json().then((data) => {
+      if (data?.provided_email) {
+        setStoredUserEmail(data.provided_email);
+      }
+    }).catch(() => {});
+  }
+  return res;
+}
+
 function base64url(input: string): string {
   const b64 = btoa(input);
   return b64.replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
@@ -62,14 +91,14 @@ async function errorDetail(res: Response): Promise<string> {
 }
 
 export async function fetchAuditLogs(): Promise<AuditLog[]> {
-  const res = await fetch(`${API_BASE}/logs`);
+  const res = await authFetch(`${API_BASE}/logs`);
   if (!res.ok) throw new Error(`Failed to load logs: HTTP ${res.status}`);
   const data: AuditLog[] = await res.json();
   return data;
 }
 
 export async function fetchSuppliers(): Promise<SupplierEntry[]> {
-  const res = await fetch(`${API_BASE}/suppliers`);
+  const res = await authFetch(`${API_BASE}/suppliers`);
   if (!res.ok) throw new Error(`Failed to load suppliers: HTTP ${res.status}`);
   return res.json();
 }
@@ -99,7 +128,7 @@ export interface AribaQuestionnaireAnswersResponse {
 }
 
 export async function fetchAribaSuppliers(): Promise<SupplierEntry[]> {
-  const res = await fetch(`${API_BASE}/ariba/suppliers`, {
+  const res = await authFetch(`${API_BASE}/ariba/suppliers`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
   });
@@ -108,7 +137,7 @@ export async function fetchAribaSuppliers(): Promise<SupplierEntry[]> {
 }
 
 export async function fetchAribaQuestionnaires(smVendorId: string): Promise<AribaQuestionnairesResponse> {
-  const res = await fetch(`${API_BASE}/ariba/suppliers/${encodeURIComponent(smVendorId)}/questionnaires`);
+  const res = await authFetch(`${API_BASE}/ariba/suppliers/${encodeURIComponent(smVendorId)}/questionnaires`);
   if (!res.ok) throw new Error(await errorDetail(res));
   return res.json();
 }
@@ -117,7 +146,7 @@ export async function fetchAribaQuestionnaireAnswers(
   smVendorId: string,
   docId: string
 ): Promise<AribaQuestionnaireAnswersResponse> {
-  const res = await fetch(
+  const res = await authFetch(
     `${API_BASE}/ariba/suppliers/${encodeURIComponent(smVendorId)}/questionnaires/${encodeURIComponent(docId)}/answers`
   );
   if (!res.ok) throw new Error(await errorDetail(res));
@@ -125,19 +154,19 @@ export async function fetchAribaQuestionnaireAnswers(
 }
 
 export async function fetchAuditRegistry(): Promise<AuditRegistryEntry[]> {
-  const res = await fetch(`${API_BASE}/audit-registry`);
+  const res = await authFetch(`${API_BASE}/audit-registry`);
   if (!res.ok) throw new Error(`Failed to load audit registry: HTTP ${res.status}`);
   return res.json();
 }
 
 export async function fetchAuditRegistryDetail(auditId: string): Promise<AuditRegistryDetail> {
-  const res = await fetch(`${API_BASE}/audit-registry/${encodeURIComponent(auditId)}`);
+  const res = await authFetch(`${API_BASE}/audit-registry/${encodeURIComponent(auditId)}`);
   if (!res.ok) throw new Error(`Failed to load audit registry detail: HTTP ${res.status}`);
   return res.json();
 }
 
 export async function fetchSupplierEvidence(supplierId: number): Promise<SupplierAssets> {
-  const res = await fetch(`${API_BASE}/logs/${supplierId}/evidence`);
+  const res = await authFetch(`${API_BASE}/logs/${supplierId}/evidence`);
   if (!res.ok) throw new Error(`Failed to load supplier evidence: HTTP ${res.status}`);
   return res.json();
 }
@@ -145,14 +174,14 @@ export async function fetchSupplierEvidence(supplierId: number): Promise<Supplie
 export const fetchSupplierAssets = fetchSupplierEvidence;
 
 export async function fetchCostAnalytics(): Promise<CostAnalyticsData> {
-  const res = await fetch(`${API_BASE}/costs`);
+  const res = await authFetch(`${API_BASE}/costs`);
   if (!res.ok) throw new Error(`Failed to load cost analytics: HTTP ${res.status}`);
   return res.json();
 }
 
 export async function fetchEvidenceLogs(auditId?: string): Promise<DocumentEvidence[]> {
   const url = auditId ? `${API_BASE}/evidence?audit_id=${encodeURIComponent(auditId)}` : `${API_BASE}/evidence`;
-  const res = await fetch(url);
+  const res = await authFetch(url);
   if (!res.ok) throw new Error(`Failed to load evidence logs: HTTP ${res.status}`);
   return res.json();
 }
@@ -167,13 +196,13 @@ export async function fetchEvidenceSummary(opts?: {
   if (opts?.supplierId) params.append("supplier_id", opts.supplierId.toString());
   if (opts?.auditId) params.append("audit_id", opts.auditId);
   const queryStr = params.toString() ? `?${params.toString()}` : "";
-  const res = await fetch(`${API_BASE}/evidence/summary${queryStr}`);
+  const res = await authFetch(`${API_BASE}/evidence/summary${queryStr}`);
   if (!res.ok) throw new Error(`Failed to load evidence summary: HTTP ${res.status}`);
   return res.json();
 }
 
 export async function fetchEvidenceDocument(documentId: string): Promise<DocumentEvidence> {
-  const res = await fetch(`${API_BASE}/evidence/${encodeURIComponent(documentId)}`);
+  const res = await authFetch(`${API_BASE}/evidence/${encodeURIComponent(documentId)}`);
   if (!res.ok) throw new Error(`Failed to load document evidence details: HTTP ${res.status}`);
   return res.json();
 }
@@ -191,7 +220,7 @@ export async function updateEvidenceMetadata(
   filename: string,
   updatedMetadata: Record<string, string>
 ): Promise<EvidenceUpdateResponse> {
-  const res = await fetch(`${API_BASE}/evidence`, {
+  const res = await authFetch(`${API_BASE}/evidence`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ audit_id: auditId, filename, updated_metadata: updatedMetadata })
@@ -216,7 +245,7 @@ export async function sendChat(
   callbacks: ChatStreamCallbacks,
   signal?: AbortSignal
 ): Promise<ChatResponse> {
-  const res = await fetch(`${API_BASE}/chat`, {
+  const res = await authFetch(`${API_BASE}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query, session_id: sessionId, stream: true }),
@@ -290,13 +319,13 @@ export async function sendChat(
 }
 
 export async function fetchChatHistory(sessionId: string): Promise<ChatHistoryResponse> {
-  const res = await fetch(`${API_BASE}/chat/history?session_id=${encodeURIComponent(sessionId)}`);
+  const res = await authFetch(`${API_BASE}/chat/history?session_id=${encodeURIComponent(sessionId)}`);
   if (!res.ok) throw new Error(await errorDetail(res));
   return res.json();
 }
 
 export async function clearChatCache(): Promise<number> {
-  const res = await fetch(`${API_BASE}/chat/cache/clear`, { method: "POST" });
+  const res = await authFetch(`${API_BASE}/chat/cache/clear`, { method: "POST" });
   if (!res.ok) throw new Error(await errorDetail(res));
   const data = await res.json();
   return data.cleared ?? 0;
@@ -308,7 +337,7 @@ export async function submitFeedback(
   rating: FeedbackRating,
   reason?: string
 ): Promise<FeedbackResponse> {
-  const res = await fetch(`${API_BASE}/chat/feedback`, {
+  const res = await authFetch(`${API_BASE}/chat/feedback`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -333,7 +362,7 @@ export async function uploadDocument(
   form.append("file", file);
   if (title) form.append("title", title);
   form.append("overwrite", overwrite.toString());
-  const res = await fetch(`${UPLOAD_API_BASE}/documents/upload`, { method: "POST", body: form });
+  const res = await authFetch(`${UPLOAD_API_BASE}/documents/upload`, { method: "POST", body: form });
   if (!res.ok) throw new Error(await errorDetail(res));
   return res.json();
 }
@@ -345,25 +374,25 @@ export async function bulkUploadDocuments(
   const form = new FormData();
   files.forEach((f) => form.append("files", f));
   form.append("overwrite", overwrite.toString());
-  const res = await fetch(`${UPLOAD_API_BASE}/documents/bulk-upload`, { method: "POST", body: form });
+  const res = await authFetch(`${UPLOAD_API_BASE}/documents/bulk-upload`, { method: "POST", body: form });
   if (!res.ok) throw new Error(await errorDetail(res));
   return res.json();
 }
 
 export async function fetchDocuments(): Promise<DocumentSummary[]> {
-  const res = await fetch(`${API_BASE}/documents`);
+  const res = await authFetch(`${API_BASE}/documents`);
   if (!res.ok) throw new Error(await errorDetail(res));
   return res.json();
 }
 
 export async function fetchFolders(): Promise<DocumentFolder[]> {
-  const res = await fetch(`${API_BASE}/folders`);
+  const res = await authFetch(`${API_BASE}/folders`);
   if (!res.ok) throw new Error(await errorDetail(res));
   return res.json();
 }
 
 export async function createFolder(name: string): Promise<DocumentFolder> {
-  const res = await fetch(`${API_BASE}/folders`, {
+  const res = await authFetch(`${API_BASE}/folders`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name }),
@@ -373,7 +402,7 @@ export async function createFolder(name: string): Promise<DocumentFolder> {
 }
 
 export async function updateFolder(folderId: string, name: string): Promise<DocumentFolder> {
-  const res = await fetch(`${API_BASE}/folders/${encodeURIComponent(folderId)}`, {
+  const res = await authFetch(`${API_BASE}/folders/${encodeURIComponent(folderId)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name }),
@@ -383,14 +412,14 @@ export async function updateFolder(folderId: string, name: string): Promise<Docu
 }
 
 export async function deleteFolder(folderId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/folders/${encodeURIComponent(folderId)}`, {
+  const res = await authFetch(`${API_BASE}/folders/${encodeURIComponent(folderId)}`, {
     method: "DELETE",
   });
   if (!res.ok) throw new Error(await errorDetail(res));
 }
 
 export async function moveDocumentFolder(documentId: string, folderId: string | null): Promise<any> {
-  const res = await fetch(`${API_BASE}/documents/${encodeURIComponent(documentId)}/folder`, {
+  const res = await authFetch(`${API_BASE}/documents/${encodeURIComponent(documentId)}/folder`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ folder_id: folderId }),
@@ -400,7 +429,7 @@ export async function moveDocumentFolder(documentId: string, folderId: string | 
 }
 
 export async function updateDocumentRegion(documentId: string, region: string): Promise<any> {
-  const res = await fetch(`${API_BASE}/documents/${encodeURIComponent(documentId)}/region`, {
+  const res = await authFetch(`${API_BASE}/documents/${encodeURIComponent(documentId)}/region`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ region }),
@@ -410,7 +439,7 @@ export async function updateDocumentRegion(documentId: string, region: string): 
 }
 
 export async function fetchDocumentContent(documentId: string): Promise<any> {
-  const res = await fetch(`${API_BASE}/documents/${encodeURIComponent(documentId)}/content`);
+  const res = await authFetch(`${API_BASE}/documents/${encodeURIComponent(documentId)}/content`);
   if (!res.ok) throw new Error(await errorDetail(res));
   return res.json();
 }
@@ -425,7 +454,7 @@ export interface RetrievalTestPayload {
 }
 
 export async function testRetrieval(payload: RetrievalTestPayload): Promise<any> {
-  const res = await fetch(`${API_BASE}/retrieval/test`, {
+  const res = await authFetch(`${API_BASE}/retrieval/test`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -453,13 +482,13 @@ export async function verifyCertificate(
   if (opts.questionLabel) form.append("question_label", opts.questionLabel);
   if (opts.qaAnswers) form.append("qa_answers", opts.qaAnswers);
   if (opts.qaDataTitle) form.append("qa_data_title", opts.qaDataTitle);
-  const res = await fetch(`${UPLOAD_API_BASE}/certificates/verify`, { method: "POST", body: form });
+  const res = await authFetch(`${UPLOAD_API_BASE}/certificates/verify`, { method: "POST", body: form });
   if (!res.ok) throw new Error(await errorDetail(res));
   return res.json();
 }
 
 export async function fetchCertificates(): Promise<SupplierAuditResponse[]> {
-  const res = await fetch(`${API_BASE}/certificates`);
+  const res = await authFetch(`${API_BASE}/certificates`);
   if (!res.ok) throw new Error(await errorDetail(res));
   return res.json();
 }
@@ -467,7 +496,7 @@ export async function fetchCertificates(): Promise<SupplierAuditResponse[]> {
 // ── Database Browser (read-only preview) ─────────────────────────────────────
 
 export async function fetchDbTables(): Promise<DbTableMeta[]> {
-  const res = await fetch(`${API_BASE}/db/tables`);
+  const res = await authFetch(`${API_BASE}/db/tables`);
   if (!res.ok) throw new Error(await errorDetail(res));
   return res.json();
 }
@@ -479,7 +508,7 @@ export async function fetchDbTable(
   search?: string
 ): Promise<DbTableData> {
   const qParam = search ? `&q=${encodeURIComponent(search)}` : "";
-  const res = await fetch(
+  const res = await authFetch(
     `${API_BASE}/db/tables/${encodeURIComponent(table)}?limit=${limit}&offset=${offset}${qParam}`
   );
   if (!res.ok) throw new Error(await errorDetail(res));
@@ -487,7 +516,7 @@ export async function fetchDbTable(
 }
 
 export async function deleteDbRow(table: string, pk: Record<string, string>): Promise<void> {
-  const res = await fetch(`${API_BASE}/db/tables/${encodeURIComponent(table)}`, {
+  const res = await authFetch(`${API_BASE}/db/tables/${encodeURIComponent(table)}`, {
     method: "DELETE",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ pk }),
@@ -501,7 +530,7 @@ export async function updateDbCell(
   column: string,
   value: string
 ): Promise<void> {
-  const res = await fetch(`${API_BASE}/db/tables/${encodeURIComponent(table)}`, {
+  const res = await authFetch(`${API_BASE}/db/tables/${encodeURIComponent(table)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ pk, column, value }),
@@ -513,7 +542,7 @@ export async function updateDbCell(
 
 
 export async function fetchDbSchema(): Promise<DbSchema> {
-  const res = await fetch(`${API_BASE}/db/schema`);
+  const res = await authFetch(`${API_BASE}/db/schema`);
   if (!res.ok) throw new Error(await errorDetail(res));
   return res.json();
 }
@@ -522,7 +551,7 @@ export async function auditAribaSupplier(smVendorId: string, docId?: string): Pr
   const url = docId
     ? `${API_BASE}/audit/ariba-supplier?sm_vendor_id=${encodeURIComponent(smVendorId)}&doc_id=${encodeURIComponent(docId)}`
     : `${API_BASE}/audit/ariba-supplier?sm_vendor_id=${encodeURIComponent(smVendorId)}`;
-  const res = await fetch(url, {
+  const res = await authFetch(url, {
     method: "POST",
   });
   if (!res.ok) throw new Error(await errorDetail(res));
@@ -533,7 +562,7 @@ export async function downloadAribaQuestionnaireAttachments(
   smVendorId: string,
   docId: string
 ): Promise<any> {
-  const res = await fetch(
+  const res = await authFetch(
     `${API_BASE}/ariba/suppliers/${encodeURIComponent(smVendorId)}/questionnaires/${encodeURIComponent(docId)}/download-attachments`,
     {
       method: "POST",
@@ -555,7 +584,7 @@ export async function testIngestDocument(
   form.append("page_number", pageNumber.toString());
   if (title) form.append("title", title);
 
-  const res = await fetch(`${UPLOAD_API_BASE}/documents/test-ingest`, {
+  const res = await authFetch(`${UPLOAD_API_BASE}/documents/test-ingest`, {
     method: "POST",
     body: form,
   });
@@ -568,7 +597,7 @@ export async function commitIngestPages(
   title: string,
   pages: { page_number: number; markdown: string }[]
 ): Promise<any> {
-  const res = await fetch(`${API_BASE}/documents/commit-pages`, {
+  const res = await authFetch(`${API_BASE}/documents/commit-pages`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ filename, title, pages }),
@@ -579,12 +608,12 @@ export async function commitIngestPages(
 
 export async function fetchRolesAndFeatures(): Promise<RolesAndFeaturesResponse> {
   try {
-    const res = await fetch(`${API_BASE}/v1/auth/roles`);
+    const res = await authFetch(`${API_BASE}/v1/auth/roles`);
     if (res.ok) return await res.json();
   } catch {
     // try secondary path
   }
-  const res = await fetch(`${API_BASE}/auth/roles`);
+  const res = await authFetch(`${API_BASE}/auth/roles`);
   if (!res.ok) throw new Error(`Failed to fetch roles & features: HTTP ${res.status}`);
   return res.json();
 }

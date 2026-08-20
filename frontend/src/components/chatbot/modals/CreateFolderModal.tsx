@@ -48,7 +48,7 @@ export default function CreateFolderModal({ onClose, onConfirm }: CreateFolderMo
         </div>
 
         {error && (
-          <p className="text-xs font-medium text-rose-400 bg-rose-500/10 p-2.5 rounded-xl border border-rose-500/20">
+          <p className="text-xs font-medium text-red-400 bg-red-500/10 p-2.5 rounded-xl border border-red-500/20">
             ⚠️ {error}
           </p>
         )}

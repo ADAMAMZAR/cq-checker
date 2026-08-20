@@ -8,6 +8,11 @@ export default function HeroBanner() {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
   useEffect(() => {
+    // Check if user prefers reduced motion (battery saver or budget devices)
+    if (typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      return;
+    }
+
     const timer = setInterval(() => {
       setCurrentImageIndex((prev) => (prev + 1) % HERO_SLIDE_IMAGES.length);
     }, 6000);
@@ -15,12 +20,12 @@ export default function HeroBanner() {
   }, []);
 
   return (
-    <section className="relative w-[calc(100%+2rem)] md:w-[calc(100%+4rem)] -mx-4 md:-mx-8 -mt-2 overflow-hidden min-h-[280px] sm:min-h-[340px] flex items-center shadow-xl bg-slate-900 px-6 sm:px-12 md:px-16 py-8 sm:py-12">
+    <section className="relative w-[calc(100%+2rem)] md:w-[calc(100%+4rem)] -mx-4 md:-mx-8 -mt-6 overflow-hidden min-h-[280px] sm:min-h-[340px] flex items-center shadow-xl bg-slate-900 px-6 sm:px-12 md:px-16 py-8 sm:py-12">
       {/* Background Hero Carousel Images */}
       {HERO_SLIDE_IMAGES.map((src, index) => (
         <div
           key={src}
-          className={`absolute inset-0 transition-opacity duration-700 ease-in-out ${
+          className={`absolute inset-0 transition-opacity duration-700 ease-in-out transform-gpu will-change-transform ${
             index === currentImageIndex ? "opacity-100" : "opacity-0 pointer-events-none"
           }`}
         >

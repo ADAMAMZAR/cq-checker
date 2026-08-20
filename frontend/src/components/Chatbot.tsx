@@ -27,9 +27,9 @@ import { nowLabel } from "./chatbot/utils/citationFormatter";
 import { useResizableSidebar } from "./chatbot/hooks/useResizableSidebar";
 import ChatMessageItem from "./chatbot/messages/ChatMessageItem";
 import DocumentSidebar from "./chatbot/sidebar/DocumentSidebar";
-import CreateFolderModal from "./chatbot/modals/CreateFolderModal";
-import FeedbackModal from "./chatbot/modals/FeedbackModal";
 
+const CreateFolderModal = dynamic(() => import("./chatbot/modals/CreateFolderModal"), { ssr: false });
+const FeedbackModal = dynamic(() => import("./chatbot/modals/FeedbackModal"), { ssr: false });
 const CitationSidePanel = dynamic(() => import("@/components/CitationSidePanel"), { ssr: false });
 
 const SESSION_KEY = "cq_chat_session";

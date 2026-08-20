@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     # ── Query cache TTL (days) ────────────────────────────────────────
     query_cache_ttl_days: int = Field(default=30, validation_alias="QUERY_CACHE_TTL_DAYS")
 
+    # ── Security & Deployment Hardening ──────────────────────────────
+    environment: str = Field(default="development", validation_alias="ENVIRONMENT")
+    internal_api_secret: str = Field(default="dev-internal-secret-cq-checker", validation_alias="INTERNAL_API_SECRET")
+    allowed_origins: str = Field(default="http://localhost:3000", validation_alias="ALLOWED_ORIGINS")
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

@@ -12,9 +12,11 @@ import {
 } from "@/lib/roleStore";
 import { RoleInfo } from "@/types";
 import { PORTAL_FEATURES, PortalModule } from "@/config/portalFeatures";
+import dynamic from "next/dynamic";
 import HeroBanner from "./hero/HeroBanner";
 import PortalFeatureCard from "./cards/PortalFeatureCard";
-import RestrictedAccessModal from "./modals/RestrictedAccessModal";
+
+const RestrictedAccessModal = dynamic(() => import("./modals/RestrictedAccessModal"), { ssr: false });
 
 export default function LandingPage() {
   const router = useRouter();
@@ -49,22 +51,22 @@ export default function LandingPage() {
     return () => window.removeEventListener(ROLE_CHANGED_EVENT, handleRoleChange);
   }, []);
 
-  // Performance Optimization: Compute allowed features set once per role/roles change
-  const allowedFeatureIds = useMemo(() => {
-    return new Set(
-      PORTAL_FEATURES.filter((item) =>
-        isFeatureAllowedForRole(item.id, activeRoleName, roles)
-      ).map((item) => item.id)
+  // Filter features based on RBAC role permissions (Hide restricted features directly)
+  const visibleFeatures = useMemo(() => {
+    return PORTAL_FEATURES.filter((item) =>
+      isFeatureAllowedForRole(item.id, activeRoleName, roles)
     );
   }, [activeRoleName, roles]);
 
-  const handleSelectFeature = (item: PortalModule) => {
-    const isAllowed = allowedFeatureIds.has(item.id);
-    if (!isAllowed) {
-      setRestrictedModalItem(item);
-      return;
-    }
+  const getGridColsClass = (count: number) => {
+    if (count >= 5) return "grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5";
+    if (count === 4) return "grid-cols-1 sm:grid-cols-2 lg:grid-cols-4";
+    if (count === 3) return "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3";
+    if (count === 2) return "grid-cols-1 md:grid-cols-2";
+    return "grid-cols-1";
+  };
 
+  const handleSelectFeature = (item: PortalModule) => {
     if (!item.isExternal && item.routePath) {
       router.push(item.routePath);
     }
@@ -75,13 +77,13 @@ export default function LandingPage() {
       {/* Hero Banner Section */}
       <HeroBanner />
 
-      {/* Grid of Portal Modules */}
-      <section className="w-full grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 sm:gap-6">
-        {PORTAL_FEATURES.map((item) => (
+      {/* Dynamic Grid of Allowed Portal Modules (Full Width Layout) */}
+      <section className={`w-full grid gap-4 sm:gap-6 ${getGridColsClass(visibleFeatures.length)}`}>
+        {visibleFeatures.map((item) => (
           <PortalFeatureCard
             key={item.id}
             item={item}
-            isAllowed={allowedFeatureIds.has(item.id)}
+            isAllowed={true}
             onSelect={handleSelectFeature}
           />
         ))}

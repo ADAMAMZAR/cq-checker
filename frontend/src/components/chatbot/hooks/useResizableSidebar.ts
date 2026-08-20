@@ -13,19 +13,30 @@ export function useResizableSidebar(initialWidth = 28, minPct = 25, maxPct = 60)
       document.body.style.userSelect = "none";
       document.body.style.cursor = "col-resize";
 
+      let animationFrameId: number | null = null;
+
       const onMouseMove = (moveEvent: MouseEvent) => {
         if (!isDraggingRef.current) return;
-        const container = document.getElementById("chatbot-container");
-        if (!container) return;
-        const rect = container.getBoundingClientRect();
-        const relativeX = moveEvent.clientX - rect.left;
-        const newPct = (relativeX / rect.width) * 100;
-        const clamped = Math.min(maxPct, Math.max(minPct, newPct));
-        setLeftWidth(clamped);
+        if (animationFrameId !== null) return;
+
+        animationFrameId = requestAnimationFrame(() => {
+          animationFrameId = null;
+          const container = document.getElementById("chatbot-container");
+          if (!container) return;
+          const rect = container.getBoundingClientRect();
+          const relativeX = moveEvent.clientX - rect.left;
+          const newPct = (relativeX / rect.width) * 100;
+          const clamped = Math.min(maxPct, Math.max(minPct, newPct));
+          setLeftWidth(clamped);
+        });
       };
 
       const onMouseUp = () => {
         isDraggingRef.current = false;
+        if (animationFrameId !== null) {
+          cancelAnimationFrame(animationFrameId);
+          animationFrameId = null;
+        }
         document.body.style.userSelect = "";
         document.body.style.cursor = "";
         window.removeEventListener("mousemove", onMouseMove);

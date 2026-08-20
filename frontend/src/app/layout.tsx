@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter, Playfair_Display, Lora } from "next/font/google";
 import "./globals.css";
 import ThemeProvider from "@/components/ThemeProvider";
+import SecurityGuard from "@/components/SecurityGuard";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -61,7 +62,9 @@ export default function RootLayout({
           }}
         />
         <ThemeProvider>
-          {children}
+          <SecurityGuard>
+            {children}
+          </SecurityGuard>
         </ThemeProvider>
       </body>
     </html>

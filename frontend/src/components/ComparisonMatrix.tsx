@@ -12,8 +12,6 @@ import {
   IconCopy,
   IconDownload,
   IconTable,
-  IconArrowUpRight,
-  IconFilter,
   IconInfoCircle,
   IconFileSpreadsheet,
   IconExternalLink,
@@ -726,7 +724,7 @@ export default function ComparisonMatrix() {
 
             <button
               onClick={handleResetDefaults}
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 font-medium text-xs border border-rose-500/30 transition-all active:scale-95 cursor-pointer"
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-300 font-medium text-xs border border-red-500/30 transition-all active:scale-95 cursor-pointer"
             >
               <IconRefresh className="w-4 h-4" />
               <span>Reset</span>
@@ -769,13 +767,13 @@ export default function ComparisonMatrix() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20">
-            <div className="w-8 h-8 rounded-lg bg-rose-500/20 flex items-center justify-center text-rose-400 font-bold text-sm">
+          <div className="flex items-center gap-3 p-3 rounded-xl bg-red-500/10 border border-red-500/20">
+            <div className="w-8 h-8 rounded-lg bg-red-500/20 flex items-center justify-center text-red-400 font-bold text-sm">
               {mismatchCount}
             </div>
             <div className="flex flex-col">
-              <span className="text-xs text-rose-300/80 font-medium">Mismatch Cases</span>
-              <span className="text-xs text-rose-300 font-bold">🔴 Rule Violations</span>
+              <span className="text-xs text-red-300/80 font-medium">Mismatch Cases</span>
+              <span className="text-xs text-red-300 font-bold">🔴 Rule Violations</span>
             </div>
           </div>
 
@@ -824,11 +822,10 @@ export default function ComparisonMatrix() {
             <button
               key={item.id}
               onClick={() => setVerdictFilter(item.id)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all cursor-pointer whitespace-nowrap ${
-                verdictFilter === item.id
-                  ? "bg-[var(--accent-primary)] text-white shadow-sm font-semibold"
-                  : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-card)]"
-              }`}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all cursor-pointer whitespace-nowrap ${verdictFilter === item.id
+                ? "bg-[var(--accent-primary)] text-white shadow-sm font-semibold"
+                : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-card)]"
+                }`}
             >
               {item.label}
             </button>
@@ -927,9 +924,8 @@ export default function ComparisonMatrix() {
                     {cat.rows.map((row, idx) => (
                       <tr
                         key={row.id}
-                        className={`group hover:bg-[var(--bg-hover)] transition-colors ${
-                          row.isCustom ? "bg-blue-500/5" : ""
-                        }`}
+                        className={`group hover:bg-[var(--bg-hover)] transition-colors ${row.isCustom ? "bg-blue-500/5" : ""
+                          }`}
                       >
                         {/* Column 1: User Input */}
                         <td className="p-3 align-top">
@@ -961,13 +957,12 @@ export default function ComparisonMatrix() {
                                 onChange={(e) =>
                                   handleCellChange(cat.id, row.id, "verdict", e.target.value as VerdictType)
                                 }
-                                className={`px-2.5 py-1 text-xs font-bold rounded-lg border focus:outline-none transition-all cursor-pointer ${
-                                  row.verdict === "Match"
-                                    ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
-                                    : row.verdict === "Mismatch"
-                                    ? "bg-rose-500/15 text-rose-400 border-rose-500/30"
+                                className={`px-2.5 py-1 text-xs font-bold rounded-lg border focus:outline-none transition-all cursor-pointer ${row.verdict === "Match"
+                                  ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+                                  : row.verdict === "Mismatch"
+                                    ? "bg-red-500/15 text-red-400 border-red-500/30"
                                     : "bg-amber-500/15 text-amber-400 border-amber-500/30"
-                                }`}
+                                  }`}
                               >
                                 <option value="Match">🟢 Match</option>
                                 <option value="Mismatch">🔴 Mismatch</option>
@@ -996,7 +991,7 @@ export default function ComparisonMatrix() {
                         <td className="p-3 align-middle text-center">
                           <button
                             onClick={() => handleDeleteRow(cat.id, row.id)}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-all cursor-pointer opacity-80 group-hover:opacity-100"
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer opacity-80 group-hover:opacity-100"
                             title="Delete this test case row"
                           >
                             <IconTrash className="w-4 h-4" />
