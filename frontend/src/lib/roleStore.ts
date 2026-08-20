@@ -1,6 +1,13 @@
 import { RoleInfo, FeatureInfo, RolesAndFeaturesResponse } from "@/types";
 import { fetchRolesAndFeatures } from "./api";
 
+export const ALL_ROLES_OPTION: RoleInfo = {
+  name: "all",
+  display_name: "All Roles (View All)",
+  description: "Bypass role restriction testing.",
+  feature_ids: ["strategic_insights", "procurement_assistant", "supplier_visibility", "certificate_checker", "e_auction_generator"],
+};
+
 export const DEFAULT_ROLES: RoleInfo[] = [
   {
     name: "admin",
@@ -38,6 +45,18 @@ export const DEFAULT_ROLES: RoleInfo[] = [
     test_user: "user@gmail.com",
   },
 ];
+
+export function mergeRoles(backendRoles: RoleInfo[]): RoleInfo[] {
+  const map = new Map<string, RoleInfo>();
+  map.set(ALL_ROLES_OPTION.name, ALL_ROLES_OPTION);
+  for (const r of DEFAULT_ROLES) {
+    map.set(r.name, r);
+  }
+  for (const r of backendRoles) {
+    map.set(r.name, { ...r, feature_ids: r.feature_ids || [] });
+  }
+  return Array.from(map.values());
+}
 
 export const STORAGE_KEY = "gpo_active_role_name";
 export const ROLE_CHANGED_EVENT = "gpo-role-changed";

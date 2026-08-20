@@ -11,6 +11,7 @@ import {
   setStoredRoleName,
   ROLE_CHANGED_EVENT,
   fetchRolesAndFeaturesCached,
+  mergeRoles,
 } from "@/lib/roleStore";
 
 const ALL_MODULES = [
@@ -34,15 +35,7 @@ export default function RoleDropdown() {
       try {
         const res = await fetchRolesAndFeaturesCached();
         if (res?.roles && res.roles.length > 0) {
-          // Keep 'all' synthetic role at top, merge backend roles
-          const merged: RoleInfo[] = [
-            DEFAULT_ROLES[0],
-            ...res.roles.map((r) => ({
-              ...r,
-              feature_ids: r.feature_ids || [],
-            })),
-          ];
-          setRoles(merged);
+          setRoles(mergeRoles(res.roles));
         }
       } catch (err) {
         console.warn("Could not fetch DB roles, using default roles:", err);

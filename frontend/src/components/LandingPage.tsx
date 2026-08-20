@@ -15,6 +15,7 @@ import {
   ROLE_CHANGED_EVENT,
   DEFAULT_ROLES,
   fetchRolesAndFeaturesCached,
+  mergeRoles,
 } from "@/lib/roleStore";
 import { RoleInfo } from "@/types";
 
@@ -106,7 +107,7 @@ export default function LandingPage() {
       try {
         const res = await fetchRolesAndFeaturesCached();
         if (res?.roles && res.roles.length > 0) {
-          setRoles([DEFAULT_ROLES[0], ...res.roles]);
+          setRoles(mergeRoles(res.roles));
         }
       } catch {
         // use default static roles
