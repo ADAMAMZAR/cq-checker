@@ -1,7 +1,3 @@
-"""
-Legacy auditor module wrapper.
-Re-exports all symbols from the modularized app.services.auditor package.
-"""
 from app.services.auditor.types import DocCategory, ExpiryStatus, InterceptType
 from app.services.auditor.matchers import (
     _is_na,

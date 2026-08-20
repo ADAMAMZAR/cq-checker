@@ -1,7 +1,3 @@
-"""
-Legacy RAG service module wrapper.
-Re-exports all symbols from the modularized app.services.rag package.
-"""
 from app.services.rag.interceptor import SYSTEM_PROMPT, normalize_query
 from app.services.rag.citations import _reindex_citations
 from app.services.rag.client import INPUT_RATE, OUTPUT_RATE

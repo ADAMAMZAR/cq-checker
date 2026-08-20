@@ -23,7 +23,7 @@ class IngestResult:
                  page_count: int = 0, cost_usd: float = 0.0, message: str = ""):
         self.document_id = document_id
         self.title = title
-        self.status = status          # "created" | "skipped" | "failed"
+        self.status = status # "created" | "skipped" | "failed"
         self.page_count = page_count
         self.cost_usd = cost_usd
         self.message = message

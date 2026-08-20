@@ -1,7 +1,3 @@
-"""
-Legacy audit_data_access service module wrapper.
-Re-exports all symbols from the modularized app.services.audit_data package.
-"""
 from app.services.audit_data.serializers import (
     MYR_RATE,
     _display_timestamp,

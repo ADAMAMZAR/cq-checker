@@ -1,7 +1,3 @@
-"""
-Legacy supplier_search service module wrapper.
-Re-exports all symbols from the modularized app.services.ariba package.
-"""
 from app.services.ariba.auth import AribaAuthClient, get_oauth_token
 from app.services.ariba.client import (
     get_all_questionnaires,
