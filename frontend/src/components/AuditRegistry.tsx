@@ -6,9 +6,9 @@ import {
   IconExternalLink, IconLoader2, IconPhoto, IconArrowUpRight, IconEdit,
   IconChevronLeft, IconFiles, IconX
 } from "@tabler/icons-react";
-import type { AuditRegistryEntry, DocumentEvidence, SupplierAssets, ComparisonTable } from "@/types";
+import type { AuditRegistryEntry, AuditRegistryDetail, DocumentEvidence, SupplierAssets, ComparisonTable } from "@/types";
 import { FIELD_NAME_TO_META_KEY } from "@/types";
-import { fetchAuditRegistry, fetchSupplierAssets, updateEvidenceMetadata, buildFileUrl } from "@/lib/api";
+import { fetchAuditRegistry, fetchAuditRegistryDetail, fetchSupplierAssets, updateEvidenceMetadata, buildFileUrl } from "@/lib/api";
 import { getCommentAndTable, formatSuggestedComment, cleanQuestionLabel, getLabelSortKey, parseEvidenceMetadata } from "@/lib/utils";
 import ScreenshotLightbox from "./ScreenshotLightbox";
 
@@ -21,7 +21,8 @@ interface AuditRegistryProps {
 
 export default function AuditRegistry({ evidenceLogs, isEvidenceLoading, onRefreshEvidence, initialSupplier }: AuditRegistryProps) {
   const [logs, setLogs] = useState<AuditRegistryEntry[]>([]);
-  const [selectedLog, setSelectedLog] = useState<AuditRegistryEntry | null>(null);
+  const [selectedLog, setSelectedLog] = useState<AuditRegistryDetail | null>(null);
+  const [logDetailLoading, setLogDetailLoading] = useState(false);
   const [assets, setAssets] = useState<SupplierAssets>({ screenshots: [], documents: [] });
   const [assetsLoading, setAssetsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -67,14 +68,19 @@ export default function AuditRegistry({ evidenceLogs, isEvidenceLoading, onRefre
       );
       if (!match) return;
       autoSelectedSupplier.current = supplierName.toLowerCase();
-      setSelectedLog(match);
+      setSelectedLog(null);
+      setLogDetailLoading(true);
       setActiveTableIdx(null);
       setAssets({ screenshots: [], documents: [] });
-      setAssetsLoading(true);
       setActiveTab("comparison");
-      const data = await fetchSupplierAssets(match.supplier_id);
-      setAssets(data);
-      setAssetsLoading(false);
+      try {
+        const detail = await fetchAuditRegistryDetail(match.audit_id);
+        setSelectedLog(detail);
+      } catch (err: any) {
+        console.error("Failed to auto-load audit detail:", err);
+      } finally {
+        setLogDetailLoading(false);
+      }
     },
     [logs]
   );
@@ -86,14 +92,40 @@ export default function AuditRegistry({ evidenceLogs, isEvidenceLoading, onRefre
   }, [initialSupplier, logs, autoSelectSupplierLog]);
 
   const handleSelectLog = async (log: AuditRegistryEntry) => {
-    setSelectedLog(log);
+    setSelectedLog(null);
+    setLogDetailLoading(true);
     setActiveTableIdx(null);
     setAssets({ screenshots: [], documents: [] });
-    setAssetsLoading(true);
     setActiveTab("comparison");
-    const data = await fetchSupplierAssets(log.supplier_id);
-    setAssets(data);
-    setAssetsLoading(false);
+
+    try {
+      const detail = await fetchAuditRegistryDetail(log.audit_id);
+      setSelectedLog(detail);
+    } catch (err: any) {
+      console.error("Failed to load audit detail:", err);
+    } finally {
+      setLogDetailLoading(false);
+    }
+  };
+
+  const handleDetailTabChange = async (tab: "comparison" | "assets") => {
+    setActiveTab(tab);
+    if (tab === "assets" && selectedLog) {
+      if (assets.documents.length === 0 && assets.screenshots.length === 0 && !assetsLoading) {
+        setAssetsLoading(true);
+        try {
+          const assetsData = await fetchSupplierAssets(selectedLog.supplier_id);
+          setAssets(assetsData);
+        } catch (err: any) {
+          console.error("Failed to load supplier assets:", err);
+        } finally {
+          setAssetsLoading(false);
+        }
+      }
+      if (evidenceLogs.length === 0 && !isEvidenceLoading) {
+        onRefreshEvidence();
+      }
+    }
   };
 
   const handleCopyComment = (comment: string) => {
@@ -175,7 +207,7 @@ export default function AuditRegistry({ evidenceLogs, isEvidenceLoading, onRefre
 
   const getFilteredLogs = () => logs.filter(log => {
     const matchesSearch = log.supplier_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      log.cert_type.toLowerCase().includes(searchQuery.toLowerCase());
+      (log.cert_type?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false);
     const matchesStatus = statusFilter === "ALL" ||
       (statusFilter === "MATCH" && log.result.toLowerCase() === "match") ||
       (statusFilter === "MISMATCH" && log.result.toLowerCase() === "mismatch");
@@ -218,9 +250,14 @@ export default function AuditRegistry({ evidenceLogs, isEvidenceLoading, onRefre
           )}
 
           {/* Right: Detail Pane */}
-          <section className={`${selectedLog ? "lg:col-span-12" : "lg:col-span-7"} flex flex-col double-bezel`}>
+          <section className={`${(selectedLog || logDetailLoading) ? "lg:col-span-12" : "lg:col-span-7"} flex flex-col double-bezel`}>
             <div className="double-bezel-inner flex-1 flex flex-col h-full">
-              {selectedLog ? (
+              {logDetailLoading ? (
+                <div className="flex-1 flex flex-col items-center justify-center text-center p-12 gap-3">
+                  <IconLoader2 className="h-8 w-8 animate-spin text-[var(--accent-primary-text)]" />
+                  <span className="text-sm font-medium text-[var(--text-secondary)]">Loading audit details...</span>
+                </div>
+              ) : selectedLog ? (
                 <DetailPane
                   log={selectedLog}
                   assets={assets}
@@ -228,7 +265,7 @@ export default function AuditRegistry({ evidenceLogs, isEvidenceLoading, onRefre
                   isEvidenceLoading={isEvidenceLoading}
                   evidenceLogs={evidenceLogs}
                   activeTab={activeTab}
-                  onTabChange={setActiveTab}
+                  onTabChange={handleDetailTabChange}
                   onBack={() => setSelectedLog(null)}
                   copied={copied}
                   onCopyComment={handleCopyComment}
@@ -358,7 +395,7 @@ function DetailPane({
   onSaveTableEdits, onCancelTableEdit, isSavingTableEdits, tableEditMsg,
   selectedScreenshot, onScreenshotClick
 }: {
-  log: AuditRegistryEntry;
+  log: AuditRegistryDetail;
   assets: SupplierAssets;
   assetsLoading: boolean;
   isEvidenceLoading: boolean;
@@ -438,7 +475,7 @@ function ComparisonTab({
   editingTableIdx, tableEditValues, onStartTableEdit, onUpdateTableEditValue,
   onSaveTableEdits, onCancelTableEdit, isSavingTableEdits, tableEditMsg
 }: {
-  log: AuditRegistryEntry; assets: SupplierAssets;
+  log: AuditRegistryDetail; assets: SupplierAssets;
   copied: boolean; onCopyComment: (c: string) => void;
   activeTableIdx: number | null; onTableToggle: (idx: number | null) => void;
   editingTableIdx: number | null; tableEditValues: Record<number, Record<number, string>>;
@@ -504,7 +541,7 @@ function JsonComparisonTables({
   editingTableIdx, tableEditValues, onStartTableEdit, onUpdateTableEditValue,
   onSaveTableEdits, onCancelTableEdit, isSavingTableEdits, tableEditMsg
 }: {
-  log: AuditRegistryEntry; assets: SupplierAssets;
+  log: AuditRegistryDetail; assets: SupplierAssets;
   activeTableIdx: number | null; onTableToggle: (idx: number | null) => void;
   editingTableIdx: number | null; tableEditValues: Record<number, Record<number, string>>;
   onStartTableEdit: (idx: number) => void;
@@ -679,7 +716,7 @@ function TableGrid({
 }
 
 function LegacyComparisonTables({ log, table, tables }: {
-  log: AuditRegistryEntry;
+  log: AuditRegistryDetail;
   table: { headers: string[]; rows: string[][] } | null;
   tables: ComparisonTable[];
 }) {
@@ -701,15 +738,15 @@ function LegacyComparisonTables({ log, table, tables }: {
                 <col style={{ width: '15%' }} />
               </colgroup>
               <thead>
-                <tr className="border-b border-[var(--match-border)] font-bold text-[var(--match-text)] bg-[var(--table-header-bg)] backdrop-blur-sm">
+                <tr className="border-b border-[var(--border-subtle)] bg-[var(--bg-card)]">
                   {table.headers.map((h, i) => (
-                    <th key={i} className={`py-2.5 px-3 uppercase tracking-wider text-[10px] ${i < table.headers.length - 1 ? 'border-r border-[var(--border-visible)]' : ''}`}>{h}</th>
+                    <th key={i} className="p-3 text-[11px] font-bold text-[var(--heading-color)] tracking-wider uppercase">{h}</th>
                   ))}
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-[var(--border-subtle)]">
                 {table.rows.map((row, rIdx) => (
-                  <tr key={rIdx} className="hover:bg-[var(--bg-surface)] border-b border-[var(--border-subtle)]">
+                  <tr key={rIdx} className="hover:bg-[var(--bg-surface-hover)] transition-colors">
                     {row.map((cell, cIdx) => {
                       const isStatusCell = cIdx === row.length - 1;
                       const cleanCell = cell.trim();
@@ -780,7 +817,7 @@ function LegacyComparisonTables({ log, table, tables }: {
 }
 
 function EvidenceTab({ log, assets, assetsLoading, isEvidenceLoading, evidenceLogs, onScreenshotClick }: {
-  log: AuditRegistryEntry;
+  log: AuditRegistryDetail;
   assets: SupplierAssets;
   assetsLoading: boolean;
   isEvidenceLoading: boolean;

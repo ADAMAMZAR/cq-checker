@@ -40,13 +40,6 @@ function CheckerPageContent() {
   }, []);
 
   useEffect(() => {
-    if (!evidenceFetched.current) {
-      evidenceFetched.current = true;
-      loadEvidence();
-    }
-  }, [loadEvidence]);
-
-  useEffect(() => {
     const rawParam = searchParams.get("tab");
     const paramTab = rawParam && VALID_TABS.includes(rawParam as MainTab) ? (rawParam as MainTab) : null;
 
@@ -70,7 +63,7 @@ function CheckerPageContent() {
 
       if (savedTab) {
         setActiveTab(savedTab);
-        router.replace(`/checker?tab=${savedTab}`, { scroll: false });
+        router.replace(`/checker/?tab=${savedTab}`, { scroll: false });
       } else {
         setActiveTab("audit");
       }
@@ -85,7 +78,7 @@ function CheckerPageContent() {
       } catch (err) {
         // Ignore localStorage errors
       }
-      router.push(`/checker?tab=${newTab}`, { scroll: false });
+      router.push(`/checker/?tab=${newTab}`, { scroll: false });
     },
     [router]
   );
@@ -137,12 +130,7 @@ function CheckerPageContent() {
       )}
       {activeTab === "editor" && (
         <div className="flex-1 flex flex-col">
-          <SupplierDataEditor
-            evidenceLogs={evidenceLogs}
-            isEvidenceLoading={isEvidenceLoading}
-            onRefreshEvidence={loadEvidence}
-            onRefreshLogs={handleRefresh}
-          />
+          <SupplierDataEditor onRefreshLogs={handleRefresh} />
         </div>
       )}
     </div>

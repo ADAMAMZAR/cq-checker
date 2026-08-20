@@ -7,7 +7,70 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sqlalchemy.orm import joinedload
-from app.models.tables import Document, DocumentPage, ObjectStorage
+from app.models.tables import Document, DocumentPage, ObjectStorage, DocumentFolder
+
+
+class FolderRepository:
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def list_all(self) -> List[dict]:
+        stmt = (
+            select(
+                DocumentFolder.id,
+                DocumentFolder.name,
+                DocumentFolder.created_at,
+                func.count(Document.id).label("document_count"),
+            )
+            .outerjoin(Document, Document.folder_id == DocumentFolder.id)
+            .group_by(DocumentFolder.id, DocumentFolder.name, DocumentFolder.created_at)
+            .order_by(DocumentFolder.name.asc())
+        )
+        res = await self.session.execute(stmt)
+        return [
+            {
+                "id": str(r.id),
+                "name": r.name,
+                "document_count": r.document_count or 0,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in res.all()
+        ]
+
+    async def create(self, name: str) -> DocumentFolder:
+        folder = DocumentFolder(name=name.strip())
+        self.session.add(folder)
+        await self.session.commit()
+        await self.session.refresh(folder)
+        return folder
+
+    async def get_by_name(self, name: str) -> Optional[DocumentFolder]:
+        result = await self.session.execute(
+            select(DocumentFolder).where(DocumentFolder.name == name.strip())
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_id(self, folder_id: UUID) -> Optional[DocumentFolder]:
+        result = await self.session.execute(
+            select(DocumentFolder).where(DocumentFolder.id == folder_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def update(self, folder_id: UUID, new_name: str) -> Optional[DocumentFolder]:
+        folder = await self.get_by_id(folder_id)
+        if folder:
+            folder.name = new_name.strip()
+            await self.session.commit()
+            await self.session.refresh(folder)
+        return folder
+
+    async def delete(self, folder_id: UUID) -> bool:
+        folder = await self.get_by_id(folder_id)
+        if not folder:
+            return False
+        await self.session.delete(folder)
+        await self.session.commit()
+        return True
 
 
 class DocumentRepository:
@@ -18,15 +81,22 @@ class DocumentRepository:
         self,
         title: str,
         object_id: Optional[UUID] = None,
+        folder_id: Optional[UUID] = None,
+        region: Optional[str] = None,
         input_tokens: int = 0,
         output_tokens: int = 0,
         cost_usd: float = 0.0,
         file_url: Optional[str] = None,
         file_hash: Optional[str] = None,
     ) -> Document:
+        from app.services.region_router import detect_document_region
+        reg = region or detect_document_region(title)
+
         doc = Document(
             title=title,
             object_id=object_id,
+            folder_id=folder_id,
+            region=reg,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cost_usd=round(float(cost_usd), 6),
@@ -38,7 +108,9 @@ class DocumentRepository:
 
     async def get_by_id(self, doc_id: UUID) -> Optional[Document]:
         result = await self.session.execute(
-            select(Document).options(joinedload(Document.object_storage)).where(Document.id == doc_id)
+            select(Document)
+            .options(joinedload(Document.object_storage), joinedload(Document.folder))
+            .where(Document.id == doc_id)
         )
         return result.scalar_one_or_none()
 
@@ -46,25 +118,41 @@ class DocumentRepository:
         result = await self.session.execute(
             select(Document)
             .join(ObjectStorage, Document.object_id == ObjectStorage.id)
-            .options(joinedload(Document.object_storage))
+            .options(joinedload(Document.object_storage), joinedload(Document.folder))
             .where(ObjectStorage.checksum == file_hash)
         )
         return result.scalar_one_or_none()
 
-    async def list_all(self, limit: int = 50, offset: int = 0) -> List[Document]:
+    async def list_all(self, limit: int = 100, offset: int = 0) -> List[Document]:
         result = await self.session.execute(
             select(Document)
-            .options(joinedload(Document.object_storage))
+            .options(joinedload(Document.object_storage), joinedload(Document.folder))
             .order_by(Document.created_at.desc())
             .limit(limit)
             .offset(offset)
         )
         return list(result.scalars().all())
 
+    async def move_to_folder(self, doc_id: UUID, folder_id: Optional[UUID]) -> Optional[Document]:
+        doc = await self.get_by_id(doc_id)
+        if doc:
+            doc.folder_id = folder_id
+            await self.session.commit()
+            await self.session.refresh(doc)
+        return doc
+
+    async def update_region(self, doc_id: UUID, region: str) -> Optional[Document]:
+        doc = await self.get_by_id(doc_id)
+        if doc:
+            doc.region = region.upper()
+            await self.session.commit()
+            await self.session.refresh(doc)
+        return doc
+
     async def get_by_title(self, title: str) -> Optional[Document]:
         result = await self.session.execute(
             select(Document)
-            .options(joinedload(Document.object_storage))
+            .options(joinedload(Document.object_storage), joinedload(Document.folder))
             .where(Document.title == title)
         )
         return result.scalar_one_or_none()

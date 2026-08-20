@@ -1,7 +1,9 @@
 import type {
   AuditLog,
   AuditRegistryEntry,
+  AuditRegistryDetail,
   DocumentEvidence,
+  DocumentEvidenceSummary,
   SupplierEntry,
   SupplierAssets,
   CostAnalyticsData,
@@ -11,6 +13,7 @@ import type {
   ChatSource,
   DocumentIngestResult,
   DocumentSummary,
+  DocumentFolder,
   CertificateVerifyResult,
   SupplierAuditResponse,
   DbTableMeta,
@@ -18,6 +21,7 @@ import type {
   DbSchema,
   FeedbackRating,
   FeedbackResponse,
+  RolesAndFeaturesResponse,
 } from "@/types";
 
 // Single seam for backend routing.
@@ -70,15 +74,65 @@ export async function fetchSuppliers(): Promise<SupplierEntry[]> {
   return res.json();
 }
 
+export interface AribaQuestionnaireItem {
+  questionnaireId?: string;
+  docId?: string;
+  docTitle?: string;
+  title?: string;
+  hasCertificates?: boolean;
+  status?: string;
+  [key: string]: any;
+}
+
+export interface AribaQuestionnairesResponse {
+  status: string;
+  sm_vendor_id: string;
+  total: number;
+  questionnaires: AribaQuestionnaireItem[];
+}
+
+export interface AribaQuestionnaireAnswersResponse {
+  status: string;
+  sm_vendor_id: string;
+  doc_id: string;
+  qna_data: any;
+}
+
 export async function fetchAribaSuppliers(): Promise<SupplierEntry[]> {
-  const res = await fetch(`${API_BASE}/ariba/suppliers`);
+  const res = await fetch(`${API_BASE}/ariba/suppliers`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
   if (!res.ok) throw new Error(`Failed to load Ariba suppliers: HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function fetchAribaQuestionnaires(smVendorId: string): Promise<AribaQuestionnairesResponse> {
+  const res = await fetch(`${API_BASE}/ariba/suppliers/${encodeURIComponent(smVendorId)}/questionnaires`);
+  if (!res.ok) throw new Error(await errorDetail(res));
+  return res.json();
+}
+
+export async function fetchAribaQuestionnaireAnswers(
+  smVendorId: string,
+  docId: string
+): Promise<AribaQuestionnaireAnswersResponse> {
+  const res = await fetch(
+    `${API_BASE}/ariba/suppliers/${encodeURIComponent(smVendorId)}/questionnaires/${encodeURIComponent(docId)}/answers`
+  );
+  if (!res.ok) throw new Error(await errorDetail(res));
   return res.json();
 }
 
 export async function fetchAuditRegistry(): Promise<AuditRegistryEntry[]> {
   const res = await fetch(`${API_BASE}/audit-registry`);
   if (!res.ok) throw new Error(`Failed to load audit registry: HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function fetchAuditRegistryDetail(auditId: string): Promise<AuditRegistryDetail> {
+  const res = await fetch(`${API_BASE}/audit-registry/${encodeURIComponent(auditId)}`);
+  if (!res.ok) throw new Error(`Failed to load audit registry detail: HTTP ${res.status}`);
   return res.json();
 }
 
@@ -96,9 +150,31 @@ export async function fetchCostAnalytics(): Promise<CostAnalyticsData> {
   return res.json();
 }
 
-export async function fetchEvidenceLogs(): Promise<DocumentEvidence[]> {
-  const res = await fetch(`${API_BASE}/evidence`);
+export async function fetchEvidenceLogs(auditId?: string): Promise<DocumentEvidence[]> {
+  const url = auditId ? `${API_BASE}/evidence?audit_id=${encodeURIComponent(auditId)}` : `${API_BASE}/evidence`;
+  const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to load evidence logs: HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function fetchEvidenceSummary(opts?: {
+  supplierName?: string;
+  supplierId?: number;
+  auditId?: string;
+}): Promise<DocumentEvidenceSummary[]> {
+  const params = new URLSearchParams();
+  if (opts?.supplierName) params.append("supplier_name", opts.supplierName);
+  if (opts?.supplierId) params.append("supplier_id", opts.supplierId.toString());
+  if (opts?.auditId) params.append("audit_id", opts.auditId);
+  const queryStr = params.toString() ? `?${params.toString()}` : "";
+  const res = await fetch(`${API_BASE}/evidence/summary${queryStr}`);
+  if (!res.ok) throw new Error(`Failed to load evidence summary: HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function fetchEvidenceDocument(documentId: string): Promise<DocumentEvidence> {
+  const res = await fetch(`${API_BASE}/evidence/${encodeURIComponent(documentId)}`);
+  if (!res.ok) throw new Error(`Failed to load document evidence details: HTTP ${res.status}`);
   return res.json();
 }
 
@@ -209,6 +285,7 @@ export async function sendChat(
     cache_hit: !!done.cache_hit,
     session_id: done.session_id ?? sessionId,
     message_id: done.message_id ?? null,
+    debug_tracing: (done as any).debug_tracing ?? null,
   };
 }
 
@@ -279,6 +356,84 @@ export async function fetchDocuments(): Promise<DocumentSummary[]> {
   return res.json();
 }
 
+export async function fetchFolders(): Promise<DocumentFolder[]> {
+  const res = await fetch(`${API_BASE}/folders`);
+  if (!res.ok) throw new Error(await errorDetail(res));
+  return res.json();
+}
+
+export async function createFolder(name: string): Promise<DocumentFolder> {
+  const res = await fetch(`${API_BASE}/folders`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) throw new Error(await errorDetail(res));
+  return res.json();
+}
+
+export async function updateFolder(folderId: string, name: string): Promise<DocumentFolder> {
+  const res = await fetch(`${API_BASE}/folders/${encodeURIComponent(folderId)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) throw new Error(await errorDetail(res));
+  return res.json();
+}
+
+export async function deleteFolder(folderId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/folders/${encodeURIComponent(folderId)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(await errorDetail(res));
+}
+
+export async function moveDocumentFolder(documentId: string, folderId: string | null): Promise<any> {
+  const res = await fetch(`${API_BASE}/documents/${encodeURIComponent(documentId)}/folder`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ folder_id: folderId }),
+  });
+  if (!res.ok) throw new Error(await errorDetail(res));
+  return res.json();
+}
+
+export async function updateDocumentRegion(documentId: string, region: string): Promise<any> {
+  const res = await fetch(`${API_BASE}/documents/${encodeURIComponent(documentId)}/region`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ region }),
+  });
+  if (!res.ok) throw new Error(await errorDetail(res));
+  return res.json();
+}
+
+export async function fetchDocumentContent(documentId: string): Promise<any> {
+  const res = await fetch(`${API_BASE}/documents/${encodeURIComponent(documentId)}/content`);
+  if (!res.ok) throw new Error(await errorDetail(res));
+  return res.json();
+}
+
+export interface RetrievalTestPayload {
+  query: string;
+  k?: number;
+  window_size?: number;
+  vector_weight?: number;
+  bm25_weight?: number;
+  region_filter?: string;
+}
+
+export async function testRetrieval(payload: RetrievalTestPayload): Promise<any> {
+  const res = await fetch(`${API_BASE}/retrieval/test`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await errorDetail(res));
+  return res.json();
+}
+
 // ── Certificate Verification ─────────────────────────────────────────────────
 
 export interface VerifyCertificateOptions {
@@ -340,16 +495,50 @@ export async function deleteDbRow(table: string, pk: Record<string, string>): Pr
   if (!res.ok) throw new Error(await errorDetail(res));
 }
 
+export async function updateDbCell(
+  table: string,
+  pk: Record<string, string>,
+  column: string,
+  value: string
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/db/tables/${encodeURIComponent(table)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pk, column, value }),
+  });
+  if (!res.ok) throw new Error(await errorDetail(res));
+}
+
+
+
+
 export async function fetchDbSchema(): Promise<DbSchema> {
   const res = await fetch(`${API_BASE}/db/schema`);
   if (!res.ok) throw new Error(await errorDetail(res));
   return res.json();
 }
 
-export async function auditAribaSupplier(smVendorId: string): Promise<any> {
-  const res = await fetch(`${API_BASE}/audit/ariba-supplier?sm_vendor_id=${encodeURIComponent(smVendorId)}`, {
+export async function auditAribaSupplier(smVendorId: string, docId?: string): Promise<any> {
+  const url = docId
+    ? `${API_BASE}/audit/ariba-supplier?sm_vendor_id=${encodeURIComponent(smVendorId)}&doc_id=${encodeURIComponent(docId)}`
+    : `${API_BASE}/audit/ariba-supplier?sm_vendor_id=${encodeURIComponent(smVendorId)}`;
+  const res = await fetch(url, {
     method: "POST",
   });
+  if (!res.ok) throw new Error(await errorDetail(res));
+  return res.json();
+}
+
+export async function downloadAribaQuestionnaireAttachments(
+  smVendorId: string,
+  docId: string
+): Promise<any> {
+  const res = await fetch(
+    `${API_BASE}/ariba/suppliers/${encodeURIComponent(smVendorId)}/questionnaires/${encodeURIComponent(docId)}/download-attachments`,
+    {
+      method: "POST",
+    }
+  );
   if (!res.ok) throw new Error(await errorDetail(res));
   return res.json();
 }
@@ -388,4 +577,17 @@ export async function commitIngestPages(
   return res.json();
 }
 
+export async function fetchRolesAndFeatures(): Promise<RolesAndFeaturesResponse> {
+  try {
+    const res = await fetch(`${API_BASE}/v1/auth/roles`);
+    if (res.ok) return await res.json();
+  } catch {
+    // try secondary path
+  }
+  const res = await fetch(`${API_BASE}/auth/roles`);
+  if (!res.ok) throw new Error(`Failed to fetch roles & features: HTTP ${res.status}`);
+  return res.json();
+}
+
 export type { ChatSource };
+

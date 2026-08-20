@@ -10,8 +10,12 @@ import hashlib
 import json
 import asyncio
 import logging
+import re
 import requests
+import time
 import uuid
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from app.models.tables import uuid7
 from typing import List, Optional
 from fastapi import FastAPI, UploadFile, File, Form, Query, HTTPException, status
@@ -20,9 +24,10 @@ from fastapi.responses import Response, StreamingResponse
 
 from app.config import settings
 from app.schemas import (
-    SupplierEntry, AuditLogEntry, AuditResultResponse, DocumentEvidence, UpdateEvidenceRequest,
-    AuditRegistryEntry, CertificateVerificationResponse, CertificateVerifyResult,
-    DocumentIngestResult, DocumentSummary, ChatRequest, ChatResponse, ChatSource,
+    SupplierEntry, AuditLogEntry, AuditResultResponse, DocumentEvidence, DocumentEvidenceSummary, UpdateEvidenceRequest,
+    AuditRegistryEntry, AuditRegistryDetail, CertificateVerificationResponse, CertificateVerifyResult,
+    DocumentIngestResult, DocumentSummary, DocumentFolderSummary, CreateFolderRequest, UpdateFolderRequest, MoveDocumentRequest, UpdateDocumentRegionRequest,
+    ChatRequest, ChatResponse, ChatSource, RetrievalTestRequest,
     ChatHistoryResponse, FeedbackRequest, FeedbackResponse,
 )
 from app.services import audit_data_access, extractor, storage, supplier_search
@@ -31,7 +36,6 @@ from app.services.auditor import clean_question_label
 from app.services.timezones import now_malaysia, to_malaysia
 
 logger = logging.getLogger(__name__)
-
 
 def _first_cert(meta: dict) -> dict:
     """Return the first certificate dict from nested ``{"certificates": [...]}``
@@ -82,11 +86,102 @@ API_TAGS = [
     {"name": "File Serving", "description": "Serve uploaded files (local disk and legacy Supabase proxy)."},
 ]
 
+async def init_db_tables():
+    """Ensure document_folders table and documents.folder_id column exist on startup."""
+    from sqlalchemy import text
+    from app.db.session import get_session_factory
+
+    factory = get_session_factory()
+    async with factory() as session:
+        await session.execute(text("""
+            CREATE TABLE IF NOT EXISTS document_folders (
+                id UUID PRIMARY KEY,
+                name VARCHAR(255) NOT NULL UNIQUE,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            );
+        """))
+        await session.execute(text("""
+            ALTER TABLE documents 
+            ADD COLUMN IF NOT EXISTS folder_id UUID REFERENCES document_folders(id) ON DELETE SET NULL;
+        """))
+        await session.execute(text("""
+            ALTER TABLE documents 
+            ADD COLUMN IF NOT EXISTS region VARCHAR(20) NOT NULL DEFAULT 'GENERAL';
+        """))
+
+        # Auto-classify existing document regions by title
+        await session.execute(text("UPDATE documents SET region = 'VN' WHERE (title ILIKE '%vietnam%' OR title ILIKE '%vn%') AND region = 'GENERAL';"))
+        await session.execute(text("UPDATE documents SET region = 'TW' WHERE (title ILIKE '%taiwan%' OR title ILIKE '%tw%' OR title LIKE '%台灣%' OR title LIKE '%臺灣%') AND region = 'GENERAL';"))
+        await session.execute(text("UPDATE documents SET region = 'MY' WHERE (title ILIKE '%malaysia%' OR title ILIKE '%my%') AND region = 'GENERAL';"))
+        await session.execute(text("UPDATE documents SET region = 'AU' WHERE (title ILIKE '%australia%' OR title ILIKE '%au%') AND region = 'GENERAL';"))
+
+        res = await session.execute(text("SELECT COUNT(*) FROM document_folders;"))
+        cnt = res.scalar() or 0
+        if cnt == 0:
+            import uuid
+            default_id = str(uuid.uuid4())
+            await session.execute(text(
+                "INSERT INTO document_folders (id, name) VALUES (:id, 'General') ON CONFLICT DO NOTHING;"
+            ), {"id": default_id})
+        
+        # Ensure RBAC tables exist for roles & features
+        await session.execute(text("""
+            CREATE TABLE IF NOT EXISTS roles (
+                id UUID PRIMARY KEY,
+                name VARCHAR(50) NOT NULL UNIQUE,
+                display_name VARCHAR(100) NOT NULL,
+                description TEXT
+            );
+        """))
+        await session.execute(text("""
+            CREATE TABLE IF NOT EXISTS features (
+                id VARCHAR(50) PRIMARY KEY,
+                display_name VARCHAR(100) NOT NULL,
+                description TEXT,
+                route_path VARCHAR(200),
+                is_external VARCHAR(1) NOT NULL DEFAULT '0',
+                sort_order INTEGER NOT NULL DEFAULT 0
+            );
+        """))
+        await session.execute(text("""
+            CREATE TABLE IF NOT EXISTS user_roles (
+                user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+                role_id UUID REFERENCES roles(id) ON DELETE CASCADE,
+                granted_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                PRIMARY KEY (user_id, role_id)
+            );
+        """))
+        await session.execute(text("""
+            CREATE TABLE IF NOT EXISTS role_features (
+                role_id UUID REFERENCES roles(id) ON DELETE CASCADE,
+                feature_id VARCHAR(50) REFERENCES features(id) ON DELETE CASCADE,
+                PRIMARY KEY (role_id, feature_id)
+            );
+        """))
+        await session.commit()
+
+        try:
+            from app.auth.seed import seed
+            await seed()
+        except Exception as seed_err:
+            logger.warning(f"Auto-seed warning: {seed_err}")
+
+
+@asynccontextmanager
+async def lifespan(app_instance: FastAPI):
+    try:
+        await init_db_tables()
+    except Exception as e:
+        logger.error(f"Failed to initialize database tables: {e}")
+    yield
+
+
 app = FastAPI(
     title="GPO Automatic Certificate Auditor API",
     description="Backend API for auditing certificates and logging results to Neon PostgreSQL",
     version="1.0.0",
     openapi_tags=API_TAGS,
+    lifespan=lifespan,
 )
 
 # Configure CORS so the Chrome Extension and Next.js can connect
@@ -98,9 +193,65 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.get("/", tags=["System / Health"])
-def read_root():
-    return {"status": "healthy", "service": "GPO Automatic Certificate Auditor API"}
+def _cert_for_question(extracted_data: dict, target_q_label: str) -> dict:
+    certs = extracted_data.get("certificates", [])
+    if not certs:
+        return {}
+    target_norm = target_q_label.strip().lower()
+    for cert in certs:
+        m_label = (cert.get("matchedQuestionLabel") or "").strip().lower()
+        if m_label and (m_label == target_norm or target_norm in m_label or m_label in target_norm):
+            return cert
+    return certs[0]
+
+
+def _q_pairs_for_file(filename: str, qa_list: list) -> list:
+    pairs = []
+    norm_fn = filename.strip().lower()
+    for item in qa_list:
+        if isinstance(item, dict):
+            att = item.get("attachedFile") or item.get("attached_file") or ""
+            if isinstance(att, dict):
+                att_name = (att.get("name") or att.get("fileName") or "").strip().lower()
+            elif isinstance(att, str):
+                att_name = att.strip().lower()
+            else:
+                att_name = ""
+
+            q_label = item.get("questionLabel") or item.get("question_label") or "Certificate Question"
+            answers = item.get("answers") or []
+            if isinstance(answers, list):
+                ans_str = ", ".join(
+                    f"{a.get('label')}: {a.get('value')}" if isinstance(a, dict) else str(a)
+                    for a in answers
+                )
+            elif isinstance(answers, str):
+                ans_str = answers
+            else:
+                ans_str = "Uploaded Attachment"
+
+            if not att_name or norm_fn in att_name or att_name in norm_fn:
+                pairs.append((q_label, ans_str or "Uploaded Attachment"))
+
+    if not pairs and qa_list:
+        for item in qa_list:
+            if isinstance(item, dict):
+                q_label = item.get("questionLabel") or item.get("question_label") or "Certificate Question"
+                answers = item.get("answers") or []
+                if isinstance(answers, list):
+                    ans_str = ", ".join(
+                        f"{a.get('label')}: {a.get('value')}" if isinstance(a, dict) else str(a)
+                        for a in answers
+                    )
+                else:
+                    ans_str = str(answers)
+                pairs.append((q_label, ans_str or "Uploaded Attachment"))
+
+    if not pairs:
+        pairs = [("Certificate Question", "Uploaded Attachment")]
+
+    return pairs
+
 
 async def _process_uploaded_files(
     supplier_name: str,
@@ -122,7 +273,11 @@ async def _process_uploaded_files(
         raw = await file.read()
         content_type = file.content_type or "application/pdf"
         orig_filename = file.filename or "document"
-        q_pairs = _questions_for_file(qa_list, orig_filename)
+        q_pairs = _q_pairs_for_file(orig_filename, qa_list)
+        target_qa_items = [
+            {"questionLabel": label, "supplierInputValue": answers}
+            for label, answers in q_pairs
+        ]
 
         fhash = hashlib.sha256(raw).hexdigest()
         cached_record = await audit_data_access.find_metadata_by_hash(fhash)
@@ -133,9 +288,16 @@ async def _process_uploaded_files(
                 metadata_dict = {}
             task = asyncio.to_thread(lambda md=metadata_dict: (md, 0, 0, 0.0))
         else:
-            task = asyncio.to_thread(extractor.extract_certificate_data, raw, content_type)
+            task = asyncio.to_thread(
+                extractor.extract_certificate_data,
+                raw,
+                content_type,
+                None,
+                target_qa_items,
+            )
 
-        file_url = await storage.store_and_record(raw, safe_supplier_name, orig_filename, content_type)
+        f_res = await storage.store_and_record(raw, safe_supplier_name, orig_filename, content_type)
+        file_url = f_res[0] if isinstance(f_res, tuple) else f_res
 
         file_entries.append({
             "filename": orig_filename,
@@ -154,31 +316,43 @@ async def _process_uploaded_files(
     total_cost = 0.0
 
     for entry, (extracted_data, in_t, out_t, cost) in zip(file_entries, extraction_results):
-        gemini_supp_name = _first_cert(extracted_data).get("certificateOwnerName", supplier_name)
         total_cost += cost
 
         # One evidence record per (file, question) so a merged file attached to
         # several questions is fully represented in the database.
         for q_label, q_answers in entry["q_pairs"]:
+            matched_cert = _cert_for_question(extracted_data, q_label)
+            gemini_supp_name = matched_cert.get("certificateOwnerName", supplier_name)
+            p_start = matched_cert.get("pageStart", 1)
+            p_end = matched_cert.get("pageEnd", 1)
+
+            # Create focused cert payload for this specific question
+            question_extracted_data = {
+                "certificates": [matched_cert] if matched_cert else extracted_data.get("certificates", [])
+            }
+
             doc_evidences.append(DocumentEvidence(
                 audit_id=temp_audit_id, supplier_id=0, timestamp=timestamp,
                 supplier_name=supplier_name, filename=entry["filename"],
                 ariba_question_label=q_label,
                 ariba_qa_answers=q_answers,
                 gemini_extracted_supplier_name=gemini_supp_name,
-                gemini_extracted_metadata=json.dumps(extracted_data),
+                gemini_extracted_metadata=json.dumps(question_extracted_data),
                 file_content_type=entry["content_type"],
                 input_tokens=in_t, output_tokens=out_t,
                 cost_usd=cost,
+                page_number_start=p_start,
+                page_number_end=p_end,
                 file_hash=entry["file_hash"], file_url=entry.get("file_url"),
             ))
             file_contexts.append({
                 "filename": entry["filename"], "content_type": entry["content_type"],
                 "ariba_question_label": q_label, "ariba_qa_answers": q_answers,
                 "file_hash": entry["file_hash"], "file_url": entry.get("file_url"),
+                "page_number_start": p_start, "page_number_end": p_end,
             })
             extracted_docs.append({
-                "filename": entry["filename"], "extracted_data": extracted_data,
+                "filename": entry["filename"], "extracted_data": question_extracted_data,
                 "input_tokens": in_t, "output_tokens": out_t, "cost_usd": cost,
             })
 
@@ -202,12 +376,18 @@ async def get_suppliers():
 
 
 @app.get("/api/ariba/suppliers", response_model=List[SupplierEntry], tags=["Supplier Audit — Single Phase Waterfall"])
-async def get_ariba_suppliers_endpoint():
+@app.post("/api/ariba/suppliers", response_model=List[SupplierEntry], tags=["Supplier Audit — Single Phase Waterfall"])
+async def get_ariba_suppliers_endpoint(
+    q: Optional[str] = Query(None, description="Optional search query to filter suppliers"),
+    payload: Optional[Dict[str, Any]] = None,
+):
     """
     Fetches live Ariba Step 1 suppliers ('InQualification' status) via app.services.supplier_search.
-    Excludes suppliers that have already been audited and saved to DB.
+    Supports POST/GET request. Sends POST request to SAP Ariba OpenAPI with Bearer token & apiKey.
+    Optionally filters by search query 'q' or 'payload.query'.
     """
     try:
+        search_query = q or (payload.get("query") if payload else None)
         ariba_suppliers = await asyncio.to_thread(supplier_search.get_ariba_suppliers)
         db_suppliers = await audit_data_access.list_suppliers()
         existing_names = {s.supplier_name.strip().lower() for s in db_suppliers}
@@ -224,38 +404,141 @@ async def get_ariba_suppliers_endpoint():
                     created_at=now_malaysia().strftime("%Y-%m-%d %H:%M:%S"),
                 ))
                 existing_names.add(s_name.lower())
+
+        if search_query and search_query.strip():
+            query_str = search_query.strip().lower()
+            results = [
+                s for s in results 
+                if query_str in s.supplier_name.lower() or (s.sm_vendor_id and query_str in s.sm_vendor_id.lower())
+            ]
+
         return results
     except Exception as e:
         logger.error(f"Error fetching Ariba suppliers: {e}")
         return []
 
 
-@app.post("/api/audit/ariba-supplier", tags=["Supplier Audit — Single Phase Waterfall"])
-async def audit_ariba_supplier_endpoint(sm_vendor_id: str):
+@app.get("/api/ariba/suppliers/{sm_vendor_id}/questionnaires", tags=["Supplier Audit — Single Phase Waterfall"])
+async def get_ariba_questionnaires_endpoint(sm_vendor_id: str):
     """
-    Executes Ariba Step 2 (get docId) and Step 3 (extract Q&A answers).
-    Triggered when the user selects an Ariba supplier and clicks 'Audit' in the Audit Tab.
+    Step 2: Fetches all questionnaires for a given SM Vendor ID from Ariba.
     """
     try:
-        res = await asyncio.to_thread(supplier_search.audit_ariba_supplier, sm_vendor_id)
+        token = await asyncio.to_thread(supplier_search.get_oauth_token)
+        questionnaires = await asyncio.to_thread(supplier_search.get_all_questionnaires, token, sm_vendor_id)
+        return {
+            "status": "success",
+            "sm_vendor_id": sm_vendor_id,
+            "total": len(questionnaires),
+            "questionnaires": questionnaires,
+        }
+    except Exception as e:
+        logger.error(f"Error fetching Ariba questionnaires for vendor {sm_vendor_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/ariba/suppliers/{sm_vendor_id}/questionnaires/{doc_id}/answers", tags=["Supplier Audit — Single Phase Waterfall"])
+async def get_ariba_questionnaire_answers_endpoint(sm_vendor_id: str, doc_id: str):
+    """
+    Step 3: Fetches Q&A answers and certificate inputs for a specific questionnaire doc_id.
+    """
+    try:
+        token = await asyncio.to_thread(supplier_search.get_oauth_token)
+        answers = await asyncio.to_thread(supplier_search.get_questionnaire_answers, token, sm_vendor_id, doc_id)
+        return {
+            "status": "success",
+            "sm_vendor_id": sm_vendor_id,
+            "doc_id": doc_id,
+            "qna_data": answers,
+        }
+    except Exception as e:
+        logger.error(f"Error fetching Q&A answers for vendor {sm_vendor_id}, doc {doc_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/ariba/suppliers/{sm_vendor_id}/questionnaires/{doc_id}/download-attachments", tags=["Supplier Audit — Single Phase Waterfall"])
+async def download_ariba_attachments_endpoint(sm_vendor_id: str, doc_id: str):
+    """
+    Downloads all certificate attachment files for a questionnaire from SAP Ariba
+    and saves them temporarily to local disk storage.
+    """
+    try:
+        token = await asyncio.to_thread(supplier_search.get_oauth_token)
+        result = await asyncio.to_thread(
+            supplier_search.download_certified_attachments_for_questionnaire,
+            token,
+            sm_vendor_id,
+            doc_id
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Error downloading attachments for vendor {sm_vendor_id}, doc {doc_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/audit/ariba-supplier", tags=["Supplier Audit — Single Phase Waterfall"])
+async def audit_ariba_supplier_endpoint(sm_vendor_id: str, doc_id: Optional[str] = None):
+    """
+    Executes the complete 2-stage multi-certificate audit pipeline for an Ariba supplier:
+    Downloads attachments ➔ Runs Gemini 3.5 Flash Vision OCR ➔ Executes Python auditor rules ➔ Persists to Neon DB.
+    """
+    try:
+        res = await supplier_search.run_ariba_2stage_audit_pipeline(sm_vendor_id, doc_id)
         return res
     except Exception as e:
         logger.error(f"Error auditing Ariba supplier {sm_vendor_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/audit-registry", response_model=List[AuditRegistryEntry], tags=["Supplier Audit — Read / Update"])
-async def get_audit_registry():
+async def get_audit_registry(limit: int = 1000, offset: int = 0):
     """
-    Consolidated audit registry with supplier info, result, and document counts.
+    Consolidated audit registry summary list with supplier info, result, and document counts.
     """
-    return await audit_data_access.get_audit_registry()
+    return await audit_data_access.get_audit_registry(limit=limit, offset=offset)
+
+@app.get("/api/audit-registry/{audit_id}", response_model=AuditRegistryDetail, tags=["Supplier Audit — Read / Update"])
+async def get_audit_registry_detail(audit_id: str):
+    """
+    Fetches full audit registry details (comparison table, suggested comments, screenshot URL) for a specific audit run.
+    """
+    detail = await audit_data_access.get_audit_registry_detail(audit_id)
+    if not detail:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Audit record not found.")
+    return detail
+
+@app.get("/api/evidence/summary", response_model=List[DocumentEvidenceSummary], tags=["Supplier Audit — Read / Update"])
+async def get_evidence_summary(
+    supplier_name: Optional[str] = None,
+    supplier_id: Optional[int] = None,
+    audit_id: Optional[str] = None,
+):
+    """
+    Fetches lightweight evidence summary list (document id, filename, question label, supplier info, created date)
+    for listing supplier certificates without loading heavy metadata payloads.
+    """
+    return await audit_data_access.get_document_evidence_summary(
+        supplier_name=supplier_name,
+        supplier_id=supplier_id,
+        audit_id=audit_id,
+    )
+
+@app.get("/api/evidence/{document_id}", response_model=DocumentEvidence, tags=["Supplier Audit — Read / Update"])
+async def get_evidence_document(document_id: str):
+    """
+    Fetches entire document evidence data (full extracted metadata, raw OCR, tokens, etc.) for a single document ID.
+    """
+    evidence = await audit_data_access.get_document_evidence_by_id(document_id)
+    if not evidence:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document evidence record not found.")
+    return evidence
 
 @app.get("/api/evidence", response_model=List[DocumentEvidence], tags=["Supplier Audit — Read / Update"])
-async def get_evidence():
+async def get_evidence(audit_id: Optional[str] = None):
     """
-    Fetches all historical document evidence logs (extracted file details) from Neon.
+    Fetches historical document evidence logs (extracted file details) from Neon.
+    Optionally filter by audit_id.
     """
-    evidence = await audit_data_access.get_document_evidence_logs()
+    evidence = await audit_data_access.get_document_evidence_logs(audit_id=audit_id)
     return evidence
 
 @app.put("/api/evidence", tags=["Supplier Audit — Read / Update"])
@@ -344,7 +627,7 @@ async def run_audit(
     supplier_name: str = Form(...),
     supplier_folder: Optional[str] = Form(None),
     workspace_title: str = Form(...),
-    cert_type: str = Form(...),
+    cert_type: Optional[str] = Form(None),
     qa_data: str = Form(...),
     files: List[UploadFile] = File(...),
     screenshot: Optional[UploadFile] = File(None)
@@ -361,9 +644,10 @@ async def run_audit(
         screenshot_filename = f"screenshot_{now_malaysia().strftime('%Y%m%d_%H%M%S')}.png"
         screenshot_bytes = screenshot.file.read()
         screenshot.file.seek(0)
-        screenshot_url = await storage.store_and_record(
+        res = await storage.store_and_record(
             screenshot_bytes, safe_supplier_name, screenshot_filename, "image/png"
         )
+        screenshot_url = res[0] if isinstance(res, tuple) else res
 
     temp_audit_id = f"TEMP_{uuid7()}"
     timestamp = now_malaysia().strftime("%d/%m/%Y, %H:%M:%S")
@@ -383,7 +667,7 @@ async def run_audit(
 
     all_filenames = [d.filename for d in doc_evidences]
 
-    qa_data_title = f"{workspace_title} {cert_type}"
+    qa_data_title = f"{workspace_title} {cert_type or ''}".strip()
     audit_result, suggested_comment, comparison_table_dict = auditor.run_full_audit(
         supplier_name,
         file_contexts,
@@ -403,7 +687,6 @@ async def run_audit(
         timestamp=timestamp,
         supplier_name=supplier_name,
         workspace_title=workspace_title,
-        cert_type=cert_type,
         complete_qa_data_dump=qa_data,
         compiled_extracted_data=json.dumps(extracted_docs),
         result=audit_result,
@@ -606,7 +889,8 @@ async def upload_document(
     file_bytes = await file.read()
     filename = file.filename or "manual.pdf"
     content_type = file.content_type or ("text/markdown" if filename.lower().endswith((".md", ".markdown", ".txt")) else "application/pdf")
-    doc_title = title or filename
+    raw_title = title or filename
+    doc_title = re.sub(r'\.(pdf|pptx|docx|doc|ppt|xlsx|xls|png|jpg|jpeg|txt|md)$', '', raw_title, flags=re.IGNORECASE).strip() or raw_title
 
     result = await ingest_document(file_bytes, doc_title, filename, content_type, overwrite=overwrite)
     if result.status == "failed":
@@ -718,12 +1002,367 @@ async def list_documents(limit: int = 50, offset: int = 0):
                 id=str(doc.id),
                 title=doc.title,
                 file_url=doc.file_url,
+                region=doc.region or "GENERAL",
                 page_count=p_cnt,
                 parent_count=p_cnt,
                 child_count=p_cnt,
+                folder_id=str(doc.folder_id) if doc.folder_id else None,
+                folder_name=doc.folder_name,
                 created_at=to_malaysia(doc.created_at).strftime("%d/%m/%Y, %H:%M:%S") if doc.created_at else None,
             ))
     return summaries
+
+
+@app.get("/api/documents/{document_id}/content", tags=["Document Ingestion / RAG"])
+async def get_document_content(document_id: str):
+    """Retrieve full structured page contents and metadata for a document."""
+    from uuid import UUID
+    from app.db.session import get_session_factory
+    from app.repositories.documents import DocumentRepository, PageRepository
+
+    try:
+        d_uuid = UUID(document_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid document_id UUID.")
+
+    factory = get_session_factory()
+    async with factory() as session:
+        doc_repo = DocumentRepository(session)
+        page_repo = PageRepository(session)
+        doc = await doc_repo.get_by_id(d_uuid)
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found.")
+
+        pages = await page_repo.list_pages(d_uuid)
+        content_type = ""
+        if doc.object_storage:
+            content_type = doc.object_storage.content_type or ""
+
+        page_list = []
+        for p in pages:
+            page_list.append({
+                "page_number": p.page_number,
+                "content": p.content or "",
+            })
+
+        return {
+            "id": str(doc.id),
+            "title": doc.title,
+            "file_url": doc.file_url,
+            "region": doc.region,
+            "content_type": content_type,
+            "page_count": len(page_list),
+            "pages": page_list,
+        }
+
+
+# ── Document Folders API Endpoints ──────────────────────────────────────────
+
+@app.get("/api/folders", response_model=List[DocumentFolderSummary], tags=["Document Ingestion / RAG"])
+async def list_folders():
+    """List all document folders with document counts."""
+    from app.db.session import get_session_factory
+    from app.repositories.documents import FolderRepository
+
+    factory = get_session_factory()
+    async with factory() as session:
+        repo = FolderRepository(session)
+        folders = await repo.list_all()
+        return [DocumentFolderSummary(**f) for f in folders]
+
+
+@app.post("/api/folders", response_model=DocumentFolderSummary, tags=["Document Ingestion / RAG"])
+async def create_folder(payload: CreateFolderRequest):
+    """Create a new document folder."""
+    from app.db.session import get_session_factory
+    from app.repositories.documents import FolderRepository
+
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Folder name cannot be empty.")
+
+    factory = get_session_factory()
+    async with factory() as session:
+        repo = FolderRepository(session)
+        existing = await repo.get_by_name(name)
+        if existing:
+            raise HTTPException(status_code=400, detail=f"Folder '{name}' already exists.")
+        folder = await repo.create(name)
+        return DocumentFolderSummary(
+            id=str(folder.id),
+            name=folder.name,
+            document_count=0,
+            created_at=to_malaysia(folder.created_at).strftime("%d/%m/%Y, %H:%M:%S") if folder.created_at else None,
+        )
+
+
+@app.put("/api/folders/{folder_id}", response_model=DocumentFolderSummary, tags=["Document Ingestion / RAG"])
+async def update_folder(folder_id: str, payload: UpdateFolderRequest):
+    """Rename a document folder."""
+    from uuid import UUID
+    from app.db.session import get_session_factory
+    from app.repositories.documents import FolderRepository
+
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Folder name cannot be empty.")
+
+    try:
+        f_uuid = UUID(folder_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid folder_id UUID.")
+
+    factory = get_session_factory()
+    async with factory() as session:
+        repo = FolderRepository(session)
+        updated = await repo.update(f_uuid, name)
+        if not updated:
+            raise HTTPException(status_code=404, detail="Folder not found.")
+        all_folders = await repo.list_all()
+        found = next((f for f in all_folders if f["id"] == str(f_uuid)), None)
+        cnt = found["document_count"] if found else 0
+        return DocumentFolderSummary(
+            id=str(updated.id),
+            name=updated.name,
+            document_count=cnt,
+            created_at=to_malaysia(updated.created_at).strftime("%d/%m/%Y, %H:%M:%S") if updated.created_at else None,
+        )
+
+
+@app.delete("/api/folders/{folder_id}", tags=["Document Ingestion / RAG"])
+async def delete_folder(folder_id: str):
+    """Delete a document folder."""
+    from uuid import UUID
+    from app.db.session import get_session_factory
+    from app.repositories.documents import FolderRepository
+
+    try:
+        f_uuid = UUID(folder_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid folder_id UUID.")
+
+    factory = get_session_factory()
+    async with factory() as session:
+        repo = FolderRepository(session)
+        success = await repo.delete(f_uuid)
+        if not success:
+            raise HTTPException(status_code=404, detail="Folder not found.")
+        return {"status": "success", "message": "Folder deleted."}
+
+
+@app.patch("/api/documents/{document_id}/folder", tags=["Document Ingestion / RAG"])
+async def move_document_folder(document_id: str, payload: MoveDocumentRequest):
+    """Move a document to a folder or uncategorize it (folder_id=None)."""
+    from uuid import UUID
+    from app.db.session import get_session_factory
+    from app.repositories.documents import DocumentRepository, FolderRepository
+
+    try:
+        d_uuid = UUID(document_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid document_id UUID.")
+
+    f_uuid = None
+    if payload.folder_id:
+        try:
+            f_uuid = UUID(payload.folder_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid folder_id UUID.")
+
+    factory = get_session_factory()
+    async with factory() as session:
+        doc_repo = DocumentRepository(session)
+        if f_uuid:
+            folder_repo = FolderRepository(session)
+            folder = await folder_repo.get_by_id(f_uuid)
+            if not folder:
+                raise HTTPException(status_code=404, detail="Target folder not found.")
+
+        doc = await doc_repo.move_to_folder(d_uuid, f_uuid)
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found.")
+        return {
+            "status": "success",
+            "document_id": str(doc.id),
+            "folder_id": str(doc.folder_id) if doc.folder_id else None,
+            "folder_name": doc.folder_name,
+        }
+
+
+@app.patch("/api/documents/{document_id}/region", tags=["Document Ingestion / RAG"])
+async def update_document_region(document_id: str, payload: UpdateDocumentRegionRequest):
+    """Update a document's region classification (VN, TW, MY, AU, GENERAL)."""
+    from uuid import UUID
+    from app.db.session import get_session_factory
+    from app.repositories.documents import DocumentRepository
+
+    try:
+        d_uuid = UUID(document_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid document_id UUID.")
+
+    new_region = payload.region.upper().strip()
+    if new_region not in ("VN", "TW", "MY", "AU", "GENERAL"):
+        raise HTTPException(status_code=400, detail="Invalid region. Must be one of: VN, TW, MY, AU, GENERAL.")
+
+    factory = get_session_factory()
+    async with factory() as session:
+        doc_repo = DocumentRepository(session)
+        doc = await doc_repo.update_region(d_uuid, new_region)
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found.")
+        return {
+            "status": "success",
+            "document_id": str(doc.id),
+            "region": doc.region,
+        }
+
+
+@app.post("/api/retrieval/test", tags=["Document Ingestion / RAG"])
+async def test_retrieval(payload: RetrievalTestRequest):
+    """
+    Test PostgreSQL Hybrid Retrieval Playground.
+    Allows testing vector vs keyword weights, Top-K seed hits, and window sizes.
+    """
+    import time
+    from sqlalchemy import text
+    from app.services import embeddings
+    from app.db.session import get_session_factory
+
+    query_text = payload.query.strip()
+    if not query_text:
+        raise HTTPException(status_code=400, detail="Query text cannot be empty.")
+
+    start_time = time.monotonic()
+    query_embedding = embeddings.embed_text(query_text)
+    embedding_str = "[" + ",".join(str(v) for v in query_embedding) + "]"
+
+    factory = get_session_factory()
+    async with factory() as session:
+        vw = float(payload.vector_weight)
+        bw = float(payload.bm25_weight)
+        k = max(1, min(50, payload.k))
+        w_size = max(0, min(10, payload.window_size))
+
+        from app.services.region_router import classify_query_intent
+        intent = classify_query_intent(query_text)
+
+        # Determine region filter SQL clause
+        target_regions = intent["target_regions"]
+        if payload.region_filter and payload.region_filter.upper() != "AUTO":
+            if payload.region_filter.upper() == "ALL":
+                target_regions = None
+            else:
+                target_regions = [payload.region_filter.upper(), "GENERAL"]
+
+        region_clause = ""
+        params = {"q": query_text, "vw": vw, "bw": bw, "k": k}
+        if target_regions:
+            region_clause = "AND (d.region = ANY(:target_regions) OR d.region = 'GENERAL')"
+            params["target_regions"] = list(target_regions)
+
+        sql_seed = text(f"""
+            SELECT
+                dp.id AS page_id,
+                dp.content AS page_content,
+                dp.page_number AS page_number,
+                d.id AS document_id,
+                d.title AS title,
+                d.region AS region,
+                COALESCE(os.file_url, '') AS file_url,
+                (1 - (dp.embedding <=> '{embedding_str}'::vector(1536))) AS vector_similarity,
+                COALESCE(ts_rank_cd(dp.tsv_content, websearch_to_tsquery('english', :q)), 0) AS bm25_rank,
+                (:vw * (1 - (dp.embedding <=> '{embedding_str}'::vector(1536)))
+                 + :bw * COALESCE(ts_rank_cd(dp.tsv_content, websearch_to_tsquery('english', :q)), 0)) AS combined_score
+            FROM document_pages dp
+            JOIN documents d ON d.id = dp.document_id
+            LEFT JOIN object_storage os ON os.id = d.object_id
+            WHERE dp.embedding IS NOT NULL
+            {region_clause}
+            ORDER BY combined_score DESC
+            LIMIT :k
+        """)
+
+        res_seed = await session.execute(sql_seed, params)
+        seed_hits = []
+        for r in res_seed:
+            seed_hits.append({
+                "page_id": str(r.page_id),
+                "page_content": r.page_content or "",
+                "page_number": r.page_number,
+                "document_id": str(r.document_id),
+                "title": r.title,
+                "region": getattr(r, "region", "GENERAL") or "GENERAL",
+                "file_url": r.file_url,
+                "vector_similarity": round(float(r.vector_similarity or 0.0), 4),
+                "bm25_rank": round(float(r.bm25_rank or 0.0), 4),
+                "combined_score": round(float(r.combined_score or 0.0), 4),
+            })
+
+        final_results = []
+        if seed_hits:
+            conditions = []
+            for s in seed_hits:
+                p_start = max(1, s["page_number"] - 1)
+                p_end = s["page_number"] + w_size
+                conditions.append(f"(dp.document_id = '{s['document_id']}' AND dp.page_number BETWEEN {p_start} AND {p_end})")
+
+            where_clause = " OR ".join(conditions)
+            sql_window = text(f"""
+                SELECT
+                    dp.document_id,
+                    d.title,
+                    COALESCE(os.file_url, '') AS file_url,
+                    MIN(dp.page_number) AS page_start,
+                    MAX(dp.page_number) AS page_end,
+                    string_agg(dp.content, E'\n\n--- Page Break ---\n\n' ORDER BY dp.page_number) AS window_content
+                FROM document_pages dp
+                JOIN documents d ON d.id = dp.document_id
+                LEFT JOIN object_storage os ON os.id = d.object_id
+                WHERE {where_clause}
+                GROUP BY dp.document_id, d.title, os.file_url
+            """)
+            res_win = await session.execute(sql_window)
+            win_map = {str(r.document_id): (r.page_start, r.page_end, r.window_content) for r in res_win}
+
+            # Group seed hits by document_id to merge overlapping page ranges
+            doc_seeds_map = {}
+            for s in seed_hits:
+                d_id = s["document_id"]
+                if d_id not in doc_seeds_map:
+                    doc_seeds_map[d_id] = {
+                        "top_seed_hit": s,
+                        "seed_pages": [s["page_number"]],
+                    }
+                else:
+                    doc_seeds_map[d_id]["seed_pages"].append(s["page_number"])
+
+            for d_id, info in doc_seeds_map.items():
+                s = info["top_seed_hit"]
+                seed_pages = info["seed_pages"]
+                w_info = win_map.get(d_id)
+                p_start, p_end, w_content = w_info if w_info else (s["page_number"], s["page_number"], s["page_content"])
+                final_results.append({
+                    **s,
+                    "seed_pages": seed_pages,
+                    "page_number_start": p_start,
+                    "page_number_end": p_end,
+                    "window_content": w_content,
+                })
+
+    latency_ms = round((time.monotonic() - start_time) * 1000, 2)
+    return {
+        "query": query_text,
+        "latency_ms": latency_ms,
+        "k": k,
+        "window_size": w_size,
+        "vector_weight": vw,
+        "bm25_weight": bw,
+        "detected_region": intent["detected_region"],
+        "output_lang_name": intent["output_lang_name"],
+        "seed_hits_count": len(seed_hits),
+        "results": final_results,
+    }
 
 
 @app.post("/api/chat", response_model=ChatResponse, tags=["RAG Chatbot"])
@@ -957,5 +1596,114 @@ async def db_delete_row(table_name: str, payload: dict):
     if not deleted:
         raise HTTPException(status_code=404, detail="Row not found.")
     return {"deleted": deleted}
+
+
+@app.put("/api/db/tables/{table_name}", tags=["Database Browser"])
+async def db_update_row(table_name: str, payload: dict):
+    """
+    Update a single cell in a row identified by its primary key.
+
+    Body: ``{"pk": {"<primary_key_column>": "<value>", ...}, "column": "<column_name>", "value": "<new_value>"}``.
+    """
+    from app.services import database_inspector
+
+    valid = await database_inspector.list_tables()
+    names = {t["name"] for t in valid}
+    if table_name not in names:
+        raise HTTPException(status_code=404, detail=f"Table '{table_name}' not found.")
+
+    pk = (payload or {}).get("pk")
+    column = (payload or {}).get("column")
+    value = (payload or {}).get("value")
+
+    if not isinstance(pk, dict) or not pk:
+        raise HTTPException(status_code=400, detail="Body must include an object 'pk' with primary key values.")
+    if not column or not isinstance(column, str):
+        raise HTTPException(status_code=400, detail="Body must include a string 'column'.")
+
+    try:
+        updated = await database_inspector.update_cell(table_name, pk, column, value)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if not updated:
+        raise HTTPException(status_code=404, detail="Row not found or no changes made.")
+    return {"updated": updated}
+
+
+# ── Auth & RBAC Endpoints ───────────────────────────────────────────────────
+
+@app.get("/api/v1/auth/roles", tags=["Auth & RBAC"])
+@app.get("/api/auth/roles", tags=["Auth & RBAC"])
+async def get_roles_and_features():
+    """Return all system roles, registered features, and role-feature permissions."""
+    from sqlalchemy import select
+    from app.db.session import get_session_factory
+    from app.models.tables import Role, Feature, RoleFeature
+    from app.auth.seed import ROLES, FEATURES, ROLE_FEATURES, TEST_USERS
+
+    try:
+        factory = get_session_factory()
+        async with factory() as session:
+            roles_db = (await session.execute(select(Role))).scalars().all()
+            features_db = (await session.execute(select(Feature))).scalars().all()
+            rf_rows = (await session.execute(select(RoleFeature))).scalars().all()
+
+            if roles_db:
+                role_features_map = {}
+                for rf in rf_rows:
+                    role_features_map.setdefault(str(rf.role_id), []).append(rf.feature_id)
+
+                roles_list = []
+                for r in roles_db:
+                    f_ids = role_features_map.get(str(r.id), ROLE_FEATURES.get(r.name, []))
+                    test_u = next((u["email"] for u in TEST_USERS if r.name in u["roles"]), None)
+                    roles_list.append({
+                        "id": str(r.id),
+                        "name": r.name,
+                        "display_name": r.display_name,
+                        "description": r.description,
+                        "feature_ids": f_ids,
+                        "test_user": test_u,
+                    })
+
+                features_list = [
+                    {
+                        "id": f.id,
+                        "display_name": f.display_name,
+                        "description": f.description,
+                        "route_path": f.route_path,
+                        "is_external": f.is_external == "1",
+                        "sort_order": f.sort_order,
+                    }
+                    for f in features_db
+                ]
+                return {"roles": roles_list, "features": features_list}
+    except Exception as e:
+        logger.warning(f"Error fetching roles from DB: {e}")
+
+    roles_list = []
+    for r in ROLES:
+        roles_list.append({
+            "name": r["name"],
+            "display_name": r["display_name"],
+            "description": r["description"],
+            "feature_ids": ROLE_FEATURES.get(r["name"], []),
+            "test_user": next((u["email"] for u in TEST_USERS if r["name"] in u["roles"]), None),
+        })
+    return {"roles": roles_list, "features": FEATURES}
+
+
+@app.post("/api/v1/auth/seed", tags=["Auth & RBAC"])
+@app.post("/api/auth/seed", tags=["Auth & RBAC"])
+async def trigger_seed():
+    """Trigger database seed for roles, features, and test users."""
+    from app.auth.seed import seed
+    await seed()
+    return {"status": "success", "message": "Roles, features, and test users seeded successfully"}
+
+
+
+
 
 

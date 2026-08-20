@@ -137,15 +137,16 @@
 }
 
 @theme inline {
-  --font-sans: var(--font-league-spartan);
-  --font-serif: var(--font-libre-baskerville);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-inter);
+  --font-serif: var(--font-lora);
+  --font-display: var(--font-playfair);
+  --font-mono: var(--font-inter);
 }
 
 body {
   background: var(--bg-page);
   color: var(--text-primary);
-  font-family: var(--font-league-spartan), system-ui, sans-serif;
+  font-family: var(--font-inter), system-ui, sans-serif;
   min-height: 100vh;
   position: relative;
   overflow-x: hidden;
@@ -153,11 +154,20 @@ body {
 }
 
 .font-serif {
-  font-family: var(--font-libre-baskerville), Georgia, serif;
+  font-family: var(--font-lora), Georgia, serif;
 }
 
 .font-sans {
-  font-family: var(--font-league-spartan), sans-serif;
+  font-family: var(--font-inter), system-ui, sans-serif;
+}
+
+.font-display {
+  font-family: var(--font-playfair), Georgia, serif;
+}
+
+.font-mono {
+  font-family: var(--font-inter), monospace;
+  font-variant-numeric: tabular-nums;
 }
 
 [data-theme="light"] body {

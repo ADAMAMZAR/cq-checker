@@ -1,50 +1,109 @@
 "use client";
 
-import { useState, useCallback, useId } from "react";
+import { useState, useEffect, useCallback, useId } from "react";
 import {
   IconSearch, IconChevronLeft, IconEdit, IconFiles, IconLoader2,
   IconArrowUpRight, IconDownload, IconCircleCheck, IconAlertTriangle
 } from "@tabler/icons-react";
-import type { DocumentEvidence } from "@/types";
+import type { AuditRegistryEntry, DocumentEvidence, DocumentEvidenceSummary } from "@/types";
 import { INITIAL_FORM_FIELDS } from "@/types";
-import { updateEvidenceMetadata, buildFileUrl } from "@/lib/api";
+import { fetchAuditRegistry, fetchEvidenceSummary, fetchEvidenceDocument, updateEvidenceMetadata, buildFileUrl } from "@/lib/api";
 import { cleanQuestionLabel, parseEvidenceMetadata, compareQuestionLabels } from "@/lib/utils";
 
-interface SupplierDataEditorProps {
-  evidenceLogs: DocumentEvidence[];
-  isEvidenceLoading: boolean;
-  onRefreshEvidence: () => void;
-  onRefreshLogs: () => void;
+interface SupplierItem {
+  supplier_id: number;
+  supplier_name: string;
 }
 
-export default function SupplierDataEditor({ evidenceLogs, isEvidenceLoading, onRefreshEvidence, onRefreshLogs }: SupplierDataEditorProps) {
-  const [selectedSupplierName, setSelectedSupplierName] = useState<string>("");
+interface SupplierDataEditorProps {
+  onRefreshLogs?: () => void;
+}
+
+export default function SupplierDataEditor({ onRefreshLogs }: SupplierDataEditorProps) {
+  const [registryLogs, setRegistryLogs] = useState<AuditRegistryEntry[]>([]);
+  const [isRegistryLoading, setIsRegistryLoading] = useState(true);
+
+  const [selectedSupplier, setSelectedSupplier] = useState<SupplierItem | null>(null);
   const [supplierSearchQuery, setSupplierSearchQuery] = useState("");
+
+  const [evidenceSummaries, setEvidenceSummaries] = useState<DocumentEvidenceSummary[]>([]);
+  const [isSummariesLoading, setIsSummariesLoading] = useState(false);
+
   const [selectedEvidence, setSelectedEvidence] = useState<DocumentEvidence | null>(null);
+  const [isDocLoading, setIsDocLoading] = useState(false);
+
   const [formFields, setFormFields] = useState<Record<string, string>>({ ...INITIAL_FORM_FIELDS });
   const [initialFields, setInitialFields] = useState<Record<string, string>>({ ...INITIAL_FORM_FIELDS });
   const [isSavingForm, setIsSavingForm] = useState(false);
   const [formSuccessMessage, setFormSuccessMessage] = useState<string | null>(null);
   const [formErrorMessage, setFormErrorMessage] = useState<string | null>(null);
 
-  const uniqueSuppliers = Array.from(new Set(evidenceLogs.map(e => e.supplier_name)));
-  const filteredSuppliers = uniqueSuppliers.filter(name =>
-    name.toLowerCase().includes(supplierSearchQuery.toLowerCase())
-  );
-  const supplierFiles = selectedSupplierName
-    ? evidenceLogs
-        .filter(e => e.supplier_name === selectedSupplierName)
-        .sort((a, b) => compareQuestionLabels(a.ariba_question_label, b.ariba_question_label))
-    : [];
+  // 1. Initial Load: Fetch list of suppliers via audit-registry summary list
+  const loadRegistry = useCallback(async () => {
+    setIsRegistryLoading(true);
+    try {
+      const data = await fetchAuditRegistry();
+      setRegistryLogs(data);
+    } catch (err: any) {
+      console.error("Failed to load audit registry for editor:", err);
+    } finally {
+      setIsRegistryLoading(false);
+    }
+  }, []);
 
-  const handleSelectEvidence = useCallback((ev: DocumentEvidence) => {
-    setSelectedEvidence(ev);
+  useEffect(() => {
+    loadRegistry();
+  }, [loadRegistry]);
+
+  // Unique list of suppliers (supplier_id + supplier_name) derived from audit registry summary
+  const uniqueSuppliers: SupplierItem[] = Array.from(
+    new Map(
+      registryLogs.map(log => [
+        log.supplier_id,
+        { supplier_id: log.supplier_id, supplier_name: log.supplier_name }
+      ])
+    ).values()
+  );
+
+  const filteredSuppliers = uniqueSuppliers.filter(s =>
+    s.supplier_name.toLowerCase().includes(supplierSearchQuery.toLowerCase())
+  );
+
+  // 2. Click Supplier: Fetch lightweight certificate evidence summaries using supplier_id
+  const handleSelectSupplier = async (supplier: SupplierItem) => {
+    setSelectedSupplier(supplier);
+    setSelectedEvidence(null);
+    setEvidenceSummaries([]);
+    setIsSummariesLoading(true);
+    try {
+      const summaries = await fetchEvidenceSummary({ supplierId: supplier.supplier_id });
+      summaries.sort((a, b) => compareQuestionLabels(a.ariba_question_label, b.ariba_question_label));
+      setEvidenceSummaries(summaries);
+    } catch (err: any) {
+      console.error("Failed to load supplier evidence summary:", err);
+    } finally {
+      setIsSummariesLoading(false);
+    }
+  };
+
+  // 3. Click Certificate: Fetch entire document evidence data using document ID
+  const handleSelectCertificateSummary = async (summary: DocumentEvidenceSummary) => {
+    setIsDocLoading(true);
     setFormSuccessMessage(null);
     setFormErrorMessage(null);
-    const fields = parseEvidenceMetadata(ev);
-    setFormFields(fields);
-    setInitialFields(fields);
-  }, []);
+    try {
+      const fullDoc = await fetchEvidenceDocument(summary.id);
+      setSelectedEvidence(fullDoc);
+      const fields = parseEvidenceMetadata(fullDoc);
+      setFormFields(fields);
+      setInitialFields(fields);
+    } catch (err: any) {
+      console.error("Failed to load full document evidence:", err);
+      setFormErrorMessage(err.message || "Failed to load document details.");
+    } finally {
+      setIsDocLoading(false);
+    }
+  };
 
   const isFormDirty = Object.keys(formFields).some(key => formFields[key] !== initialFields[key]);
 
@@ -62,19 +121,31 @@ export default function SupplierDataEditor({ evidenceLogs, isEvidenceLoading, on
       );
       setFormSuccessMessage("Successfully saved changes! Comparison table recalculated.");
       setInitialFields({ ...formFields });
-      await onRefreshEvidence();
-      await onRefreshLogs();
-      setSelectedEvidence(prev => prev ? {
-        ...prev,
-        gemini_extracted_supplier_name: formFields.certificateOwnerName,
-        gemini_extracted_metadata: JSON.stringify(formFields)
-      } : null);
+
+      if (onRefreshLogs) {
+        onRefreshLogs();
+      }
+
+      // Refetch updated document details using document ID
+      if (selectedEvidence.id) {
+        const updatedDoc = await fetchEvidenceDocument(selectedEvidence.id);
+        setSelectedEvidence(updatedDoc);
+      }
     } catch (err: unknown) {
       setFormErrorMessage(err instanceof Error ? err.message : "An unexpected error occurred while saving.");
     } finally {
       setIsSavingForm(false);
     }
   };
+
+  if (isDocLoading) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center text-center p-12 gap-3">
+        <IconLoader2 className="h-8 w-8 animate-spin text-[var(--accent-primary-text)]" />
+        <span className="text-sm font-medium text-[var(--text-secondary)]">Loading certificate document details...</span>
+      </div>
+    );
+  }
 
   if (selectedEvidence) {
     return (
@@ -87,7 +158,7 @@ export default function SupplierDataEditor({ evidenceLogs, isEvidenceLoading, on
             Change Certificate
           </button>
           <div className="flex items-center gap-1.5 text-xs min-w-0">
-            <span className="text-[var(--match-text)] font-semibold shrink-0">{selectedSupplierName}</span>
+            <span className="text-[var(--match-text)] font-semibold shrink-0">{selectedSupplier?.supplier_name || selectedEvidence.supplier_name}</span>
             <span className="text-[var(--text-muted)]">/</span>
             <span className="text-[var(--text-primary)] font-medium truncate">{selectedEvidence.filename}</span>
           </div>
@@ -146,21 +217,21 @@ export default function SupplierDataEditor({ evidenceLogs, isEvidenceLoading, on
     <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch min-h-0 lg:min-h-[600px]">
       <section className="lg:col-span-4 flex flex-col min-h-0 lg:min-h-[600px] double-bezel">
         <div className="double-bezel-inner flex-1 flex flex-col h-full">
-          {!selectedSupplierName ? (
+          {!selectedSupplier ? (
             <SupplierPicker
               searchQuery={supplierSearchQuery}
               onSearchChange={setSupplierSearchQuery}
-              isLoading={isEvidenceLoading}
+              isLoading={isRegistryLoading}
               suppliers={filteredSuppliers}
-              onSelect={(name) => { setSelectedSupplierName(name); setSelectedEvidence(null); }}
+              onSelect={handleSelectSupplier}
             />
           ) : (
             <SupplierFileList
-              supplierName={selectedSupplierName}
-              files={supplierFiles}
-              selectedEvidence={selectedEvidence}
-              onSelectFile={handleSelectEvidence}
-              onBack={() => { setSelectedSupplierName(""); setSupplierSearchQuery(""); setSelectedEvidence(null); }}
+              supplier={selectedSupplier}
+              summaries={evidenceSummaries}
+              isLoading={isSummariesLoading}
+              onSelectFile={handleSelectCertificateSummary}
+              onBack={() => { setSelectedSupplier(null); setSupplierSearchQuery(""); setEvidenceSummaries([]); }}
             />
           )}
         </div>
@@ -168,9 +239,11 @@ export default function SupplierDataEditor({ evidenceLogs, isEvidenceLoading, on
 
       <section className="lg:col-span-8 flex flex-col double-bezel">
         <div className="double-bezel-inner flex-1 flex flex-col h-full items-center justify-center text-center p-8">
-          {isEvidenceLoading ? (
+          {isSummariesLoading ? (
             <div className="w-full space-y-4 animate-pulse">
-              <div className="h-14 w-14 rounded-full bg-[var(--bg-surface-hover)] mx-auto" />
+              <div className="h-14 w-14 rounded-full bg-[var(--bg-surface-hover)] mx-auto flex items-center justify-center">
+                <IconLoader2 className="h-6 w-6 animate-spin text-[var(--accent-primary-text)]" />
+              </div>
               <div className="h-4 w-36 bg-[var(--bg-surface-hover)] rounded mx-auto" />
               <div className="h-3 w-56 bg-[var(--bg-surface-hover)] rounded mx-auto" />
             </div>
@@ -197,8 +270,8 @@ function SupplierPicker({ searchQuery, onSearchChange, isLoading, suppliers, onS
   searchQuery: string;
   onSearchChange: (v: string) => void;
   isLoading: boolean;
-  suppliers: string[];
-  onSelect: (name: string) => void;
+  suppliers: SupplierItem[];
+  onSelect: (supplier: SupplierItem) => void;
 }) {
   return (
     <>
@@ -221,11 +294,11 @@ function SupplierPicker({ searchQuery, onSearchChange, isLoading, suppliers, onS
         ) : suppliers.length === 0 ? (
           <div className="text-center py-12 text-[var(--text-tertiary)]"><p className="text-sm">No suppliers found.</p></div>
         ) : (
-          suppliers.map(name => (
-            <button key={name} type="button" onClick={() => onSelect(name)}
-              className="w-full text-left p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] hover:border-[var(--accent-success)] hover:bg-[var(--accent-success-soft)] transition-all duration-300 cursor-pointer"
+          suppliers.map(sup => (
+            <button key={sup.supplier_id} type="button" onClick={() => onSelect(sup)}
+              className="w-full text-left p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] hover:border-[var(--accent-success)] hover:bg-[var(--accent-success-soft)] transition-all duration-300 cursor-pointer flex justify-between items-center"
             >
-              <h4 className="font-semibold text-sm text-[var(--heading-color)]">{name}</h4>
+              <h4 className="font-semibold text-sm text-[var(--heading-color)]">{sup.supplier_name}</h4>
             </button>
           ))
         )}
@@ -234,11 +307,11 @@ function SupplierPicker({ searchQuery, onSearchChange, isLoading, suppliers, onS
   );
 }
 
-function SupplierFileList({ supplierName, files, selectedEvidence, onSelectFile, onBack }: {
-  supplierName: string;
-  files: DocumentEvidence[];
-  selectedEvidence: DocumentEvidence | null;
-  onSelectFile: (ev: DocumentEvidence) => void;
+function SupplierFileList({ supplier, summaries, isLoading, onSelectFile, onBack }: {
+  supplier: SupplierItem;
+  summaries: DocumentEvidenceSummary[];
+  isLoading: boolean;
+  onSelectFile: (summary: DocumentEvidenceSummary) => void;
   onBack: () => void;
 }) {
   return (
@@ -252,31 +325,32 @@ function SupplierFileList({ supplierName, files, selectedEvidence, onSelectFile,
         </button>
       </div>
       <div className="flex-1 flex flex-col">
-        <h3 className="text-sm font-bold text-[var(--heading-color)] mb-1 truncate">Supplier: <span className="text-[var(--match-text)]">{supplierName}</span></h3>
+        <h3 className="text-sm font-bold text-[var(--heading-color)] mb-1 truncate">Supplier: <span className="text-[var(--match-text)]">{supplier.supplier_name}</span></h3>
         <h4 className="text-[10px] font-bold text-[var(--text-tertiary)] uppercase tracking-wider mb-4 mt-2 flex items-center gap-1.5">
           <IconFiles className="h-4 w-4 text-[var(--match-text)]" />
-          Available Certificates ({files.length})
+          Available Certificates ({summaries.length})
         </h4>
         <div className="flex-1 overflow-y-auto space-y-3 max-h-none lg:max-h-[420px] pr-2">
-          {files.length === 0 ? (
+          {isLoading ? (
+            Array.from({ length: 3 }).map((_, idx) => (
+              <div key={idx} className="p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] animate-pulse space-y-2">
+                <div className="h-3.5 w-3/4 bg-[var(--bg-surface-hover)] rounded" />
+                <div className="h-2.5 w-1/2 bg-[var(--bg-surface-hover)] rounded" />
+              </div>
+            ))
+          ) : summaries.length === 0 ? (
             <p className="text-xs text-[var(--text-tertiary)] italic">No certificates recorded for this supplier.</p>
           ) : (
-            files.map(ev => {
-              const isSelected = selectedEvidence?.audit_id === ev.audit_id && selectedEvidence?.filename === ev.filename;
-              return (
-                <button key={`${ev.audit_id}-${ev.filename}-${ev.ariba_question_label}`} type="button" onClick={() => onSelectFile(ev)}
-                  className={`w-full text-left p-4 rounded-xl border transition-all duration-300 cursor-pointer ${isSelected
-                    ? "bg-[var(--bg-surface-hover)] border-[var(--match-border)] glow-success"
-                    : "bg-[var(--bg-surface)] border-[var(--border-visible)] hover:border-[var(--accent-success)] hover:bg-[var(--accent-success-soft)]"
-                  }`}
-                >
-                  <div className="flex justify-between items-start mb-1.5">
-                    <p className="text-xs font-semibold text-[var(--heading-color)] truncate pr-2">{ev.filename}</p>
-                  </div>
-                  <div className="text-[10px] text-[var(--text-tertiary)] font-medium truncate">{cleanQuestionLabel(ev.ariba_question_label)}</div>
-                </button>
-              );
-            })
+            summaries.map(s => (
+              <button key={s.id} type="button" onClick={() => onSelectFile(s)}
+                className="w-full text-left p-4 rounded-xl border border-[var(--border-visible)] bg-[var(--bg-surface)] hover:border-[var(--accent-success)] hover:bg-[var(--accent-success-soft)] transition-all duration-300 cursor-pointer"
+              >
+                <div className="flex justify-between items-start mb-1.5">
+                  <p className="text-xs font-semibold text-[var(--heading-color)] truncate pr-2">{s.filename}</p>
+                </div>
+                <div className="text-[10px] text-[var(--text-tertiary)] font-medium truncate">{cleanQuestionLabel(s.ariba_question_label)}</div>
+              </button>
+            ))
           )}
         </div>
       </div>

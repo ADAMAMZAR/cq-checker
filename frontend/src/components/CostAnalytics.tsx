@@ -123,11 +123,10 @@ export default function CostAnalytics() {
         <button
           type="button"
           onClick={() => setActiveTab("cq")}
-          className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-            activeTab === "cq"
+          className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold transition-all cursor-pointer ${activeTab === "cq"
               ? "bg-[var(--accent-primary-soft)] text-[var(--heading-color)] border border-[var(--accent-primary-border)] shadow-xs"
               : "text-[var(--text-secondary)] hover:text-[var(--heading-color)] hover:bg-[var(--bg-surface)] border border-transparent"
-          }`}
+            }`}
         >
           <IconFileCheck className="w-4 h-4 text-[var(--accent-primary-text)]" />
           <span>CQ Checker (Audits)</span>
@@ -139,11 +138,10 @@ export default function CostAnalytics() {
         <button
           type="button"
           onClick={() => setActiveTab("chatbot")}
-          className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-            activeTab === "chatbot"
+          className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold transition-all cursor-pointer ${activeTab === "chatbot"
               ? "bg-[var(--accent-primary-soft)] text-[var(--heading-color)] border border-[var(--accent-primary-border)] shadow-xs"
               : "text-[var(--text-secondary)] hover:text-[var(--heading-color)] hover:bg-[var(--bg-surface)] border border-transparent"
-          }`}
+            }`}
         >
           <IconRobot className="w-4 h-4 text-[var(--accent-primary-text)]" />
           <span>Chatbot RAG</span>
@@ -155,11 +153,10 @@ export default function CostAnalytics() {
         <button
           type="button"
           onClick={() => setActiveTab("ingestion")}
-          className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-            activeTab === "ingestion"
+          className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold transition-all cursor-pointer ${activeTab === "ingestion"
               ? "bg-[var(--accent-primary-soft)] text-[var(--heading-color)] border border-[var(--accent-primary-border)] shadow-xs"
               : "text-[var(--text-secondary)] hover:text-[var(--heading-color)] hover:bg-[var(--bg-surface)] border border-transparent"
-          }`}
+            }`}
         >
           <IconFileUpload className="w-4 h-4 text-[var(--accent-primary-text)]" />
           <span>Document Ingestion</span>
@@ -324,11 +321,11 @@ export default function CostAnalytics() {
                             <td className="py-3 px-4 text-center">
                               {log.cache_hit ? (
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-[var(--accent-success-soft)] text-[var(--accent-success-text)] border border-[var(--accent-success-border)]">
-                                  <IconCircleCheck className="w-3 h-3" /> Cache Hit
+                                  Cache Hit
                                 </span>
                               ) : (
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-[var(--accent-primary-soft)] text-[var(--accent-primary-text)] border border-[var(--accent-primary-border)]">
-                                  <IconSparkles className="w-3 h-3" /> Gemini LLM
+                                  AI response
                                 </span>
                               )}
                             </td>

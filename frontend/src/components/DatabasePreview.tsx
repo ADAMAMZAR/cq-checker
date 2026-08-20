@@ -12,9 +12,21 @@ import {
   IconX,
   IconTrash,
   IconEraser,
+  IconEdit,
+  IconCheck,
+  IconFolder,
 } from "@tabler/icons-react";
-import type { DbTableMeta, DbTableData } from "@/types";
-import { fetchDbTables, fetchDbTable, deleteDbRow, clearChatCache } from "@/lib/api";
+import type { DbTableMeta, DbTableData, DocumentFolder } from "@/types";
+import {
+  fetchDbTables,
+  fetchDbTable,
+  updateDbCell,
+  deleteDbRow,
+  fetchFolders,
+  moveDocumentFolder,
+  updateDocumentRegion,
+  clearChatCache,
+} from "@/lib/api";
 
 const PAGE_SIZE = 100;
 
@@ -46,7 +58,7 @@ function CellModal({ column, rowNumber, value, onClose }: {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-8 bg-black/60 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-8 bg-black/60"
       onClick={onClose}
     >
       <div
@@ -90,6 +102,79 @@ export default function DatabasePreview() {
   const [expandedCell, setExpandedCell] = useState<{ column: string; rowNumber: number; value: string } | null>(null);
   const [deletingRow, setDeletingRow] = useState<number | null>(null);
   const [clearingCache, setClearingCache] = useState(false);
+
+  const [editingCell, setEditingCell] = useState<{ rIdx: number; colName: string } | null>(null);
+  const [editingValue, setEditingValue] = useState("");
+  const [updatingCell, setUpdatingCell] = useState(false);
+  const [folders, setFolders] = useState<DocumentFolder[]>([]);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [confirmDeleteState, setConfirmDeleteState] = useState<{ rIdx: number; pk: Record<string, string>; tableName: string } | null>(null);
+
+  const loadFolders = useCallback(async () => {
+    try {
+      const res = await fetchFolders();
+      setFolders(res);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    loadFolders();
+  }, [loadFolders]);
+
+  const handleFolderChange = async (docId: string, newFolderId: string) => {
+    try {
+      setUpdatingCell(true);
+      await moveDocumentFolder(docId, newFolderId || null);
+      loadFolders();
+      handleRefresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update document folder.");
+    } finally {
+      setUpdatingCell(false);
+    }
+  };
+
+  const handleRegionChange = async (docId: string, newRegion: string) => {
+    setUpdatingCell(true);
+    setError(null);
+    try {
+      await updateDocumentRegion(docId, newRegion);
+      handleRefresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update document region.");
+    } finally {
+      setUpdatingCell(false);
+    }
+  };
+
+  const handleSaveCell = async (rIdx: number, colName: string, newValue: string) => {
+    if (!data) return;
+    const pks = data.primary_keys ?? [];
+    if (pks.length === 0) {
+      setError("This table has no primary key — cannot update cell.");
+      return;
+    }
+    const row = data.rows[rIdx];
+    const pk: Record<string, string> = {};
+    pks.forEach((col) => {
+      const idx = data.columns.indexOf(col);
+      pk[col] = row[idx] ?? "";
+    });
+
+    setUpdatingCell(true);
+    setError(null);
+    try {
+      await updateDbCell(data.table, pk, colName, newValue);
+      await loadTableData(data.table, page * PAGE_SIZE);
+      setEditingCell(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update cell.");
+    } finally {
+      setUpdatingCell(false);
+    }
+  };
 
   const fetched = useRef(false);
 
@@ -146,7 +231,8 @@ export default function DatabasePreview() {
       const cleared = await clearChatCache();
       setError(null);
       setClearingCache(false);
-      window.alert(`Cleared ${cleared} cached query entr${cleared === 1 ? "y" : "ies"}.`);
+      setToastMsg(`Cleared ${cleared} cached query entr${cleared === 1 ? "y" : "ies"}.`);
+      setTimeout(() => setToastMsg(null), 4000);
       handleRefresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to clear cache.");
@@ -154,7 +240,7 @@ export default function DatabasePreview() {
     }
   };
 
-  const handleDeleteRow = async (rIdx: number) => {
+  const handlePromptDeleteRow = (rIdx: number) => {
     if (!data) return;
     const pks = data.primary_keys ?? [];
     if (pks.length === 0) {
@@ -167,13 +253,18 @@ export default function DatabasePreview() {
       const idx = data.columns.indexOf(col);
       pk[col] = row[idx] ?? "";
     });
-    const confirmText = `Delete this row from "${data.table}"?\n\n${pks.map((c) => `${c}: ${pk[c]}`).join("\n")}`;
-    if (!window.confirm(confirmText)) return;
+    setConfirmDeleteState({ rIdx, pk, tableName: data.table });
+  };
+
+  const handleExecuteDeleteRow = async () => {
+    if (!confirmDeleteState) return;
+    const { rIdx, pk, tableName } = confirmDeleteState;
     setDeletingRow(rIdx);
     setError(null);
     try {
-      await deleteDbRow(data.table, pk);
-      loadTableData(data.table, page * PAGE_SIZE);
+      await deleteDbRow(tableName, pk);
+      setConfirmDeleteState(null);
+      loadTableData(tableName, page * PAGE_SIZE);
       loadTables();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete row.");
@@ -241,9 +332,9 @@ export default function DatabasePreview() {
         </div>
       )}
 
-      <div className="flex flex-1 gap-6 min-h-[520px]">
+      <div className="flex flex-1 gap-6 min-h-[520px] items-start">
         {/* Left: table list */}
-        <aside className="w-64 shrink-0 flex flex-col rounded-xl border border-[var(--border-visible)] bg-[var(--bg-card)] overflow-hidden">
+        <aside className="w-64 shrink-0 flex flex-col rounded-xl border border-[var(--border-visible)] bg-[var(--bg-card)] overflow-hidden sticky top-4 self-start max-h-[calc(100vh-140px)] shadow-lg">
           <div className="p-3 border-b border-[var(--border-subtle)]">
             <div className="relative">
               <IconSearch className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--text-tertiary)]" />
@@ -396,34 +487,149 @@ export default function DatabasePreview() {
                             {data.offset + rIdx + 1}
                           </td>
                           {row.map((cell, cIdx) => {
-                            const colName = data.columns[cIdx]?.toLowerCase() ?? "";
-                            const isLongText = colName.includes("content") || colName.includes("text") || colName.includes("snippet") || colName.includes("answer") || colName.includes("response");
+                            const realColName = data.columns[cIdx];
+                            const normCol = (realColName ?? "").toLowerCase();
+                            const isTitleCol = normCol === "title";
+                            const isLongText = normCol.includes("content") || normCol.includes("text") || normCol.includes("snippet") || normCol.includes("answer") || normCol.includes("response");
+                            const isNonEditable = (data.primary_keys ?? []).includes(realColName) || ["created_at", "embedding", "tsv_content"].includes(normCol);
+                            const isEditableCol = !isNonEditable;
+                            const isEditingThisCell = editingCell?.rIdx === rIdx && editingCell?.colName === realColName;
+
+                            if (selectedTable === "documents" && (normCol === "folder_id" || normCol === "folder" || normCol === "folder_name")) {
+                              const idColIdx = data.columns.findIndex((c) => c.toLowerCase() === "id");
+                              const docId = idColIdx !== -1 ? row[idColIdx] : null;
+                              const generalFolder = folders.find((f) => f.name.toLowerCase() === "general");
+                              const hasGeneralInDb = !!generalFolder;
+                              const currentFolderId = normCol === "folder_id" ? cell : (folders.find((f) => f.name === cell)?.id || (generalFolder ? generalFolder.id : ""));
+
+                              return (
+                                <td key={cIdx} className="py-1.5 px-2 align-middle border-b border-[var(--border-subtle)]">
+                                  <select
+                                    value={currentFolderId || ""}
+                                    disabled={updatingCell || !docId}
+                                    onChange={(e) => {
+                                      if (docId) handleFolderChange(docId, e.target.value);
+                                    }}
+                                    className="px-2.5 py-1 rounded-lg bg-[var(--bg-input)] border border-[var(--border-subtle)] hover:border-[var(--accent-primary-border)] text-xs font-semibold text-[var(--heading-color)] outline-none cursor-pointer focus:border-[var(--accent-primary-border)] transition-all disabled:opacity-50"
+                                  >
+                                    {!hasGeneralInDb && <option value="">📁 General</option>}
+                                    {folders.map((f) => (
+                                      <option key={f.id} value={f.id}>
+                                        📁 {f.name} ({f.document_count})
+                                      </option>
+                                    ))}
+                                  </select>
+                                </td>
+                              );
+                            }
+
+                            if (selectedTable === "documents" && normCol === "region") {
+                              const idColIdx = data.columns.findIndex((c) => c.toLowerCase() === "id");
+                              const docId = idColIdx !== -1 ? row[idColIdx] : null;
+                              const currentRegion = (cell || "GENERAL").toUpperCase();
+
+                              return (
+                                <td key={cIdx} className="py-1.5 px-2 align-middle border-b border-[var(--border-subtle)]">
+                                  <select
+                                    value={currentRegion}
+                                    disabled={updatingCell || !docId}
+                                    onChange={(e) => {
+                                      if (docId) handleRegionChange(docId, e.target.value);
+                                    }}
+                                    className="px-2.5 py-1 rounded-lg bg-[var(--bg-input)] border border-[var(--border-subtle)] hover:border-[var(--accent-primary-border)] text-xs font-semibold text-[var(--heading-color)] outline-none cursor-pointer focus:border-[var(--accent-primary-border)] transition-all disabled:opacity-50"
+                                  >
+                                    <option value="GENERAL">🌐 GENERAL</option>
+                                    <option value="VN">🇻🇳 VN (Vietnam)</option>
+                                    <option value="TW">🇹🇼 TW (Taiwan)</option>
+                                    <option value="MY">🇲🇾 MY (Malaysia)</option>
+                                    <option value="AU">🇦🇺 AU (Australia)</option>
+                                  </select>
+                                </td>
+                              );
+                            }
+
+                            if (isEditingThisCell) {
+                              return (
+                                <td key={cIdx} className="py-1 px-2 align-middle border-b border-[var(--border-subtle)]">
+                                  <div className="flex items-center gap-1.5 min-w-[220px]">
+                                    <input
+                                      type="text"
+                                      autoFocus
+                                      value={editingValue}
+                                      onChange={(e) => setEditingValue(e.target.value)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Enter") handleSaveCell(rIdx, realColName, editingValue);
+                                        if (e.key === "Escape") setEditingCell(null);
+                                      }}
+                                      className="flex-1 px-2.5 py-1 rounded bg-[var(--bg-input)] border border-[var(--accent-primary-border-focus)] text-xs font-medium text-[var(--heading-color)] focus:outline-none shadow-xs"
+                                    />
+                                    <button
+                                      onClick={() => handleSaveCell(rIdx, realColName, editingValue)}
+                                      disabled={updatingCell}
+                                      className="p-1 rounded bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 transition-colors cursor-pointer disabled:opacity-50"
+                                      title="Save (Enter)"
+                                    >
+                                      {updatingCell ? <IconLoader2 className="w-3.5 h-3.5 animate-spin" /> : <IconCheck className="w-3.5 h-3.5" />}
+                                    </button>
+                                    <button
+                                      onClick={() => handlePromptDeleteRow(rIdx)}
+                                      disabled={deletingRow === rIdx}
+                                      className="p-1.5 rounded text-[var(--text-tertiary)] hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer disabled:opacity-50"
+                                      title="Delete row"
+                                    >
+                                      <IconX className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </td>
+                              );
+                            }
+
                             return (
                               <td
                                 key={cIdx}
-                                onDoubleClick={() =>
-                                  setExpandedCell({
-                                    column: data.columns[cIdx],
-                                    rowNumber: data.offset + rIdx + 1,
-                                    value: cell ?? "",
-                                  })
-                                }
-                                title="Double-click to enlarged view"
-                                className={`py-2 px-3 align-top cursor-zoom-in ${
+                                onDoubleClick={() => {
+                                  if (isEditableCol) {
+                                    setEditingCell({ rIdx, colName: realColName });
+                                    setEditingValue(cell ?? "");
+                                  } else {
+                                    setExpandedCell({
+                                      column: realColName,
+                                      rowNumber: data.offset + rIdx + 1,
+                                      value: cell ?? "",
+                                    });
+                                  }
+                                }}
+                                title={isEditableCol ? `Double-click or click edit icon to update ${realColName}` : "Double-click for enlarged view"}
+                                className={`py-2 px-3 align-top group/cell ${
                                   isLongText
                                     ? "whitespace-pre-wrap break-words max-w-[500px] leading-relaxed text-xs"
                                     : "whitespace-nowrap max-w-[260px] truncate text-xs"
                                 }`}
                               >
-                                <span>
-                                  {cell === "" ? <span className="text-[var(--text-tertiary)]">NULL</span> : cell}
-                                </span>
+                                <div className="flex items-center justify-between gap-1.5">
+                                  <span className={isTitleCol ? "font-semibold text-[var(--heading-color)]" : ""}>
+                                    {cell === "" ? <span className="text-[var(--text-tertiary)]">NULL</span> : cell}
+                                  </span>
+                                  {isEditableCol && (
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setEditingCell({ rIdx, colName: realColName });
+                                        setEditingValue(cell ?? "");
+                                      }}
+                                      className="opacity-0 group-hover/cell:opacity-100 transition-opacity p-1 text-[var(--text-tertiary)] hover:text-[var(--accent-primary-text)] hover:bg-[var(--accent-primary-soft)] rounded cursor-pointer"
+                                      title={`Edit ${realColName}`}
+                                    >
+                                      <IconEdit className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                </div>
                               </td>
                             );
                           })}
                           <td className="py-1.5 px-3 text-center whitespace-nowrap">
                             <button
-                              onClick={() => handleDeleteRow(rIdx)}
+                              onClick={() => handlePromptDeleteRow(rIdx)}
                               disabled={deletingRow === rIdx}
                               title="Delete this row"
                               className="inline-flex items-center justify-center p-1.5 rounded-lg border border-transparent text-[var(--text-tertiary)] hover:text-red-400 hover:border-red-500/30 hover:bg-red-500/10 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
@@ -457,6 +663,69 @@ export default function DatabasePreview() {
           value={expandedCell.value}
           onClose={() => setExpandedCell(null)}
         />
+      )}
+
+      {toastMsg && (
+        <div className="fixed bottom-6 right-6 z-50 p-3.5 rounded-xl bg-emerald-950/90 border border-emerald-500/30 text-xs text-emerald-300 font-semibold shadow-2xl flex items-center gap-3 animate-fade-in">
+          <span>✨ {toastMsg}</span>
+          <button onClick={() => setToastMsg(null)} className="p-1 hover:text-white transition-colors cursor-pointer">
+            <IconX className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {confirmDeleteState && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60"
+          onClick={() => setConfirmDeleteState(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl border border-rose-500/30 bg-[var(--bg-card)] p-5 shadow-2xl space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
+              <div className="flex items-center gap-2 text-rose-400">
+                <IconTrash className="w-4 h-4" />
+                <h3 className="font-sans text-sm font-bold text-[var(--heading-color)]">Confirm Row Deletion</h3>
+              </div>
+              <button
+                onClick={() => setConfirmDeleteState(null)}
+                className="p-1 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--heading-color)]"
+              >
+                <IconX className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-[var(--text-secondary)]">
+              Are you sure you want to delete this row from <span className="font-bold text-[var(--heading-color)]">{confirmDeleteState.tableName}</span>?
+            </p>
+
+            <div className="p-3 rounded-xl bg-[var(--bg-input)] border border-[var(--border-subtle)] font-mono text-[11px] space-y-1 text-[var(--text-primary)]">
+              {Object.entries(confirmDeleteState.pk).map(([k, v]) => (
+                <div key={k} className="flex justify-between gap-2">
+                  <span className="text-[var(--text-tertiary)]">{k}:</span>
+                  <span className="font-semibold text-amber-400 truncate">{v}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                onClick={() => setConfirmDeleteState(null)}
+                className="px-3.5 py-1.5 rounded-xl border border-[var(--border-subtle)] text-xs font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-surface-hover)] cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleExecuteDeleteRow}
+                disabled={deletingRow !== null}
+                className="px-4 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-xs font-bold text-white shadow-md transition-all cursor-pointer disabled:opacity-50"
+              >
+                {deletingRow !== null ? "Deleting..." : "Delete Row"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

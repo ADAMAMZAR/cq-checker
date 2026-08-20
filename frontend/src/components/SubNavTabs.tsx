@@ -1,8 +1,8 @@
 "use client";
 
-import { IconHome, IconFiles, IconEdit, IconSearch, IconRobot, IconCertificate } from "@tabler/icons-react";
+import { IconHome, IconFiles, IconEdit, IconSearch, IconRobot, IconCertificate, IconSparkles } from "@tabler/icons-react";
 
-export type MainTab = "home" | "registry" | "editor" | "audit" | "assistant" | "chat" | "verify";
+export type MainTab = "home" | "registry" | "editor" | "audit" | "assistant" | "chat" | "verify" | "retrieval";
 
 interface SubNavTabsProps {
   active: MainTab;

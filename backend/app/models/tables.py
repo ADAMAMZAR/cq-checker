@@ -53,18 +53,31 @@ _new_uuid = uuid7
 
 # ── Document Ingestion & RAG ────────────────────────────────────────────────
 
+class DocumentFolder(Base):
+    __tablename__ = "document_folders"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
+    name = Column(String(255), nullable=False, unique=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    documents = relationship("Document", back_populates="folder")
+
+
 class Document(Base):
     __tablename__ = "documents"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
     object_id = Column(UUID(as_uuid=True), ForeignKey("object_storage.id", ondelete="SET NULL"), nullable=True, index=True)
+    folder_id = Column(UUID(as_uuid=True), ForeignKey("document_folders.id", ondelete="SET NULL"), nullable=True, index=True)
     title = Column(String(255), nullable=False)
+    region = Column(String(20), nullable=False, default="GENERAL", index=True)
     input_tokens = Column(Integer, nullable=False, default=0)
     output_tokens = Column(Integer, nullable=False, default=0)
     cost_usd = Column(Numeric(12, 6), nullable=False, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     object_storage = relationship("ObjectStorage")
+    folder = relationship("DocumentFolder", back_populates="documents")
     pages = relationship("DocumentPage", back_populates="document", cascade="all, delete-orphan")
 
     @property
@@ -74,6 +87,10 @@ class Document(Base):
     @property
     def file_hash(self) -> Optional[str]:
         return self.object_storage.checksum if self.object_storage else None
+
+    @property
+    def folder_name(self) -> Optional[str]:
+        return self.folder.name if self.folder else "General"
 
 
 class DocumentPage(Base):
@@ -154,6 +171,45 @@ class User(Base):
     display_name = Column(String(255), nullable=True)
     role = Column(String(50), nullable=False, default="employee")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    roles = relationship("Role", secondary="user_roles", lazy="selectin")
+
+
+class Role(Base):
+    __tablename__ = "roles"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
+    name = Column(String(50), unique=True, nullable=False)
+    display_name = Column(String(100), nullable=False)
+    description = Column(Text, nullable=True)
+
+    features = relationship("Feature", secondary="role_features", lazy="selectin")
+
+
+class UserRole(Base):
+    __tablename__ = "user_roles"
+
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    role_id = Column(UUID(as_uuid=True), ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True)
+    granted_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class Feature(Base):
+    __tablename__ = "features"
+
+    id = Column(String(50), primary_key=True)
+    display_name = Column(String(100), nullable=False)
+    description = Column(Text, nullable=True)
+    route_path = Column(String(200), nullable=True)
+    is_external = Column(String(1), nullable=False, default="0")  # SQLite compat for boolean
+    sort_order = Column(Integer, nullable=False, default=0)
+
+
+class RoleFeature(Base):
+    __tablename__ = "role_features"
+
+    role_id = Column(UUID(as_uuid=True), ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True)
+    feature_id = Column(String(50), ForeignKey("features.id", ondelete="CASCADE"), primary_key=True)
 
 
 class ChatSession(Base):
@@ -251,7 +307,6 @@ class AuditLog(Base):
     supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=False)
     supplier_name = Column(String(255), nullable=False)
     workspace_title = Column(String(255), nullable=True, default="Ariba Workspace")
-    cert_type = Column(String(100), nullable=True, default="Relational evidence")
     complete_qa_data_dump = Column(Text, nullable=True, default="[]")
     compiled_extracted_data = Column(Text, nullable=False)
     result = Column(String(50), nullable=True, default="Mismatch")

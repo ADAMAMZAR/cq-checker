@@ -2,9 +2,9 @@
 
 import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
-import LandingPage from "@/components/LandingPage";
+import EAuctionGenerator from "@/components/EAuctionGenerator";
 
-export default function Dashboard() {
+export default function AuctionPage() {
   const router = useRouter();
 
   return (
@@ -14,10 +14,10 @@ export default function Dashboard() {
         isLoading={false}
         isEvidenceLoading={false}
         onRefresh={() => {}}
-        hideHomeIcon={true}
+        onGoHome={() => router.push("/")}
       />
-      <div className="flex-1 flex flex-col">
-        <LandingPage />
+      <div className="flex-1 flex flex-col mt-4">
+        <EAuctionGenerator />
       </div>
     </div>
   );

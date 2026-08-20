@@ -9,6 +9,7 @@ class SupplierEntry(BaseModel):
     sm_vendor_id: Optional[str] = Field(None, description="Ariba SM Vendor ID")
 
 class DocumentEvidence(BaseModel):
+    id: Optional[str] = Field(None, description="Document Evidence UUID primary key")
     audit_id: str = Field(..., description="Unique UUID for the audit run")
     supplier_id: int = Field(..., description="Supplier ID referencing SupplierEntry")
     created_at: str = Field(default="", description="Timestamp of the document log")
@@ -32,6 +33,23 @@ class DocumentEvidence(BaseModel):
         elif not self.timestamp and self.created_at:
             self.timestamp = self.created_at
 
+class DocumentEvidenceSummary(BaseModel):
+    id: str = Field(..., description="Document Evidence UUID primary key")
+    audit_id: str = Field(..., description="Audit ID referencing AuditLog")
+    supplier_id: int = Field(..., description="Supplier ID referencing SupplierEntry")
+    supplier_name: str = Field(..., description="Cleaned supplier name")
+    filename: str = Field(..., description="Filename of the downloaded document / cert")
+    ariba_question_label: str = Field(..., description="Label of the question where the file was attached")
+    gemini_extracted_supplier_name: str = Field(default="", description="Extracted supplier name from certificate")
+    created_at: str = Field(default="", description="Timestamp of the document log")
+    timestamp: Optional[str] = Field(default=None, description="Legacy alias for created_at")
+
+    def model_post_init(self, __context):
+        if not self.created_at and self.timestamp:
+            self.created_at = self.timestamp
+        elif not self.timestamp and self.created_at:
+            self.timestamp = self.created_at
+
 class AuditLogEntry(BaseModel):
     audit_id: str = Field(..., description="Unique UUID for the audit run")
     supplier_id: int = Field(..., description="Supplier ID referencing SupplierEntry")
@@ -39,7 +57,6 @@ class AuditLogEntry(BaseModel):
     timestamp: Optional[str] = Field(default=None, description="Legacy alias for created_at")
     supplier_name: str = Field(..., description="Supplier Name")
     workspace_title: Optional[str] = Field(default="Ariba Workspace", description="Workspace Title")
-    cert_type: Optional[str] = Field(default="Relational evidence", description="Certificate Type")
     complete_qa_data_dump: Optional[str] = Field(default="[]", description="JSON string of all QA pairs scraped from the page")
     compiled_extracted_data: str = Field(..., description="JSON string of compiled metadata from all documents")
     result: Optional[str] = Field(default="Mismatch", description="Audit Result (Match/Mismatch)")
@@ -62,7 +79,6 @@ class AuditResultResponse(BaseModel):
     supplier_id: int
     supplier_name: str
     workspace_title: Optional[str] = "Ariba Workspace"
-    cert_type: Optional[str] = "Relational evidence"
     filename: str
     result: Optional[str] = "Mismatch"
     suggested_comment: str
@@ -85,7 +101,21 @@ class AuditRegistryEntry(BaseModel):
     result: str
     created_at: str = ""
     timestamp: Optional[str] = None
-    cert_type: str = "Relational evidence"
+    document_count: int = 0
+
+    def model_post_init(self, __context):
+        if not self.created_at and self.timestamp:
+            self.created_at = self.timestamp
+        elif not self.timestamp and self.created_at:
+            self.timestamp = self.created_at
+
+class AuditRegistryDetail(BaseModel):
+    audit_id: str
+    supplier_id: int
+    supplier_name: str
+    result: str
+    created_at: str = ""
+    timestamp: Optional[str] = None
     document_count: int = 0
     suggested_comment: str = ""
     screenshot_url: Optional[str] = None
@@ -128,13 +158,39 @@ class DocumentIngestResult(BaseModel):
     message: str = ""
 
 
+class DocumentFolderSummary(BaseModel):
+    id: str
+    name: str
+    document_count: int = 0
+    created_at: Optional[str] = None
+
+
+class CreateFolderRequest(BaseModel):
+    name: str
+
+
+class UpdateFolderRequest(BaseModel):
+    name: str
+
+
+class MoveDocumentRequest(BaseModel):
+    folder_id: Optional[str] = None
+
+
+class UpdateDocumentRegionRequest(BaseModel):
+    region: str
+
+
 class DocumentSummary(BaseModel):
     id: str
     title: str
     file_url: str
+    region: str = "GENERAL"
     page_count: int = 0
     parent_count: int = 0
     child_count: int = 0
+    folder_id: Optional[str] = None
+    folder_name: Optional[str] = "General"
     created_at: Optional[str] = None
 
 
@@ -144,11 +200,22 @@ class ChatRequest(BaseModel):
     stream: bool = False
 
 
+class RetrievalTestRequest(BaseModel):
+    query: str
+    k: int = 5
+    window_size: int = 4
+    vector_weight: float = 0.6
+    bm25_weight: float = 0.4
+    region_filter: Optional[str] = None
+
+
 class ChatSource(BaseModel):
     title: str
     page_number: Optional[int] = None
     snippet: Optional[str] = None
     file_url: Optional[str] = None
+    document_id: Optional[str] = None
+    content_type: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
@@ -158,6 +225,7 @@ class ChatResponse(BaseModel):
     cache_hit: bool = False
     session_id: Optional[str] = None
     message_id: Optional[str] = None
+    debug_tracing: Optional[dict] = None
 
 
 class ChatHistoryResponse(BaseModel):

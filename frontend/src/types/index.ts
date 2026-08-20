@@ -5,7 +5,7 @@ export interface AuditLog {
   timestamp: string;
   supplier_name: string;
   workspace_title: string;
-  cert_type: string;
+  cert_type?: string;
   complete_qa_data_dump: string;
   compiled_extracted_data: string;
   result: string;
@@ -33,6 +33,7 @@ export interface SupplierAssets {
 }
 
 export interface DocumentEvidence {
+  id?: string;
   audit_id: string;
   supplier_id: number;
   created_at?: string;
@@ -49,6 +50,18 @@ export interface DocumentEvidence {
   cost_usd: number;
   cost_myr: number;
   file_url?: string;
+}
+
+export interface DocumentEvidenceSummary {
+  id: string;
+  audit_id: string;
+  supplier_id: number;
+  supplier_name: string;
+  filename: string;
+  ariba_question_label: string;
+  gemini_extracted_supplier_name: string;
+  created_at?: string;
+  timestamp: string;
 }
 
 export interface ComparisonTable {
@@ -142,8 +155,11 @@ export interface AuditRegistryEntry {
   result: string;
   created_at?: string;
   timestamp: string;
-  cert_type: string;
+  cert_type?: string;
   document_count: number;
+}
+
+export interface AuditRegistryDetail extends AuditRegistryEntry {
   suggested_comment: string;
   screenshot_url?: string;
   comparison_table?: any;
@@ -178,6 +194,8 @@ export interface ChatSource {
   page_number?: number | null;
   snippet?: string | null;
   file_url?: string | null;
+  document_id?: string | null;
+  content_type?: string | null;
 }
 
 export interface ChatResponse {
@@ -187,6 +205,7 @@ export interface ChatResponse {
   cache_hit: boolean;
   session_id?: string | null;
   message_id?: string | null;
+  debug_tracing?: any;
 }
 
 export interface ChatHistoryResponse {
@@ -201,6 +220,7 @@ export interface ChatStreamDone {
   cache_hit: boolean;
   session_id?: string | null;
   message_id?: string | null;
+  debug_tracing?: any;
   error?: string;
 }
 
@@ -236,6 +256,13 @@ export interface DocumentIngestResult {
   message: string;
 }
 
+export interface DocumentFolder {
+  id: string;
+  name: string;
+  document_count: number;
+  created_at?: string | null;
+}
+
 export interface DocumentSummary {
   id: string;
   title: string;
@@ -243,6 +270,8 @@ export interface DocumentSummary {
   page_count?: number;
   parent_count?: number;
   child_count?: number;
+  folder_id?: string | null;
+  folder_name?: string | null;
   created_at?: string | null;
 }
 
@@ -319,3 +348,29 @@ export interface DbSchema {
   tables: DbTableSchema[];
   relationships: DbRelationship[];
 }
+
+// ── Auth & RBAC ──────────────────────────────────────────────────────────────
+
+export interface RoleInfo {
+  id?: string;
+  name: string;
+  display_name: string;
+  description: string;
+  feature_ids: string[];
+  test_user?: string | null;
+}
+
+export interface FeatureInfo {
+  id: string;
+  display_name: string;
+  description: string;
+  route_path?: string | null;
+  is_external?: boolean;
+  sort_order?: number;
+}
+
+export interface RolesAndFeaturesResponse {
+  roles: RoleInfo[];
+  features: FeatureInfo[];
+}
+

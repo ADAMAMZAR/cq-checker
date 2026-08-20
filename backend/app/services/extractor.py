@@ -66,6 +66,10 @@ SINGLE_CERT_SCHEMA = {
         "additionalCertificateType": {"type": "string"},
         "isPermanent": {"type": "boolean"},
         "recertificationLetter": {"type": "boolean"},
+        "pageStart": {"type": "integer"},
+        "pageEnd": {"type": "integer"},
+        "matchedQuestionLabel": {"type": "string"},
+        "evidenceStatus": {"type": "string"},
         "confidence": {"type": "number"},
     },
 }
@@ -91,6 +95,9 @@ MOCK_EXTRACTION = {
         "effectiveDate": "01/01/2026",
         "certificateLocation": "Selangor, Malaysia",
         "yearOfPublication": "2026",
+        "pageStart": 1,
+        "pageEnd": 1,
+        "evidenceStatus": "FOUND",
         "confidence": 0.9,
     }],
 }
@@ -115,30 +122,56 @@ def calculate_cost(prompt_tokens: int, output_tokens: int,
     return (prompt_tokens * input_rate) + (output_tokens * output_rate)
 
 
-def _build_prompt(question_label: Optional[str]) -> str:
-    return (
-        "You are a high-precision certificate OCR extractor. Extract every field exactly as written. "
+def _build_prompt(
+    question_label: Optional[str] = None,
+    target_qa_items: Optional[list] = None,
+) -> str:
+    base_prompt = (
+        "You are an expert Document OCR Extractor & QA Binder. Extract every field exactly as written. "
         "Use 'N/A' for any field not found. Dates must be formatted as DD/MM/YYYY. "
         "yearOfPublication must be the 4-digit year (e.g. 2024); if absent, use the year from effectiveDate. "
         "certificateLocation must be 'State, Country' (e.g. Selangor, Malaysia). "
+        "For `certificateType`, NEVER output 'Certificate of Currency' alone as it is too vague. "
+        "Always append the specific policy/insurance type (e.g., 'Certificate of Currency - Public Liability', "
+        "'Certificate of Currency - Workers Compensation', 'Certificate of Currency - Professional Indemnity', "
+        "'Certificate of Currency - Contract Works', or 'Certificate of Currency - Plant & Equipment'). "
         "The document may contain one or more distinct certificates. Extract EACH distinct certificate "
         "into its own object inside the 'certificates' array, in the order they appear. "
-        "If the document contains only a single certificate, return exactly one object in the array. "
+        "Include 1-indexed pageStart and pageEnd for each certificate. "
         "Never merge certificates together; a merged multi-page document must yield one object per certificate. "
         "If a public liability/insurance coverage amount appears, extract it under publicLiabilityAmount "
         "(e.g. '20,000,000', '20M'). Extract the currency under currency ('$' alone -> 'AUD'). "
         "If the certificate is permanent/non-expiring (e.g. 'KEKAL SAH', 'NO EXPIRY'), set isPermanent to true. "
         "If it is a recertification/renewal letter (not a full certificate), set recertificationLetter to true. "
+        "Set evidenceStatus to 'FOUND' if a valid certificate is present, or 'MISSING_IN_FILE' if no relevant document exists. "
         "Output an overall 'confidence' score (0-1) for the whole certificate."
     )
+
+    if target_qa_items:
+        items_str = json.dumps(target_qa_items, indent=2)
+        base_prompt += (
+            f"\n\nTarget Ariba Questionnaire Items referencing this file:\n{items_str}\n\n"
+            "For EACH extracted certificate, identify which target question item above it responds to, "
+            "and explicitly set `matchedQuestionLabel` to that exact question label string. "
+            "If a target question from the list has no matching certificate in the document, "
+            "output an entry with matchedQuestionLabel set to that question label and evidenceStatus set to 'MISSING_IN_FILE'."
+        )
+    elif question_label:
+        base_prompt += (
+            f"\n\nTarget Question Label: '{question_label}'. "
+            "Set `matchedQuestionLabel` to this string for the matching certificate."
+        )
+
+    return base_prompt
 
 
 def extract_certificate_data(
     file_bytes: bytes,
     mime_type: str,
     question_label: Optional[str] = None,
+    target_qa_items: Optional[list] = None,
 ) -> tuple[Dict[str, Any], int, int, float]:
-    """Extract certificate fields via Gemini 3.5 Flash Lite.
+    """Extract certificate fields via Gemini 3.5 Flash Vision OCR with QA context binding.
 
     Returns (extracted_data, input_tokens, output_tokens, cost_usd) where
     extracted_data is ``{"certificates": [ {...}, ... ]}``.
@@ -151,10 +184,11 @@ def extract_certificate_data(
         if _client is None:
             raise RuntimeError("Gemini client not initialized (no API key).")
 
-        prompt = _build_prompt(question_label)
+        prompt = _build_prompt(question_label=question_label, target_qa_items=target_qa_items)
+        model_name = getattr(settings, "gemini_extraction_model", "gemini-3.5-flash")
 
         response = _client.models.generate_content(
-            model=_MODEL_NAME,
+            model=model_name,
             contents=[
                 prompt,
                 types.Part.from_bytes(data=file_bytes, mime_type=mime_type),

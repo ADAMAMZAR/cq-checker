@@ -10,9 +10,10 @@ import {
   IconArrowLeft,
   IconTable,
   IconFlask,
+  IconSparkles,
 } from "@tabler/icons-react";
 
-export type AdminTab = "costs" | "database" | "schema" | "playground" | "ingest" | "ingest-test" | "matrix";
+export type AdminTab = "costs" | "database" | "schema" | "playground" | "ingest" | "ingest-test" | "matrix" | "retrieval";
 
 interface AdminTabsProps {
   active: AdminTab;
@@ -21,6 +22,7 @@ interface AdminTabsProps {
 
 const tabs: { key: AdminTab; label: string; icon: typeof IconDatabase }[] = [
   { key: "database", label: "Database", icon: IconDatabase },
+  { key: "retrieval", label: "Chunk Retrieval Test", icon: IconSparkles },
   { key: "matrix", label: "Comparison Matrix", icon: IconTable },
   { key: "costs", label: "Cost Analytics", icon: IconCoin },
   { key: "schema", label: "Schema", icon: IconSchema },

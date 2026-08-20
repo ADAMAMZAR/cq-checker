@@ -12,7 +12,7 @@ def test_get_ariba_suppliers_unconfigured():
         suppliers = supplier_search.get_ariba_suppliers()
         assert suppliers == []
 
-@patch("app.services.supplier_search.step1_get_in_qualification_suppliers")
+@patch("app.services.supplier_search.get_in_qualification_suppliers")
 @patch("app.services.supplier_search.get_oauth_token")
 def test_get_ariba_suppliers_success(mock_token, mock_step1):
     """Verify Step 1 supplier search parses Ariba JSON correctly."""
@@ -31,14 +31,14 @@ def test_get_ariba_suppliers_success(mock_token, mock_step1):
         assert suppliers[0]["sm_vendor_id"] == "V12345"
         assert suppliers[0]["supplier_name"] == "ACME Corp"
 
-@patch("app.services.supplier_search.step3_get_questionnaire_answers")
-@patch("app.services.supplier_search.step2_get_questionnaire_doc_id")
+@patch("app.services.supplier_search.get_questionnaire_answers")
+@patch("app.services.supplier_search.get_all_questionnaires")
 @patch("app.services.supplier_search.get_oauth_token")
-def test_audit_ariba_supplier_steps_2_and_3(mock_token, mock_step2, mock_step3):
-    """Verify Steps 2 & 3 execution returns doc_id and questionnaire answers."""
+def test_audit_ariba_supplier_steps_2_and_3(mock_token, mock_get_q, mock_get_answers):
+    """Verify Steps 2 & 3 execution returns questionnaire answers."""
     mock_token.return_value = "mock_token_123"
-    mock_step2.return_value = "doc999"
-    mock_step3.return_value = {"questionnaires": [{"id": 1, "answer": "yes"}]}
+    mock_get_q.return_value = [{"questionnaireId": "doc999", "docTitle": "Safety Cert", "hasCertificates": True}]
+    mock_get_answers.return_value = {"questionnaires": [{"id": 1, "answer": "yes"}]}
 
     with patch("app.services.supplier_search.settings") as mock_settings:
         mock_settings.ariba_client_id = "client_id"
@@ -47,6 +47,8 @@ def test_audit_ariba_supplier_steps_2_and_3(mock_token, mock_step2, mock_step3):
 
         res = supplier_search.audit_ariba_supplier("V12345")
         assert res["status"] == "success"
-        assert res["doc_id"] == "doc999"
         assert res["sm_vendor_id"] == "V12345"
-        assert "qna_data" in res
+        assert len(res["audit_results"]) == 1
+        assert res["audit_results"][0]["doc_id"] == "doc999"
+        assert "qna_data" in res["audit_results"][0]
+

@@ -47,16 +47,38 @@ def chunk_pages(pages: List[dict]) -> List[dict]:
 
 
 def _split_markdown_by_qa(markdown_text: str) -> List[str]:
-    """Split markdown text into distinct Q&A pairs if Q&A headers exist."""
-    # Pattern matching Q&A headers e.g.:
-    # ## **BU-Q1: ...**, ## **Q1: ...**, ## Q1: ..., ### Question: ..., ### Template 1: ...
-    qa_header_regex = re.compile(
-        r'^(?=(?:#{2,3}\s+(?:\*\*)?(?:BU-Q\d+|Q\d+|Question|Template\s+\d+):?))',
-        re.MULTILINE | re.IGNORECASE
-    )
-    parts = qa_header_regex.split(markdown_text)
-    cleaned = [p.strip() for p in parts if p and p.strip()]
-    return cleaned
+    """Split markdown text into distinct Q&A / Template pairs with section category headers."""
+    header_regex = re.compile(r'^(?=(?:#{1,3}\s+))', re.MULTILINE)
+    parts = header_regex.split(markdown_text)
+
+    cleaned_chunks = []
+    active_section_header = ""
+
+    for part in parts:
+        clean_part = re.sub(r'^---\s*', '', part.strip(), flags=re.MULTILINE).strip()
+        if not clean_part:
+            continue
+
+        lines = clean_part.split('\n')
+        first_line = lines[0] if lines else ""
+
+        if re.match(r'^#\s+', first_line) and not re.search(r'Q\d+:', first_line, re.IGNORECASE):
+            active_section_header = first_line.strip()
+            clean_part = '\n'.join(lines[1:]).strip()
+
+        clean_part = re.sub(r'---\s*#\s+.*$', '', clean_part, flags=re.DOTALL).strip()
+        clean_part = re.sub(r'\n#\s+[^#\n]+$', '', clean_part, flags=re.DOTALL).strip()
+
+        if not clean_part:
+            continue
+
+        block_content = clean_part
+        if active_section_header and not block_content.startswith(active_section_header):
+            block_content = f"{active_section_header}\n\n{block_content}"
+
+        cleaned_chunks.append(block_content)
+
+    return cleaned_chunks if cleaned_chunks else [markdown_text.strip()]
 
 
 def _split_markdown_by_headers(markdown_text: str) -> List[str]:
