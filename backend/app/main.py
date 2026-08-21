@@ -56,15 +56,28 @@ app = FastAPI(
 )
 
 
+from starlette.middleware.sessions import SessionMiddleware
+from app.auth.routes import router as sso_auth_router
+
 ALLOWED_DOMAIN = "gamuda.com.my"
+
+# Mount Starlette SessionMiddleware for HttpOnly session cookie handling
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=settings.session_secret,
+    session_cookie=settings.session_cookie_name,
+    max_age=settings.session_max_age_seconds,
+    same_site="lax",
+    https_only=settings.environment.lower() == "production",
+)
 
 
 # Security Middleware: Verify pre-shared internal secret token header & company domain gate before SSO implementation
 @app.middleware("http")
 async def verify_internal_secret_header(request: Request, call_next):
-    # Allow OPTIONS preflight requests and public health/docs endpoints
+    # Allow OPTIONS preflight requests, public health/docs endpoints, and SSO auth routes
     bypassed_paths = {"/", "/docs", "/redoc", "/openapi.json"}
-    if request.method == "OPTIONS" or request.url.path in bypassed_paths:
+    if request.method == "OPTIONS" or request.url.path in bypassed_paths or request.url.path.startswith("/auth"):
         return await call_next(request)
 
     # 1. Layer 1: Secret Key Verification
@@ -105,7 +118,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount master API v1 router
+# Mount SSO Auth router & master API v1 router
+app.include_router(sso_auth_router)
 app.include_router(api_v1_router)
 
 

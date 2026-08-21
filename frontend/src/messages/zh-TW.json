@@ -1,0 +1,50 @@
+{
+  "header": {
+    "title": "金務大集團採購處",
+    "admin": "管理員",
+    "homeTooltip": "返回首頁"
+  },
+  "security": {
+    "accessDenied": "拒絕存取",
+    "onlyGamudian": "僅限金務大員工存取此系統。",
+    "blocked": "已封鎖",
+    "allowed": "已允許"
+  },
+  "hero": {
+    "title": "營運控制台",
+    "subtitle": "金務大集團採購處智慧樞紐",
+    "description": "涵蓋採購工作流程、供應商驗證、電子競標與戰略成本分析的統一平台。"
+  },
+  "features": {
+    "strategic_insights": {
+      "title": "即時戰略洞察",
+      "subtitle": "高階主管分析",
+      "description": "財務明細、成本影響分析與合規成本指標門戶。"
+    },
+    "procurement_assistant": {
+      "title": "採購 AI 助手",
+      "subtitle": "AI 智慧助手",
+      "description": "用於供應商入駐與尋源採購的 SAP Ariba 採購助手。"
+    },
+    "supplier_visibility": {
+      "title": "即時供應商可視化",
+      "subtitle": "供應商情報",
+      "description": "深度審計引擎、證照交叉比對與即時供應商風險監控。"
+    },
+    "certificate_checker": {
+      "title": "證照審核中心",
+      "subtitle": "審計登記冊引擎",
+      "description": "管理、更新並解決供應商證照數據與審計發現。"
+    },
+    "e_auction_generator": {
+      "title": "電子競標生成器",
+      "subtitle": "活動文件中心",
+      "description": "發行並生成官方電子競標活動資訊文件與標包結構。"
+    }
+  },
+  "actions": {
+    "clickHere": "點擊前往",
+    "restricted": "存取受限",
+    "close": "關閉"
+  }
+}

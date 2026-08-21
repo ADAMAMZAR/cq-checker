@@ -3,6 +3,7 @@ import { Inter, Playfair_Display, Lora } from "next/font/google";
 import "./globals.css";
 import ThemeProvider from "@/components/ThemeProvider";
 import SecurityGuard from "@/components/SecurityGuard";
+import AutoTranslateEngine from "@/components/AutoTranslateEngine";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -65,6 +66,7 @@ export default function RootLayout({
           <SecurityGuard>
             {children}
           </SecurityGuard>
+          <AutoTranslateEngine />
         </ThemeProvider>
       </body>
     </html>

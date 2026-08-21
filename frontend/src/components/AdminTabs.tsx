@@ -11,9 +11,10 @@ import {
   IconTable,
   IconFlask,
   IconSparkles,
+  IconUsers,
 } from "@tabler/icons-react";
 
-export type AdminTab = "costs" | "database" | "schema" | "playground" | "ingest" | "ingest-test" | "matrix" | "retrieval";
+export type AdminTab = "users" | "costs" | "database" | "schema" | "playground" | "ingest" | "ingest-test" | "matrix" | "retrieval";
 
 interface AdminTabsProps {
   active: AdminTab;
@@ -21,6 +22,7 @@ interface AdminTabsProps {
 }
 
 const tabs: { key: AdminTab; label: string; icon: typeof IconDatabase }[] = [
+  { key: "users", label: "User Management", icon: IconUsers },
   { key: "database", label: "Database", icon: IconDatabase },
   { key: "retrieval", label: "Chunk Retrieval Test", icon: IconSparkles },
   { key: "matrix", label: "Comparison Matrix", icon: IconTable },

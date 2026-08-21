@@ -89,9 +89,9 @@ export default function RoleDropdown() {
         <IconChevronDown className={`w-3.5 h-3.5 text-[var(--text-secondary)] transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`} />
       </button>
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-80 sm:w-96 rounded-xl bg-[var(--bg-card)] border border-[var(--border-visible)] shadow-2xl overflow-hidden animate-fade-in divide-y divide-[var(--border-subtle)] z-50">
+        <div className="absolute right-0 mt-2 w-80 sm:w-96 rounded-xl bg-[var(--bg-card-solid)] border border-[var(--border-visible)] shadow-2xl overflow-hidden animate-fade-in divide-y divide-[var(--border-subtle)] z-50">
           {/* Menu Header */}
-          <div className="p-3 bg-[var(--bg-elevated)] flex items-center justify-between">
+          <div className="p-3 bg-[var(--bg-card-solid)] border-b border-[var(--border-subtle)] flex items-center justify-between">
             <div>
               <h4 className="text-xs font-bold text-[var(--heading-color)]">Switch Role</h4>
             </div>

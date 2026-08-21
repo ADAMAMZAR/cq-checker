@@ -24,19 +24,53 @@ import type {
   RolesAndFeaturesResponse,
 } from "@/types";
 
-// Single seam for backend routing.
-// - Local dev: defaults to same-origin "/api", proxied by next.config rewrites.
-// - Phase 8 static export: baked at build time to the Cloud Run URL via NEXT_PUBLIC_API_URL.
+import { getStoredUserEmail, setStoredUserEmail } from "./securityStore";
+
+// ── Base API Configuration ───────────────────────────────────────────────────
+
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "/api";
+
 export const UPLOAD_API_BASE =
   process.env.NEXT_PUBLIC_API_URL ||
   (typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
     ? "http://127.0.0.1:8000/api"
     : API_BASE);
 
-import { getStoredUserEmail, setStoredUserEmail } from "./securityStore";
-
 const INTERNAL_SECRET = process.env.NEXT_PUBLIC_INTERNAL_API_SECRET || "dev-internal-secret-cq-checker";
+
+// ── Custom Error Classes ──────────────────────────────────────────────────────
+
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    public statusText: string,
+    message: string
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+export class UnauthorizedError extends ApiError {
+  constructor(message = "Session expired or unauthorized. Please sign in.") {
+    super(401, "Unauthorized", message);
+    this.name = "UnauthorizedError";
+  }
+}
+
+export async function errorDetail(res: Response): Promise<string> {
+  try {
+    const data = await res.json();
+    if (typeof data.detail === "string") return data.detail;
+    if (data.detail) return JSON.stringify(data.detail);
+    if (typeof data.message === "string") return data.message;
+    return JSON.stringify(data);
+  } catch {
+    return `HTTP ${res.status}: ${res.statusText || "Request failed"}`;
+  }
+}
+
+// ── Authentication & Network Interceptors ───────────────────────────────────
 
 export function getAuthHeaders(extraHeaders: HeadersInit = {}): HeadersInit {
   const headers = new Headers(extraHeaders);
@@ -52,14 +86,26 @@ export function getAuthHeaders(extraHeaders: HeadersInit = {}): HeadersInit {
 
 export async function authFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
   const headers = getAuthHeaders(init.headers);
-  const res = await fetch(input, { ...init, headers });
-  if (res.status === 403 && typeof window !== "undefined") {
-    res.clone().json().then((data) => {
-      if (data?.provided_email) {
-        setStoredUserEmail(data.provided_email);
-      }
-    }).catch(() => {});
+  const res = await fetch(input, { credentials: "include", ...init, headers });
+
+  if (res.status === 401) {
+    console.warn("API request returned 401 Unauthorized:", input);
   }
+
+  if (res.status === 403 && typeof window !== "undefined") {
+    res
+      .clone()
+      .json()
+      .then((data) => {
+        if (data?.provided_email) {
+          setStoredUserEmail(data.provided_email);
+        }
+      })
+      .catch((err) => {
+        console.debug("Failed to extract provided_email from 403 response:", err);
+      });
+  }
+
   return res;
 }
 
@@ -68,12 +114,6 @@ function base64url(input: string): string {
   return b64.replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
 }
 
-/**
- * Resolve any stored file reference to a browser-fetchable URL.
- * - New uploads: storage returns relative "/api/files/local/..." -> prefix with API_BASE
- * - Legacy Supabase absolute URLs -> proxied through the backend /api/files/{b64url}
- * - Anything else -> returned untouched.
- */
 export function buildFileUrl(url?: string | null): string {
   if (!url) return "";
   if (url.startsWith("/api/")) return `${API_BASE}${url.slice("/api".length)}`;
@@ -81,27 +121,7 @@ export function buildFileUrl(url?: string | null): string {
   return url;
 }
 
-async function errorDetail(res: Response): Promise<string> {
-  try {
-    const data = await res.json();
-    return typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail ?? data);
-  } catch {
-    return `HTTP ${res.status}`;
-  }
-}
-
-export async function fetchAuditLogs(): Promise<AuditLog[]> {
-  const res = await authFetch(`${API_BASE}/logs`);
-  if (!res.ok) throw new Error(`Failed to load logs: HTTP ${res.status}`);
-  const data: AuditLog[] = await res.json();
-  return data;
-}
-
-export async function fetchSuppliers(): Promise<SupplierEntry[]> {
-  const res = await authFetch(`${API_BASE}/suppliers`);
-  if (!res.ok) throw new Error(`Failed to load suppliers: HTTP ${res.status}`);
-  return res.json();
-}
+// ── DTO Type Definitions ──────────────────────────────────────────────────────
 
 export interface AribaQuestionnaireItem {
   questionnaireId?: string;
@@ -110,7 +130,7 @@ export interface AribaQuestionnaireItem {
   title?: string;
   hasCertificates?: boolean;
   status?: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export interface AribaQuestionnairesResponse {
@@ -124,7 +144,115 @@ export interface AribaQuestionnaireAnswersResponse {
   status: string;
   sm_vendor_id: string;
   doc_id: string;
-  qna_data: any;
+  qna_data: Record<string, unknown> | unknown[];
+}
+
+export interface EvidenceUpdateResponse {
+  status: string;
+  message: string;
+  audit_result?: string;
+  suggested_comment?: string;
+  comparison_table?: unknown;
+}
+
+export interface MoveDocumentFolderResult {
+  status: string;
+  message?: string;
+  document_id?: string;
+  folder_id?: string | null;
+  [key: string]: unknown;
+}
+
+export interface UpdateDocumentRegionResult {
+  status: string;
+  message?: string;
+  document_id?: string;
+  region?: string;
+  [key: string]: unknown;
+}
+
+export interface DocumentContentResult {
+  document_id: string;
+  filename: string;
+  title: string;
+  content?: string;
+  markdown?: string;
+  pages?: Array<{ page_number: number; markdown: string }>;
+  [key: string]: unknown;
+}
+
+export interface RetrievalTestPayload {
+  query: string;
+  k?: number;
+  window_size?: number;
+  vector_weight?: number;
+  bm25_weight?: number;
+  region_filter?: string;
+}
+
+export interface RetrievalTestResult {
+  query: string;
+  results: Array<{
+    document_id: string;
+    chunk_id: string;
+    content: string;
+    score: number;
+    metadata?: Record<string, unknown>;
+  }>;
+  [key: string]: unknown;
+}
+
+export interface VerifyCertificateOptions {
+  supplierName: string;
+  questionLabel?: string;
+  qaAnswers?: string;
+  qaDataTitle?: string;
+}
+
+export interface AuditAribaSupplierResult {
+  status: string;
+  sm_vendor_id: string;
+  doc_id?: string;
+  audit_id?: string;
+  summary?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface DownloadAribaAttachmentsResult {
+  status: string;
+  downloaded_count?: number;
+  attachments?: Array<{ filename: string; file_url?: string }>;
+  [key: string]: unknown;
+}
+
+export interface TestIngestDocumentResult {
+  status: string;
+  filename: string;
+  title?: string;
+  total_pages?: number;
+  pages?: Array<{ page_number: number; markdown: string }>;
+  [key: string]: unknown;
+}
+
+export interface CommitIngestPagesResult {
+  status: string;
+  document_id?: string;
+  message?: string;
+  [key: string]: unknown;
+}
+
+// ── Audit & Supplier APIs ────────────────────────────────────────────────────
+
+export async function fetchAuditLogs(): Promise<AuditLog[]> {
+  const res = await authFetch(`${API_BASE}/logs`);
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
+  return res.json();
+}
+
+export async function fetchSuppliers(): Promise<SupplierEntry[]> {
+  const res = await authFetch(`${API_BASE}/suppliers`);
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
+  return res.json();
 }
 
 export async function fetchAribaSuppliers(): Promise<SupplierEntry[]> {
@@ -132,13 +260,13 @@ export async function fetchAribaSuppliers(): Promise<SupplierEntry[]> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
   });
-  if (!res.ok) throw new Error(`Failed to load Ariba suppliers: HTTP ${res.status}`);
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
   return res.json();
 }
 
 export async function fetchAribaQuestionnaires(smVendorId: string): Promise<AribaQuestionnairesResponse> {
   const res = await authFetch(`${API_BASE}/ariba/suppliers/${encodeURIComponent(smVendorId)}/questionnaires`);
-  if (!res.ok) throw new Error(await errorDetail(res));
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
   return res.json();
 }
 
@@ -149,25 +277,25 @@ export async function fetchAribaQuestionnaireAnswers(
   const res = await authFetch(
     `${API_BASE}/ariba/suppliers/${encodeURIComponent(smVendorId)}/questionnaires/${encodeURIComponent(docId)}/answers`
   );
-  if (!res.ok) throw new Error(await errorDetail(res));
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
   return res.json();
 }
 
 export async function fetchAuditRegistry(): Promise<AuditRegistryEntry[]> {
   const res = await authFetch(`${API_BASE}/audit-registry`);
-  if (!res.ok) throw new Error(`Failed to load audit registry: HTTP ${res.status}`);
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
   return res.json();
 }
 
 export async function fetchAuditRegistryDetail(auditId: string): Promise<AuditRegistryDetail> {
   const res = await authFetch(`${API_BASE}/audit-registry/${encodeURIComponent(auditId)}`);
-  if (!res.ok) throw new Error(`Failed to load audit registry detail: HTTP ${res.status}`);
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
   return res.json();
 }
 
 export async function fetchSupplierEvidence(supplierId: number): Promise<SupplierAssets> {
   const res = await authFetch(`${API_BASE}/logs/${supplierId}/evidence`);
-  if (!res.ok) throw new Error(`Failed to load supplier evidence: HTTP ${res.status}`);
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
   return res.json();
 }
 
@@ -175,14 +303,14 @@ export const fetchSupplierAssets = fetchSupplierEvidence;
 
 export async function fetchCostAnalytics(): Promise<CostAnalyticsData> {
   const res = await authFetch(`${API_BASE}/costs`);
-  if (!res.ok) throw new Error(`Failed to load cost analytics: HTTP ${res.status}`);
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
   return res.json();
 }
 
 export async function fetchEvidenceLogs(auditId?: string): Promise<DocumentEvidence[]> {
   const url = auditId ? `${API_BASE}/evidence?audit_id=${encodeURIComponent(auditId)}` : `${API_BASE}/evidence`;
   const res = await authFetch(url);
-  if (!res.ok) throw new Error(`Failed to load evidence logs: HTTP ${res.status}`);
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
   return res.json();
 }
 
@@ -197,22 +325,14 @@ export async function fetchEvidenceSummary(opts?: {
   if (opts?.auditId) params.append("audit_id", opts.auditId);
   const queryStr = params.toString() ? `?${params.toString()}` : "";
   const res = await authFetch(`${API_BASE}/evidence/summary${queryStr}`);
-  if (!res.ok) throw new Error(`Failed to load evidence summary: HTTP ${res.status}`);
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
   return res.json();
 }
 
 export async function fetchEvidenceDocument(documentId: string): Promise<DocumentEvidence> {
   const res = await authFetch(`${API_BASE}/evidence/${encodeURIComponent(documentId)}`);
-  if (!res.ok) throw new Error(`Failed to load document evidence details: HTTP ${res.status}`);
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
   return res.json();
-}
-
-export interface EvidenceUpdateResponse {
-  status: string;
-  message: string;
-  audit_result?: string;
-  suggested_comment?: string;
-  comparison_table?: unknown;
 }
 
 export async function updateEvidenceMetadata(
@@ -223,9 +343,9 @@ export async function updateEvidenceMetadata(
   const res = await authFetch(`${API_BASE}/evidence`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ audit_id: auditId, filename, updated_metadata: updatedMetadata })
+    body: JSON.stringify({ audit_id: auditId, filename, updated_metadata: updatedMetadata }),
   });
-  if (!res.ok) throw new Error(await errorDetail(res));
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
   return res.json();
 }
 
@@ -235,10 +355,6 @@ export interface ChatStreamCallbacks {
   onDelta: (text: string) => void;
 }
 
-/**
- * Stream a RAG answer over SSE. Falls back gracefully to a plain JSON response
- * if the server/proxy does not emit text/event-stream.
- */
 export async function sendChat(
   query: string,
   sessionId: string | null,
@@ -251,7 +367,8 @@ export async function sendChat(
     body: JSON.stringify({ query, session_id: sessionId, stream: true }),
     signal,
   });
-  if (!res.ok) throw new Error(await errorDetail(res));
+
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
 
   const contentType = res.headers.get("content-type") || "";
   if (!contentType.includes("text/event-stream")) {
@@ -264,7 +381,7 @@ export async function sendChat(
   const decoder = new TextDecoder();
   let buffer = "";
   let answer = "";
-  let done: ChatStreamDone | null = null;
+  let done: (ChatStreamDone & { answer?: string; debug_tracing?: unknown }) | null = null;
   let streamError: Error | null = null;
 
   while (reader && !streamError) {
@@ -276,14 +393,16 @@ export async function sendChat(
     while (sepIdx !== -1) {
       const block = buffer.slice(0, sepIdx);
       buffer = buffer.slice(sepIdx + 2);
+
       for (const line of block.split("\n")) {
         if (!line.startsWith("data:")) continue;
         const raw = line.slice(5).trim();
         if (!raw || raw === "[DONE]") continue;
+
         try {
           const event = JSON.parse(raw);
           if (event.error) {
-            streamError = new Error(event.error);
+            streamError = new ApiError(500, "Internal Error", event.error);
             break;
           }
           if (typeof event.delta === "string") {
@@ -292,41 +411,43 @@ export async function sendChat(
           } else if (event.done) {
             done = event;
           }
-        } catch {
-          // ignore malformed events
+        } catch (parseErr) {
+          console.warn("Failed to parse SSE payload chunk:", raw, parseErr);
         }
       }
+
       if (streamError) break;
       sepIdx = buffer.indexOf("\n\n");
     }
   }
+
   if (streamError) throw streamError;
-  if (reader) await reader.cancel().catch(() => { });
+  if (reader) await reader.cancel().catch(() => {});
 
   if (!done) {
     done = { done: true, sources: [], cost_usd: 0, cache_hit: false, session_id: sessionId };
   }
 
   return {
-    answer: (done as any).answer || answer,
+    answer: done.answer || answer,
     sources: done.sources ?? [],
     cost_usd: done.cost_usd ?? 0,
     cache_hit: !!done.cache_hit,
     session_id: done.session_id ?? sessionId,
     message_id: done.message_id ?? null,
-    debug_tracing: (done as any).debug_tracing ?? null,
+    debug_tracing: done.debug_tracing ?? null,
   };
 }
 
 export async function fetchChatHistory(sessionId: string): Promise<ChatHistoryResponse> {
   const res = await authFetch(`${API_BASE}/chat/history?session_id=${encodeURIComponent(sessionId)}`);
-  if (!res.ok) throw new Error(await errorDetail(res));
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
   return res.json();
 }
 
 export async function clearChatCache(): Promise<number> {
   const res = await authFetch(`${API_BASE}/chat/cache/clear`, { method: "POST" });
-  if (!res.ok) throw new Error(await errorDetail(res));
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
   const data = await res.json();
   return data.cleared ?? 0;
 }
@@ -347,7 +468,7 @@ export async function submitFeedback(
       reason: reason || null,
     }),
   });
-  if (!res.ok) throw new Error(await errorDetail(res));
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
   return res.json();
 }
 
@@ -362,8 +483,9 @@ export async function uploadDocument(
   form.append("file", file);
   if (title) form.append("title", title);
   form.append("overwrite", overwrite.toString());
+
   const res = await authFetch(`${UPLOAD_API_BASE}/documents/upload`, { method: "POST", body: form });
-  if (!res.ok) throw new Error(await errorDetail(res));
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
   return res.json();
 }
 
@@ -374,20 +496,21 @@ export async function bulkUploadDocuments(
   const form = new FormData();
   files.forEach((f) => form.append("files", f));
   form.append("overwrite", overwrite.toString());
+
   const res = await authFetch(`${UPLOAD_API_BASE}/documents/bulk-upload`, { method: "POST", body: form });
-  if (!res.ok) throw new Error(await errorDetail(res));
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
   return res.json();
 }
 
 export async function fetchDocuments(): Promise<DocumentSummary[]> {
   const res = await authFetch(`${API_BASE}/documents`);
-  if (!res.ok) throw new Error(await errorDetail(res));
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
   return res.json();
 }
 
 export async function fetchFolders(): Promise<DocumentFolder[]> {
   const res = await authFetch(`${API_BASE}/folders`);
-  if (!res.ok) throw new Error(await errorDetail(res));
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
   return res.json();
 }
 
@@ -397,7 +520,7 @@ export async function createFolder(name: string): Promise<DocumentFolder> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name }),
   });
-  if (!res.ok) throw new Error(await errorDetail(res));
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
   return res.json();
 }
 
@@ -407,7 +530,7 @@ export async function updateFolder(folderId: string, name: string): Promise<Docu
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name }),
   });
-  if (!res.ok) throw new Error(await errorDetail(res));
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
   return res.json();
 }
 
@@ -415,62 +538,52 @@ export async function deleteFolder(folderId: string): Promise<void> {
   const res = await authFetch(`${API_BASE}/folders/${encodeURIComponent(folderId)}`, {
     method: "DELETE",
   });
-  if (!res.ok) throw new Error(await errorDetail(res));
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
 }
 
-export async function moveDocumentFolder(documentId: string, folderId: string | null): Promise<any> {
+export async function moveDocumentFolder(
+  documentId: string,
+  folderId: string | null
+): Promise<MoveDocumentFolderResult> {
   const res = await authFetch(`${API_BASE}/documents/${encodeURIComponent(documentId)}/folder`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ folder_id: folderId }),
   });
-  if (!res.ok) throw new Error(await errorDetail(res));
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
   return res.json();
 }
 
-export async function updateDocumentRegion(documentId: string, region: string): Promise<any> {
+export async function updateDocumentRegion(
+  documentId: string,
+  region: string
+): Promise<UpdateDocumentRegionResult> {
   const res = await authFetch(`${API_BASE}/documents/${encodeURIComponent(documentId)}/region`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ region }),
   });
-  if (!res.ok) throw new Error(await errorDetail(res));
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
   return res.json();
 }
 
-export async function fetchDocumentContent(documentId: string): Promise<any> {
+export async function fetchDocumentContent(documentId: string): Promise<DocumentContentResult> {
   const res = await authFetch(`${API_BASE}/documents/${encodeURIComponent(documentId)}/content`);
-  if (!res.ok) throw new Error(await errorDetail(res));
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
   return res.json();
 }
 
-export interface RetrievalTestPayload {
-  query: string;
-  k?: number;
-  window_size?: number;
-  vector_weight?: number;
-  bm25_weight?: number;
-  region_filter?: string;
-}
-
-export async function testRetrieval(payload: RetrievalTestPayload): Promise<any> {
+export async function testRetrieval(payload: RetrievalTestPayload): Promise<RetrievalTestResult> {
   const res = await authFetch(`${API_BASE}/retrieval/test`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error(await errorDetail(res));
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
   return res.json();
 }
 
 // ── Certificate Verification ─────────────────────────────────────────────────
-
-export interface VerifyCertificateOptions {
-  supplierName: string;
-  questionLabel?: string;
-  qaAnswers?: string;
-  qaDataTitle?: string;
-}
 
 export async function verifyCertificate(
   file: File,
@@ -482,22 +595,23 @@ export async function verifyCertificate(
   if (opts.questionLabel) form.append("question_label", opts.questionLabel);
   if (opts.qaAnswers) form.append("qa_answers", opts.qaAnswers);
   if (opts.qaDataTitle) form.append("qa_data_title", opts.qaDataTitle);
+
   const res = await authFetch(`${UPLOAD_API_BASE}/certificates/verify`, { method: "POST", body: form });
-  if (!res.ok) throw new Error(await errorDetail(res));
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
   return res.json();
 }
 
 export async function fetchCertificates(): Promise<SupplierAuditResponse[]> {
   const res = await authFetch(`${API_BASE}/certificates`);
-  if (!res.ok) throw new Error(await errorDetail(res));
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
   return res.json();
 }
 
-// ── Database Browser (read-only preview) ─────────────────────────────────────
+// ── Database Browser ─────────────────────────────────────────────────────────
 
 export async function fetchDbTables(): Promise<DbTableMeta[]> {
   const res = await authFetch(`${API_BASE}/db/tables`);
-  if (!res.ok) throw new Error(await errorDetail(res));
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
   return res.json();
 }
 
@@ -511,7 +625,7 @@ export async function fetchDbTable(
   const res = await authFetch(
     `${API_BASE}/db/tables/${encodeURIComponent(table)}?limit=${limit}&offset=${offset}${qParam}`
   );
-  if (!res.ok) throw new Error(await errorDetail(res));
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
   return res.json();
 }
 
@@ -521,7 +635,7 @@ export async function deleteDbRow(table: string, pk: Record<string, string>): Pr
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ pk }),
   });
-  if (!res.ok) throw new Error(await errorDetail(res));
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
 }
 
 export async function updateDbCell(
@@ -535,40 +649,36 @@ export async function updateDbCell(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ pk, column, value }),
   });
-  if (!res.ok) throw new Error(await errorDetail(res));
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
 }
-
-
-
 
 export async function fetchDbSchema(): Promise<DbSchema> {
   const res = await authFetch(`${API_BASE}/db/schema`);
-  if (!res.ok) throw new Error(await errorDetail(res));
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
   return res.json();
 }
 
-export async function auditAribaSupplier(smVendorId: string, docId?: string): Promise<any> {
+export async function auditAribaSupplier(
+  smVendorId: string,
+  docId?: string
+): Promise<AuditAribaSupplierResult> {
   const url = docId
     ? `${API_BASE}/audit/ariba-supplier?sm_vendor_id=${encodeURIComponent(smVendorId)}&doc_id=${encodeURIComponent(docId)}`
     : `${API_BASE}/audit/ariba-supplier?sm_vendor_id=${encodeURIComponent(smVendorId)}`;
-  const res = await authFetch(url, {
-    method: "POST",
-  });
-  if (!res.ok) throw new Error(await errorDetail(res));
+  const res = await authFetch(url, { method: "POST" });
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
   return res.json();
 }
 
 export async function downloadAribaQuestionnaireAttachments(
   smVendorId: string,
   docId: string
-): Promise<any> {
+): Promise<DownloadAribaAttachmentsResult> {
   const res = await authFetch(
     `${API_BASE}/ariba/suppliers/${encodeURIComponent(smVendorId)}/questionnaires/${encodeURIComponent(docId)}/download-attachments`,
-    {
-      method: "POST",
-    }
+    { method: "POST" }
   );
-  if (!res.ok) throw new Error(await errorDetail(res));
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
   return res.json();
 }
 
@@ -577,7 +687,7 @@ export async function testIngestDocument(
   mode: "single" | "all" = "single",
   pageNumber: number = 1,
   title?: string
-): Promise<any> {
+): Promise<TestIngestDocumentResult> {
   const form = new FormData();
   form.append("file", file);
   form.append("mode", mode);
@@ -588,7 +698,7 @@ export async function testIngestDocument(
     method: "POST",
     body: form,
   });
-  if (!res.ok) throw new Error(await errorDetail(res));
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
   return res.json();
 }
 
@@ -596,13 +706,13 @@ export async function commitIngestPages(
   filename: string,
   title: string,
   pages: { page_number: number; markdown: string }[]
-): Promise<any> {
+): Promise<CommitIngestPagesResult> {
   const res = await authFetch(`${API_BASE}/documents/commit-pages`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ filename, title, pages }),
   });
-  if (!res.ok) throw new Error(await errorDetail(res));
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
   return res.json();
 }
 
@@ -610,13 +720,73 @@ export async function fetchRolesAndFeatures(): Promise<RolesAndFeaturesResponse>
   try {
     const res = await authFetch(`${API_BASE}/v1/auth/roles`);
     if (res.ok) return await res.json();
-  } catch {
-    // try secondary path
+  } catch (err) {
+    console.warn("Primary endpoint /v1/auth/roles failed, trying fallback:", err);
   }
   const res = await authFetch(`${API_BASE}/auth/roles`);
-  if (!res.ok) throw new Error(`Failed to fetch roles & features: HTTP ${res.status}`);
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
+  return res.json();
+}
+
+// ── Admin User Management ───────────────────────────────────────────────────
+
+export interface AdminUserItem {
+  id: string;
+  email: string;
+  display_name?: string;
+  roles: string[];
+  sso_subject?: string | null;
+  sso_provider?: string | null;
+  is_active: boolean;
+  last_login_at?: string | null;
+  created_at?: string | null;
+  status: string;
+}
+
+export interface AdminUsersResponse {
+  users: AdminUserItem[];
+  available_roles: Array<{ id: string; name: string; display_name: string }>;
+}
+
+export async function fetchAdminUsers(): Promise<AdminUsersResponse> {
+  const res = await authFetch(`${API_BASE}/admin/users`);
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
+  return res.json();
+}
+
+export async function createAdminUser(
+  email: string,
+  roles: string[],
+  displayName?: string
+): Promise<{ status: string; message: string; user_id?: string }> {
+  const res = await authFetch(`${API_BASE}/admin/users`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, roles, display_name: displayName }),
+  });
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
+  return res.json();
+}
+
+export async function updateAdminUserRoles(
+  userId: string,
+  roles: string[]
+): Promise<{ status: string; message: string }> {
+  const res = await authFetch(`${API_BASE}/admin/users/${encodeURIComponent(userId)}/roles`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ roles }),
+  });
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
+  return res.json();
+}
+
+export async function deleteAdminUser(userId: string): Promise<{ status: string; message: string }> {
+  const res = await authFetch(`${API_BASE}/admin/users/${encodeURIComponent(userId)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
   return res.json();
 }
 
 export type { ChatSource };
-

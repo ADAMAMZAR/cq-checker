@@ -12,6 +12,7 @@ from sqlalchemy import (
     Integer,
     Numeric,
     DateTime,
+    Boolean,
     ForeignKey,
     Computed,
     CheckConstraint,
@@ -170,9 +171,27 @@ class User(Base):
     email = Column(String(255), nullable=False, unique=True, index=True)
     display_name = Column(String(255), nullable=True)
     role = Column(String(50), nullable=False, default="employee")
+    sso_subject = Column(String(255), nullable=True, unique=True, index=True)
+    sso_provider = Column(String(50), nullable=True, default="entra")
+    sso_tenant_id = Column(String(100), nullable=True)
+    last_login_at = Column(DateTime(timezone=True), nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     roles = relationship("Role", secondary="user_roles", lazy="selectin")
+
+
+class AuthEvent(Base):
+    __tablename__ = "auth_events"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    actor_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    event_type = Column(String(50), nullable=False)  # login_success, login_failure, logout, impersonate_start, impersonate_stop
+    ip_address = Column(String(45), nullable=True)
+    user_agent = Column(Text, nullable=True)
+    details = Column(JSONB, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class Role(Base):

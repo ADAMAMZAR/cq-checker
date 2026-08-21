@@ -91,7 +91,7 @@ export default function SecurityGateToggle() {
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-80 rounded-xl border border-[var(--border-visible)] bg-[var(--bg-elevated)] p-3 shadow-xl z-50 animate-in fade-in zoom-in-95 duration-100">
+        <div className="absolute right-0 mt-2 w-80 rounded-xl border border-[var(--border-visible)] bg-[var(--bg-card-solid)] p-3 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-100">
           <div className="space-y-1.5 mb-3">
             <button
               type="button"

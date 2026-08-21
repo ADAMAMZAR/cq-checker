@@ -1,0 +1,50 @@
+{
+  "header": {
+    "title": "Gamuda Group Procurement Office",
+    "admin": "Admin",
+    "homeTooltip": "Return to Main Home"
+  },
+  "security": {
+    "accessDenied": "Access Denied",
+    "onlyGamudian": "Only Gamudian are allowed to access this system.",
+    "blocked": "Blocked",
+    "allowed": "Allowed"
+  },
+  "hero": {
+    "title": "Operations Deck",
+    "subtitle": "Gamuda Group Procurement Office Intelligence Hub",
+    "description": "Unified platform for procurement workflows, vendor verification, e-auctions, and strategic cost analytics."
+  },
+  "features": {
+    "strategic_insights": {
+      "title": "Real-Time Strategic Insights",
+      "subtitle": "Executive Analytics",
+      "description": "Financial breakdown, cost impact analysis, and compliance cost metrics portal."
+    },
+    "procurement_assistant": {
+      "title": "Procurement Assistant",
+      "subtitle": "AI Assistant",
+      "description": "SAP Ariba Procurement Assistant for Vendor Onboarding and Sourcing."
+    },
+    "supplier_visibility": {
+      "title": "Real-Time Supplier Visibility",
+      "subtitle": "Vendor Intelligence",
+      "description": "Deep audit engine, certificate cross-checks, and real-time vendor risk monitoring."
+    },
+    "certificate_checker": {
+      "title": "Certificate Checker",
+      "subtitle": "Audit Registry Engine",
+      "description": "Manage, update, and resolve supplier certificate data and audit findings."
+    },
+    "e_auction_generator": {
+      "title": "E-Auction Generator",
+      "subtitle": "Event Document Center",
+      "description": "Issue and generate official E-Auction Event Information documents & lot structures."
+    }
+  },
+  "actions": {
+    "clickHere": "Click Here",
+    "restricted": "Restricted Access",
+    "close": "Close"
+  }
+}

@@ -12,6 +12,7 @@ import {
 } from "@/lib/securityStore";
 import SecurityGateToggle from "./SecurityGateToggle";
 import ThemeToggle from "./ThemeToggle";
+import LanguageDropdown from "./LanguageDropdown";
 
 export default function SecurityGuard({ children }: { children: React.ReactNode }) {
   const [email, setEmail] = useState<string>(DEFAULT_AUTHORIZED_EMAIL);
@@ -53,11 +54,10 @@ export default function SecurityGuard({ children }: { children: React.ReactNode 
           </div>
           <div className="flex items-center gap-2 sm:gap-2.5">
             <SecurityGateToggle />
+            <LanguageDropdown />
             <ThemeToggle />
           </div>
         </header>
-
-        {/* Full Screen Access Denied Security Wall */}
         <main className="flex-1 flex items-center justify-center p-6">
           <div className="max-w-lg w-full rounded-2xl border border-red-500/30 bg-[var(--bg-elevated)] p-8 shadow-2xl text-center relative overflow-hidden animate-in fade-in zoom-in-95 duration-200">
             <h2 className="text-2xl font-extrabold tracking-tight text-[var(--heading-color)] mb-2">

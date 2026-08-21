@@ -73,6 +73,27 @@ async def init_db_tables():
                 PRIMARY KEY (role_id, feature_id)
             );
         """))
+
+        # SSO user columns
+        await session.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS sso_subject VARCHAR(255);"))
+        await session.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS sso_provider VARCHAR(50) DEFAULT 'entra';"))
+        await session.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS sso_tenant_id VARCHAR(100);"))
+        await session.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP WITH TIME ZONE;"))
+        await session.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;"))
+
+        # Auth events audit log table
+        await session.execute(text("""
+            CREATE TABLE IF NOT EXISTS auth_events (
+                id UUID PRIMARY KEY,
+                user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                actor_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                event_type VARCHAR(50) NOT NULL,
+                ip_address VARCHAR(45),
+                user_agent TEXT,
+                details JSONB,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            );
+        """))
         await session.commit()
 
 

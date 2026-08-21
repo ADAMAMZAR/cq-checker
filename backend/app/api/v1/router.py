@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from app.api.v1.admin_users import router as admin_users_router
 from app.api.v1.ariba_audit import router as ariba_audit_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.certificates import router as certificates_router
@@ -11,6 +12,7 @@ from app.api.v1.files import router as files_router
 
 api_v1_router = APIRouter()
 
+api_v1_router.include_router(admin_users_router)
 api_v1_router.include_router(ariba_audit_router)
 api_v1_router.include_router(auth_router)
 api_v1_router.include_router(certificates_router)
