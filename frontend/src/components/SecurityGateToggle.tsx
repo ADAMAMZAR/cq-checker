@@ -81,8 +81,8 @@ export default function SecurityGateToggle() {
         </span>
         <span
           className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase tracking-wider ${isAllowed
-            ? "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300"
-            : "bg-red-500/20"
+            ? "text-emerald-700"
+            : "text-red-700"
             }`}
         >
           {isAllowed ? "Allowed" : "Blocked"}

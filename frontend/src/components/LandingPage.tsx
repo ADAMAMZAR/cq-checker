@@ -78,7 +78,7 @@ export default function LandingPage() {
       <HeroBanner />
 
       {/* Dynamic Grid of Allowed Portal Modules (Full Width Layout) */}
-      <section className={`w-full grid gap-4 sm:gap-6 ${getGridColsClass(visibleFeatures.length)}`}>
+      <section className={`w-full grid gap-4 sm:gap-6 pt-10 ${getGridColsClass(visibleFeatures.length)}`}>
         {visibleFeatures.map((item) => (
           <PortalFeatureCard
             key={item.id}
