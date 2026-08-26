@@ -21,7 +21,7 @@ export interface PortalModule {
 export const PORTAL_FEATURES: PortalModule[] = [
   {
     id: "strategic_insights",
-    title: "Real-Time Strategic Insights",
+    title: "Automating Real-Time Strategic Insights",
     subtitle: "Executive Analytics",
     description: "Financial breakdown, cost impact analysis, and compliance cost metrics portal.",
     icon: IconTrendingUp,
@@ -30,7 +30,7 @@ export const PORTAL_FEATURES: PortalModule[] = [
   },
   {
     id: "procurement_assistant",
-    title: "Procurement Assistant",
+    title: "24/7 Autonomous Procurement Assistant",
     subtitle: "AI Assistant",
     description: "SAP Ariba Procurement Assistant for Vendor Onboarding and Sourcing.",
     icon: IconRobot,
@@ -39,7 +39,7 @@ export const PORTAL_FEATURES: PortalModule[] = [
   },
   {
     id: "supplier_visibility",
-    title: "Real-Time Supplier Visibility",
+    title: "Providing Real-Time Supplier Visibility",
     subtitle: "Vendor Intelligence",
     description: "Deep audit engine, certificate cross-checks, and real-time vendor risk monitoring.",
     icon: IconEye,
@@ -48,7 +48,7 @@ export const PORTAL_FEATURES: PortalModule[] = [
   },
   {
     id: "certificate_checker",
-    title: "Certificate Checker",
+    title: "Automating Supplier Compliance Audits",
     subtitle: "Audit Registry Engine",
     description: "Manage, update, and resolve supplier certificate data and audit findings.",
     icon: IconCertificate,

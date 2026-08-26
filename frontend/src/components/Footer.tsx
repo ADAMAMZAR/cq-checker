@@ -104,7 +104,7 @@ export default function Footer() {
         {/* Section Heading */}
         <div className="mb-6 flex items-center gap-3">
           <h2 className="font-sans text-sm sm:text-base font-bold tracking-tight text-[var(--heading-color)]">
-            Global Office Contacts
+            Procurement Office Contacts
           </h2>
         </div>
         {/* Regional Contacts Grid */}

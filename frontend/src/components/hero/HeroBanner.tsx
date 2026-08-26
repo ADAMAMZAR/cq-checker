@@ -5,7 +5,10 @@ import Image from "next/image";
 import { HERO_SLIDE_IMAGES } from "@/config/portalFeatures";
 
 export default function HeroBanner() {
-  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  // Lazy state initialization ensures initial render is ALREADY a random image (0ms flash)
+  const [currentImageIndex, setCurrentImageIndex] = useState<number>(() => {
+    return Math.floor(Math.random() * HERO_SLIDE_IMAGES.length);
+  });
 
   useEffect(() => {
     // Check if user prefers reduced motion (battery saver or budget devices)
@@ -14,7 +17,13 @@ export default function HeroBanner() {
     }
 
     const timer = setInterval(() => {
-      setCurrentImageIndex((prev) => (prev + 1) % HERO_SLIDE_IMAGES.length);
+      setCurrentImageIndex((prev) => {
+        let nextIndex = Math.floor(Math.random() * HERO_SLIDE_IMAGES.length);
+        while (nextIndex === prev && HERO_SLIDE_IMAGES.length > 1) {
+          nextIndex = Math.floor(Math.random() * HERO_SLIDE_IMAGES.length);
+        }
+        return nextIndex;
+      });
     }, 6000);
     return () => clearInterval(timer);
   }, []);

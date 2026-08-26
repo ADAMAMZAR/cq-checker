@@ -131,10 +131,6 @@ export default function EAuctionGenerator() {
     <div className="flex-1 flex flex-col w-full max-w-5xl mx-auto pb-16 animate-fade-in">
       {/* Page Title Descriptor */}
       <div className="text-center mb-8">
-        <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[var(--accent-primary-soft)] border border-[var(--accent-primary-border)] text-xs font-bold uppercase tracking-wider text-[var(--accent-primary-text)] mb-3">
-          <IconGavel className="w-4 h-4 text-[var(--accent-primary-text)]" />
-          Gamuda E-Auction Workspace
-        </div>
         <h1 className="text-2xl sm:text-3xl font-extrabold text-[var(--heading-color)] tracking-tight">
           E-Auction Document Generator
         </h1>
