@@ -21,8 +21,8 @@ import {
 
 const ALL_ROLES = [
   { name: "admin", label: "Admin", desc: "Full system access" },
-  { name: "gpo_lead", label: "GPO Management", desc: "GPO management team" },
-  { name: "manager", label: "Non GPO Management", desc: "Non GPO Management roles" },
+  { name: "gpo_admin", label: "GPO Admin", desc: "GPO Admin team" },
+  { name: "management", label: "Management", desc: "Management team" },
   { name: "gpo", label: "GPO", desc: "GPO operations team" },
   { name: "user", label: "User", desc: "Standard employee access" },
 ];

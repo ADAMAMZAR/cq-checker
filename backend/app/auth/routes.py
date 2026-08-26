@@ -139,23 +139,3 @@ async def debug_sso_session(request: Request, db: AsyncSession = Depends(get_db)
             "roles": [r.name for r in user.roles] if user and hasattr(user, "roles") and user.roles else [],
         } if user else None
     }
-
-
-@router.post("/reset-admin")
-@router.post("/api/auth/reset-admin")
-async def reset_admin_role_endpoint(request: Request, db: AsyncSession = Depends(get_db)):
-    """Temporary dev endpoint: Reset user role to admin for adamamzar email."""
-    user = await get_current_user_from_session(request, db)
-    if not user or "adamamzar" not in user.email.lower():
-        raise HTTPException(403, "Only adamamzar email is permitted to run temporary admin reset.")
-
-    admin_role_res = await db.execute(select(Role).where(Role.name == "admin"))
-    admin_role = admin_role_res.scalar_one_or_none()
-    if not admin_role:
-        raise HTTPException(500, "Admin role 'admin' not found in database.")
-
-    await db.execute(delete(UserRole).where(UserRole.user_id == user.id))
-    db.add(UserRole(user_id=user.id, role_id=admin_role.id))
-    await db.commit()
-    logger.info(f"⚡ Restored 'admin' role for {user.email}")
-    return {"status": "success", "message": f"Restored admin role for {user.email}"}

@@ -3,7 +3,6 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { checkAuthSession, UserSession } from "@/lib/auth";
 import { setStoredUserEmail } from "@/lib/securityStore";
-import { setStoredRoleName } from "@/lib/roleStore";
 
 interface AuthContextType {
   session: UserSession | null;
@@ -16,7 +15,7 @@ const AuthContext = createContext<AuthContextType>({
   session: null,
   isAuthenticated: false,
   loading: true,
-  refreshAuth: async () => {},
+  refreshAuth: async () => { },
 });
 
 export const UNAUTHORIZED_EVENT = "gpo-unauthorized-session-event";
@@ -38,7 +37,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (res.authenticated && res.user) {
         if (res.user.email) setStoredUserEmail(res.user.email);
-        if (res.user.roles && res.user.roles.length > 0) setStoredRoleName(res.user.roles[0]);
       } else {
         setStoredUserEmail("");
       }

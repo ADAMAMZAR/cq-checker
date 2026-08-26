@@ -13,12 +13,9 @@ import {
   IconMoon,
   IconX,
   IconCheck,
-  IconShieldCheck,
 } from "@tabler/icons-react";
 import { checkAuthSession, loginWithEntra, logoutFromEntra, UserSession } from "@/lib/auth";
 import { setStoredUserEmail } from "@/lib/securityStore";
-import { setStoredRoleName, getStoredRoleName, ROLE_CHANGED_EVENT } from "@/lib/roleStore";
-import { API_BASE, authFetch } from "@/lib/api";
 import {
   SUPPORTED_LOCALES,
   SupportedLocale,
@@ -32,27 +29,17 @@ import { useAuth } from "@/context/AuthContext";
 export default function UserNav() {
   const router = useRouter();
   const { theme, setTheme } = useTheme();
-  const { session, isAuthenticated, loading, refreshAuth } = useAuth();
-  const [resettingAdmin, setResettingAdmin] = useState(false);
+  const { session, isAuthenticated, loading } = useAuth();
 
   const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
   const [showLanguageModal, setShowLanguageModal] = useState<boolean>(false);
   const [showThemeModal, setShowThemeModal] = useState<boolean>(false);
 
-  const [activeRoleName, setActiveRoleName] = useState<string>("admin");
   const [activeLocale, setActiveLocale] = useState<SupportedLocale>(getStoredLocale());
 
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setActiveRoleName(getStoredRoleName());
-    const handleRoleChanged = (e: Event) => {
-      const customEv = e as CustomEvent;
-      if (customEv.detail?.roleName) {
-        setActiveRoleName(customEv.detail.roleName);
-      }
-    };
-
     const handleLocaleChanged = (e: Event) => {
       const customEv = e as CustomEvent;
       if (customEv.detail?.locale) {
@@ -60,10 +47,8 @@ export default function UserNav() {
       }
     };
 
-    window.addEventListener(ROLE_CHANGED_EVENT, handleRoleChanged);
     window.addEventListener(LANGUAGE_CHANGED_EVENT, handleLocaleChanged);
     return () => {
-      window.removeEventListener(ROLE_CHANGED_EVENT, handleRoleChanged);
       window.removeEventListener(LANGUAGE_CHANGED_EVENT, handleLocaleChanged);
     };
   }, []);
@@ -102,12 +87,8 @@ export default function UserNav() {
     );
   }
 
-  const primaryRole = session.roles?.[0] || activeRoleName || "user";
-  const isAdmin =
-    session.roles?.includes("admin") ||
-    session.roles?.includes("all") ||
-    activeRoleName === "admin" ||
-    activeRoleName === "all";
+  const primaryRole = session.roles?.[0] || "user";
+  const isAdmin = session.roles?.some((r) => ["admin", "gpo_admin", "all"].includes(r)) ?? false;
 
   const currentLocaleObj =
     SUPPORTED_LOCALES.find((l) => l.code === activeLocale) || SUPPORTED_LOCALES[0];
@@ -121,33 +102,6 @@ export default function UserNav() {
   const handleSelectTheme = (newTheme: "dark" | "light") => {
     setTheme(newTheme);
     setShowThemeModal(false);
-  };
-
-  const isAdamAmzar = session?.email?.toLowerCase().includes("adamamzar");
-
-  const handleResetAdmin = async () => {
-    setResettingAdmin(true);
-    try {
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-      await authFetch(`${API_URL}/auth/reset-admin`, { method: "POST" });
-      setStoredRoleName("admin");
-      await refreshAuth();
-      setIsDropdownOpen(false);
-      window.location.href = "/";
-    } catch (err) {
-      console.error("Failed to reset admin role:", err);
-      try {
-        await authFetch(`/api/auth/reset-admin`, { method: "POST" });
-        setStoredRoleName("admin");
-        await refreshAuth();
-        setIsDropdownOpen(false);
-        window.location.href = "/";
-      } catch (e) {
-        console.error("Fallback reset admin failed:", e);
-      }
-    } finally {
-      setResettingAdmin(false);
-    }
   };
 
   return (
@@ -187,22 +141,6 @@ export default function UserNav() {
 
           {/* Menu Actions */}
           <div className="p-1.5 space-y-0.5">
-            {/* Temporary Dev Admin Reset Button for adamamzar */}
-            {isAdamAmzar && (
-              <button
-                type="button"
-                onClick={handleResetAdmin}
-                disabled={resettingAdmin}
-                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-emerald-500 dark:text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 transition-colors cursor-pointer"
-                title="Temporary Dev Shortcut: Reset user role to admin"
-              >
-                <IconShieldCheck className="w-4 h-4 text-emerald-500 shrink-0" />
-                <div className="text-left flex-1">
-                  <div>{resettingAdmin ? "Resetting..." : "⚡ Reset to Admin (Dev)"}</div>
-                </div>
-              </button>
-            )}
-
             {/* Admin Console Option (Conditional) */}
             {isAdmin && (
               <button

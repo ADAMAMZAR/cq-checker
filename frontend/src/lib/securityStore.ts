@@ -1,8 +1,5 @@
-export const SECURITY_EMAIL_KEY = "cq_demo_security_email";
-export const SECURITY_EMAIL_CHANGED_EVENT = "cq_demo_security_email_changed";
-
-export const DEFAULT_AUTHORIZED_EMAIL = "adam@gamuda.com.my";
-export const DEMO_UNAUTHORIZED_EMAIL = "outsider@gmail.com";
+export const SECURITY_EMAIL_KEY = "gpo_sso_user_email";
+export const SECURITY_EMAIL_CHANGED_EVENT = "gpo_sso_user_email_changed";
 
 export function getStoredUserEmail(): string {
   if (typeof window === "undefined") return "";

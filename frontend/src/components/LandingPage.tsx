@@ -3,9 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import {
-  getStoredRoleName,
   isFeatureAllowedForRole,
-  ROLE_CHANGED_EVENT,
   DEFAULT_ROLES,
   fetchRolesAndFeaturesCached,
   mergeRoles,
@@ -15,19 +13,22 @@ import { PORTAL_FEATURES, PortalModule } from "@/config/portalFeatures";
 import dynamic from "next/dynamic";
 import HeroBanner from "./hero/HeroBanner";
 import PortalFeatureCard from "./cards/PortalFeatureCard";
+import { useAuth } from "@/context/AuthContext";
 
 const RestrictedAccessModal = dynamic(() => import("./modals/RestrictedAccessModal"), { ssr: false });
 
 export default function LandingPage() {
   const router = useRouter();
+  const { session } = useAuth();
 
-  const [activeRoleName, setActiveRoleName] = useState<string>("all");
   const [roles, setRoles] = useState<RoleInfo[]>(DEFAULT_ROLES);
   const [restrictedModalItem, setRestrictedModalItem] = useState<PortalModule | null>(null);
 
-  useEffect(() => {
-    setActiveRoleName(getStoredRoleName());
+  const userRoles = useMemo(() => {
+    return session?.roles && session.roles.length > 0 ? session.roles : ["user"];
+  }, [session]);
 
+  useEffect(() => {
     async function loadRoles() {
       try {
         const res = await fetchRolesAndFeaturesCached();
@@ -39,24 +40,14 @@ export default function LandingPage() {
       }
     }
     loadRoles();
-
-    const handleRoleChange = (e: Event) => {
-      const customEv = e as CustomEvent;
-      if (customEv.detail?.roleName) {
-        setActiveRoleName(customEv.detail.roleName);
-      }
-    };
-
-    window.addEventListener(ROLE_CHANGED_EVENT, handleRoleChange);
-    return () => window.removeEventListener(ROLE_CHANGED_EVENT, handleRoleChange);
   }, []);
 
-  // Filter features based on RBAC role permissions (Hide restricted features directly)
+  // Filter features based on live SSO RBAC role permissions
   const visibleFeatures = useMemo(() => {
     return PORTAL_FEATURES.filter((item) =>
-      isFeatureAllowedForRole(item.id, activeRoleName, roles)
+      isFeatureAllowedForRole(item.id, userRoles, roles)
     );
-  }, [activeRoleName, roles]);
+  }, [userRoles, roles]);
 
   const getGridColsClass = (count: number) => {
     if (count >= 5) return "grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5";
