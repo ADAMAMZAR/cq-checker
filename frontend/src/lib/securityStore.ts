@@ -5,12 +5,12 @@ export const DEFAULT_AUTHORIZED_EMAIL = "adam@gamuda.com.my";
 export const DEMO_UNAUTHORIZED_EMAIL = "outsider@gmail.com";
 
 export function getStoredUserEmail(): string {
-  if (typeof window === "undefined") return DEFAULT_AUTHORIZED_EMAIL;
+  if (typeof window === "undefined") return "";
   try {
     const val = localStorage.getItem(SECURITY_EMAIL_KEY);
-    return val && val.trim() ? val.trim() : DEFAULT_AUTHORIZED_EMAIL;
+    return val && val.trim() ? val.trim() : "";
   } catch {
-    return DEFAULT_AUTHORIZED_EMAIL;
+    return "";
   }
 }
 
@@ -30,5 +30,6 @@ export function setStoredUserEmail(email: string): void {
 }
 
 export function isAuthorizedDomain(email: string): boolean {
+  if (!email || !email.trim()) return false;
   return email.trim().toLowerCase().endsWith("@gamuda.com.my");
 }

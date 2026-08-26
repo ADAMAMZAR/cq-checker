@@ -66,7 +66,7 @@ export default function PortalFeatureCard({ item, isAllowed, onSelect }: PortalF
 
       {/* Hover Overlay for Restricted Features */}
       {!isAllowed && (
-        <div className="absolute inset-0 bg-[var(--bg-card-solid)]/95 backdrop-blur-[2px] z-30 opacity-0 group-hover:opacity-100 transition-all duration-300 flex flex-col items-center justify-center p-4 text-center pointer-events-none">
+        <div className="absolute inset-0 bg-[var(--bg-card-solid)] z-30 opacity-0 group-hover:opacity-100 transition-opacity duration-150 flex flex-col items-center justify-center p-4 text-center pointer-events-none">
           <div className="w-9 h-9 rounded-full bg-red-500/10 border border-red-500/30 flex items-center justify-center text-red-500 mb-2">
             <IconLock className="w-4 h-4" />
           </div>

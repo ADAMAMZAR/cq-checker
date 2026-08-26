@@ -61,7 +61,9 @@ async def get_or_create_user(claims: dict, db: AsyncSession) -> User:
             db.add(UserRole(user_id=user.id, role_id=default_role.id))
         logger.info(f"Provisioned new SSO user: {email} ({user.id})")
     else:
-        # Update existing user SSO metadata (preserving any pre-assigned roles in DB)
+        # Update existing user SSO metadata and sync display name from Entra claims
+        if display_name:
+            user.display_name = display_name
         if sso_subject and not user.sso_subject:
             user.sso_subject = sso_subject
         if tenant_id and not user.sso_tenant_id:

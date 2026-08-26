@@ -103,9 +103,18 @@ export function getRoleByName(roleName: string, customRoles?: RoleInfo[]): RoleI
   return found || DEFAULT_ROLES[0];
 }
 
-export function isFeatureAllowedForRole(featureId: string, roleName: string, customRoles?: RoleInfo[]): boolean {
-  if (roleName === "all") return true;
-  const role = getRoleByName(roleName, customRoles);
+export function isFeatureAllowedForRole(featureId: string, roleNameOrRoles: string | string[], customRoles?: RoleInfo[]): boolean {
+  const rolesList = Array.isArray(roleNameOrRoles) ? roleNameOrRoles : [roleNameOrRoles];
+  if (rolesList.includes("all") || rolesList.includes("admin")) return true;
+
   const normId = normalizeFeatureId(featureId);
-  return role.feature_ids.some((fid) => normalizeFeatureId(fid) === normId);
+  const roles = customRoles && customRoles.length > 0 ? customRoles : DEFAULT_ROLES;
+
+  for (const rName of rolesList) {
+    const foundRole = roles.find((r) => r.name === rName);
+    if (foundRole && foundRole.feature_ids.some((fid) => normalizeFeatureId(fid) === normId)) {
+      return true;
+    }
+  }
+  return false;
 }

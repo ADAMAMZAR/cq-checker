@@ -90,6 +90,9 @@ export async function authFetch(input: RequestInfo | URL, init: RequestInit = {}
 
   if (res.status === 401) {
     console.warn("API request returned 401 Unauthorized:", input);
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("gpo-unauthorized-session-event"));
+    }
   }
 
   if (res.status === 403 && typeof window !== "undefined") {

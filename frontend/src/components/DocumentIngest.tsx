@@ -118,7 +118,7 @@ export default function DocumentIngest() {
   return (
     <div className="flex flex-col gap-8 max-w-4xl mx-auto w-full py-2 animate-fade-in">
       {/* Upload card */}
-      <section className="rounded-2xl border border-[var(--border-visible)] bg-[var(--bg-card)] p-6 shadow-xl backdrop-blur-2xl">
+      <section className="rounded-2xl border border-[var(--border-visible)] bg-[var(--bg-card)] p-6 shadow-sm">
         <div className="flex items-center gap-3 mb-5">
           <div className="p-2.5 rounded-xl bg-[var(--accent-primary-soft)] border border-[var(--accent-primary-border)] text-[var(--accent-primary-text)]">
             <IconUpload className="w-5 h-5" />
@@ -230,7 +230,7 @@ export default function DocumentIngest() {
       </section>
 
       {/* Ingested documents */}
-      <section className="rounded-2xl border border-[var(--border-visible)] bg-[var(--bg-card)] p-6 shadow-xl backdrop-blur-2xl">
+      <section className="rounded-2xl border border-[var(--border-visible)] bg-[var(--bg-card)] p-6 shadow-sm">
         <h3 className="text-[10px] font-bold text-[var(--text-tertiary)] uppercase tracking-wider mb-4">Ingested documents</h3>
         {loadingDocs ? (
           <div className="space-y-2 animate-pulse">

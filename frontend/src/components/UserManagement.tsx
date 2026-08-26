@@ -21,9 +21,9 @@ import {
 
 const ALL_ROLES = [
   { name: "admin", label: "Admin", desc: "Full system access" },
-  { name: "manager", label: "Manager", desc: "Strategic sourcing oversight" },
+  { name: "gpo_lead", label: "GPO Management", desc: "GPO management team" },
+  { name: "manager", label: "Non GPO Management", desc: "Non GPO Management roles" },
   { name: "gpo", label: "GPO", desc: "GPO operations team" },
-  { name: "gpo_lead", label: "GPO Lead", desc: "GPO management team" },
   { name: "user", label: "User", desc: "Standard employee access" },
 ];
 
@@ -210,9 +210,6 @@ export default function UserManagement() {
                   <td className="py-3 px-4">
                     <div className="flex flex-col">
                       <span className="font-semibold text-[var(--heading-color)]">{u.email}</span>
-                      {u.display_name && (
-                        <span className="text-[10px] text-[var(--text-tertiary)]">{u.display_name}</span>
-                      )}
                     </div>
                   </td>
                   <td className="py-3 px-4">
