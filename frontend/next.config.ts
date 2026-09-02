@@ -11,6 +11,7 @@ const nextConfig: NextConfig = {
   images: {
     formats: ["image/avif", "image/webp"],
     minimumCacheTTL: 2592000,
+    unoptimized: isStaticExport ? true : false,
   },
   experimental: {
     proxyClientMaxBodySize: "100mb",
