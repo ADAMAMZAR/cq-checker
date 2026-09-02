@@ -14,6 +14,8 @@ export interface AuthMeResponse {
   user: UserSession | null;
 }
 
+import { clearRolesCache } from "./roleStore";
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 /**
@@ -51,6 +53,7 @@ export async function checkAuthSession(): Promise<AuthMeResponse> {
  * Logout current session and redirect to Entra ID end-session URL.
  */
 export async function logoutFromEntra(): Promise<void> {
+  clearRolesCache();
   try {
     const response = await fetch(`${API_BASE_URL}/auth/logout`, {
       method: "POST",

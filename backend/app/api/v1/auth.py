@@ -9,10 +9,17 @@ from app.models.tables import Feature, Role, RoleFeature
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# In-memory cache to avoid continuous PostgreSQL queries for static roles and features
+_cached_roles_features_response = None
+
 
 @router.get("/api/v1/auth/roles", tags=["Auth & RBAC"])
 @router.get("/api/auth/roles", tags=["Auth & RBAC"])
 async def get_roles_and_features():
+    global _cached_roles_features_response
+    if _cached_roles_features_response is not None:
+        return _cached_roles_features_response
+
     try:
         factory = get_session_factory()
         async with factory() as session:
@@ -49,7 +56,8 @@ async def get_roles_and_features():
                     }
                     for f in features_db
                 ]
-                return {"roles": roles_list, "features": features_list}
+                _cached_roles_features_response = {"roles": roles_list, "features": features_list}
+                return _cached_roles_features_response
     except Exception as e:
         logger.warning(f"Error fetching roles from DB: {e}")
 
@@ -62,11 +70,14 @@ async def get_roles_and_features():
             "feature_ids": ROLE_FEATURES.get(r["name"], []),
             "test_user": next((u["email"] for u in TEST_USERS if r["name"] in u["roles"]), None),
         })
-    return {"roles": roles_list, "features": FEATURES}
+    _cached_roles_features_response = {"roles": roles_list, "features": FEATURES}
+    return _cached_roles_features_response
 
 
 @router.post("/api/v1/auth/seed", tags=["Auth & RBAC"])
 @router.post("/api/auth/seed", tags=["Auth & RBAC"])
 async def trigger_seed():
+    global _cached_roles_features_response
     await seed()
+    _cached_roles_features_response = None
     return {"status": "success", "message": "Roles, features, and test users seeded successfully"}

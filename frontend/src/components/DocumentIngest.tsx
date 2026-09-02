@@ -10,6 +10,7 @@ import {
   IconExternalLink,
 } from "@tabler/icons-react";
 import { uploadDocument, bulkUploadDocuments, fetchDocuments, buildFileUrl } from "@/lib/api";
+import { formatMalaysiaDateTime } from "@/lib/dateUtils";
 import type { DocumentIngestResult, DocumentSummary } from "@/types";
 
 const STAGES = ["Uploading", "Parsing", "Chunking", "Embedding"];
@@ -268,7 +269,7 @@ export default function DocumentIngest() {
                     </td>
                     <td className="py-3 px-4 text-center font-mono tabular-nums">{doc.page_count ?? doc.parent_count ?? 0}</td>
                     <td className="py-3 px-4 text-right text-[var(--text-tertiary)]">
-                      {doc.created_at ? new Date(doc.created_at).toLocaleString() : "—"}
+                      {formatMalaysiaDateTime(doc.created_at)}
                     </td>
                   </tr>
                 ))}

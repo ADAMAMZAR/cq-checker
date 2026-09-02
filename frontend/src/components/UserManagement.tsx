@@ -18,6 +18,7 @@ import {
   deleteAdminUser,
   AdminUserItem,
 } from "@/lib/api";
+import { formatMalaysiaDate, formatMalaysiaDateTime } from "@/lib/dateUtils";
 
 const ALL_ROLES = [
   { name: "admin", label: "Admin", desc: "Full system access" },
@@ -210,6 +211,11 @@ export default function UserManagement() {
                   <td className="py-3 px-4">
                     <div className="flex flex-col">
                       <span className="font-semibold text-[var(--heading-color)]">{u.email}</span>
+                      {u.created_at && (
+                        <span className="text-[10px] text-[var(--text-tertiary)]">
+                          Added: {formatMalaysiaDate(u.created_at)}
+                        </span>
+                      )}
                     </div>
                   </td>
                   <td className="py-3 px-4">
@@ -242,7 +248,7 @@ export default function UserManagement() {
                     )}
                   </td>
                   <td className="py-3 px-4 text-[10px] font-mono text-[var(--text-tertiary)]">
-                    {u.last_login_at ? new Date(u.last_login_at).toLocaleString() : "Never"}
+                    {u.last_login_at ? formatMalaysiaDateTime(u.last_login_at) : "Never"}
                   </td>
                   <td className="py-3 px-4 text-right">
                     <div className="inline-flex items-center gap-1">

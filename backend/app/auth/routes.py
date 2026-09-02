@@ -9,8 +9,9 @@ from app.auth.dependencies import get_current_user_from_session
 from app.auth.oauth import oauth
 from app.auth.provisioning import get_or_create_user
 from app.config import settings
-from app.db.session import get_db
+from app.db.session import get_db, get_session_factory
 from app.models.tables import AuthEvent, User, Role, UserRole
+from app.services.timezones import to_malaysia
 
 logger = logging.getLogger(__name__)
 
@@ -54,10 +55,20 @@ async def callback(request: Request, db: AsyncSession = Depends(get_db)):
         logger.error(f"User provisioning failed: {e}")
         raise HTTPException(400, f"User provisioning failed: {e}")
 
-    # Save session details
+    # Save session details into cryptographically signed session cookie
+    user_roles = [r.name for r in user.roles] if hasattr(user, "roles") and user.roles else ["user"]
+    last_login_formatted = (
+        to_malaysia(user.last_login_at).strftime("%d/%m/%Y, %H:%M:%S")
+        if user.last_login_at
+        else None
+    )
+
     request.session["user_id"] = str(user.id)
     request.session["email"] = user.email
     request.session["display_name"] = user.display_name
+    request.session["roles"] = user_roles
+    request.session["is_active"] = bool(user.is_active)
+    request.session["last_login_at"] = last_login_formatted
 
     # Audit log authentication event
     client_ip = request.client.host if request.client else None
@@ -79,20 +90,25 @@ async def callback(request: Request, db: AsyncSession = Depends(get_db)):
 
 @router.post("/logout")
 @router.get("/logout")
-async def logout(request: Request, db: AsyncSession = Depends(get_db)):
+async def logout(request: Request):
     """Clear local user session and return Entra logout URL."""
-    user = await get_current_user_from_session(request, db)
-    if user:
-        client_ip = request.client.host if request.client else None
-        db.add(
-            AuthEvent(
-                user_id=user.id,
-                event_type="logout",
-                ip_address=client_ip,
-                user_agent=request.headers.get("user-agent"),
-            )
-        )
-        await db.commit()
+    user_id = request.session.get("user_id")
+    if user_id:
+        try:
+            factory = get_session_factory()
+            async with factory() as db:
+                client_ip = request.client.host if request.client else None
+                db.add(
+                    AuthEvent(
+                        user_id=user_id,
+                        event_type="logout",
+                        ip_address=client_ip,
+                        user_agent=request.headers.get("user-agent"),
+                    )
+                )
+                await db.commit()
+        except Exception as e:
+            logger.warning(f"Could not record logout event: {e}")
 
     request.session.clear()
 
@@ -105,37 +121,76 @@ async def logout(request: Request, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/me")
-async def me(request: Request, db: AsyncSession = Depends(get_db)):
-    """Return currently authenticated user from session."""
-    user = await get_current_user_from_session(request, db)
-    if not user:
+async def me(request: Request):
+    """Return currently authenticated user directly from cryptographically signed session cookie.
+
+    Bypasses PostgreSQL queries completely so Neon DB stays asleep and within the free tier.
+    """
+    user_id = request.session.get("user_id")
+    if not user_id:
         return {"authenticated": False, "user": None}
 
-    user_roles = [r.name for r in user.roles] if hasattr(user, "roles") and user.roles else []
+    # 1. Fast-path: read verified data directly from signed Starlette session cookie (0 DB queries!)
+    if "roles" in request.session and "email" in request.session:
+        return {
+            "authenticated": True,
+            "user": {
+                "id": user_id,
+                "email": request.session.get("email"),
+                "display_name": request.session.get("display_name"),
+                "roles": request.session.get("roles") or ["user"],
+                "is_active": request.session.get("is_active", True),
+                "last_login_at": request.session.get("last_login_at"),
+            },
+        }
 
-    return {
-        "authenticated": True,
-        "user": {
-            "id": str(user.id),
-            "email": user.email,
-            "display_name": user.display_name,
-            "roles": user_roles,
-            "is_active": user.is_active,
-            "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
-        },
-    }
+    # 2. Fallback path for legacy session cookies created prior to embedding roles
+    try:
+        factory = get_session_factory()
+        async with factory() as db:
+            user = await get_current_user_from_session(request, db)
+            if not user:
+                return {"authenticated": False, "user": None}
+
+            user_roles = [r.name for r in user.roles] if hasattr(user, "roles") and user.roles else ["user"]
+            last_login = (
+                to_malaysia(user.last_login_at).strftime("%d/%m/%Y, %H:%M:%S")
+                if user.last_login_at
+                else None
+            )
+
+            # Upgrade cookie in-place for future zero-DB fast-path requests
+            request.session["roles"] = user_roles
+            request.session["is_active"] = bool(user.is_active)
+            request.session["last_login_at"] = last_login
+
+            return {
+                "authenticated": True,
+                "user": {
+                    "id": str(user.id),
+                    "email": user.email,
+                    "display_name": user.display_name,
+                    "roles": user_roles,
+                    "is_active": user.is_active,
+                    "last_login_at": last_login,
+                },
+            }
+    except Exception as e:
+        logger.error(f"Error resolving legacy user session: {e}")
+        return {"authenticated": False, "user": None}
 
 
 @router.get("/debug")
-async def debug_sso_session(request: Request, db: AsyncSession = Depends(get_db)):
+async def debug_sso_session(request: Request):
     """Debug endpoint returning raw Microsoft Entra OIDC claims received upon login."""
-    user = await get_current_user_from_session(request, db)
     return {
         "raw_microsoft_entra_claims": request.session.get("raw_entra_claims"),
-        "authenticated_user_in_db": {
-            "id": str(user.id) if user else None,
-            "email": user.email if user else None,
-            "display_name": user.display_name if user else None,
-            "roles": [r.name for r in user.roles] if user and hasattr(user, "roles") and user.roles else [],
-        } if user else None
+        "authenticated_user_in_session": {
+            "id": request.session.get("user_id"),
+            "email": request.session.get("email"),
+            "display_name": request.session.get("display_name"),
+            "roles": request.session.get("roles"),
+            "is_active": request.session.get("is_active"),
+            "last_login_at": request.session.get("last_login_at"),
+        }
     }

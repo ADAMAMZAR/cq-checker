@@ -53,11 +53,12 @@ async def init_db_tables():
                 id VARCHAR(50) PRIMARY KEY,
                 display_name VARCHAR(100) NOT NULL,
                 description TEXT,
-                route_path VARCHAR(200),
+                route_path TEXT,
                 is_external VARCHAR(1) NOT NULL DEFAULT '0',
                 sort_order INTEGER NOT NULL DEFAULT 0
             );
         """))
+        await session.execute(text("ALTER TABLE features ALTER COLUMN route_path TYPE TEXT;"))
         await session.execute(text("""
             CREATE TABLE IF NOT EXISTS user_roles (
                 user_id UUID REFERENCES users(id) ON DELETE CASCADE,

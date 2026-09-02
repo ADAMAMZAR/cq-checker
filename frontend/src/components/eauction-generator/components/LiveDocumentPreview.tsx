@@ -14,6 +14,7 @@ import {
   IconPrinter,
   IconDownload,
 } from "@tabler/icons-react";
+import { formatMalaysiaDate } from "@/lib/dateUtils";
 
 interface LiveDocumentPreviewProps {
   payload: any;
@@ -108,7 +109,7 @@ export default function LiveDocumentPreview({ payload, onDownloadDocx }: LiveDoc
                 <span className="font-semibold text-slate-500 block">Bidding Date:</span>
                 <span className="font-bold text-slate-900 flex items-center gap-1">
                   <IconCalendar className="w-3.5 h-3.5 text-slate-400" />
-                  {payload.biddingDate || "(Not specified)"}
+                  {payload.biddingDate ? formatMalaysiaDate(payload.biddingDate) : "(Not specified)"}
                 </span>
               </div>
 

@@ -53,13 +53,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     verifyAuth(false);
 
-    // Quiet Stale-While-Revalidate: Re-check auth status when tab regains focus (0ms UI lag)
-    const handleFocusOrVisibility = () => {
-      if (document.visibilityState === "visible") {
-        verifyAuth(true);
-      }
-    };
-
     // Auto-invalidate session if API responds with 401 Unauthorized
     const handleUnauthorized = () => {
       setIsAuthenticated(false);
@@ -67,13 +60,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setStoredUserEmail("");
     };
 
-    window.addEventListener("visibilitychange", handleFocusOrVisibility);
-    window.addEventListener("focus", handleFocusOrVisibility);
     window.addEventListener(UNAUTHORIZED_EVENT, handleUnauthorized);
 
     return () => {
-      window.removeEventListener("visibilitychange", handleFocusOrVisibility);
-      window.removeEventListener("focus", handleFocusOrVisibility);
       window.removeEventListener(UNAUTHORIZED_EVENT, handleUnauthorized);
     };
   }, [verifyAuth]);

@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import type { IngestionCostTabProps } from "../types";
 import { KpiCard, SkeletonKpiCard } from "../components/KpiCard";
+import { formatMalaysiaDateTime } from "@/lib/dateUtils";
 
 export default function IngestionCostTab({ isLoading, ingestData, searchQuery }: IngestionCostTabProps) {
   const filteredDocuments = useMemo(() => {
@@ -110,7 +111,7 @@ export default function IngestionCostTab({ isLoading, ingestData, searchQuery }:
                         {doc.title}
                       </td>
                       <td className="py-3 px-4 text-[var(--text-tertiary)] font-mono whitespace-nowrap">
-                        {doc.created_at}
+                        {formatMalaysiaDateTime(doc.created_at)}
                       </td>
                       <td className="py-3 px-4 text-center text-[var(--text-primary)] font-medium tabular-nums">
                         {doc.page_count}

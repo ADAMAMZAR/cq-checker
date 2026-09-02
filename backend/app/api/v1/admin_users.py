@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.models.tables import User, Role, UserRole
+from app.services.timezones import to_malaysia
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +43,8 @@ async def list_users(db: AsyncSession = Depends(get_db)):
             "sso_subject": u.sso_subject,
             "sso_provider": u.sso_provider,
             "is_active": u.is_active,
-            "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None,
-            "created_at": u.created_at.isoformat() if u.created_at else None,
+            "last_login_at": to_malaysia(u.last_login_at).strftime("%d/%m/%Y, %H:%M:%S") if u.last_login_at else None,
+            "created_at": to_malaysia(u.created_at).strftime("%d/%m/%Y, %H:%M:%S") if u.created_at else None,
             "status": "Active (SSO Linked)" if u.sso_subject else "Pre-seeded (Pending Login)",
         })
 

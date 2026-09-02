@@ -219,7 +219,7 @@ class Feature(Base):
     id = Column(String(50), primary_key=True)
     display_name = Column(String(100), nullable=False)
     description = Column(Text, nullable=True)
-    route_path = Column(String(200), nullable=True)
+    route_path = Column(Text, nullable=True)
     is_external = Column(String(1), nullable=False, default="0")  # SQLite compat for boolean
     sort_order = Column(Integer, nullable=False, default=0)
 
