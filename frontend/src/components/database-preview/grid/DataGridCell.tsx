@@ -69,7 +69,7 @@ const DataGridCell = memo(function DataGridCell({
           <button
             onClick={() => onPromptDeleteRow(rIdx)}
             disabled={deletingRow === rIdx}
-            className="p-1.5 rounded text-[var(--text-tertiary)] hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer disabled:opacity-50"
+            className="p-1.5 rounded text-[var(--text-tertiary)] hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer disabled:opacity-50"
             title="Delete row"
           >
             <IconX className="w-3.5 h-3.5" />
@@ -99,11 +99,10 @@ const DataGridCell = memo(function DataGridCell({
           ? `Double-click or click edit icon to update ${meta.name}`
           : "Double-click for enlarged view"
       }
-      className={`py-2 px-3 align-top group/cell ${
-        meta.isLongText
+      className={`py-2 px-3 align-top group/cell ${meta.isLongText
           ? "whitespace-pre-wrap break-words max-w-[500px] leading-relaxed text-xs"
           : "whitespace-nowrap max-w-[260px] truncate text-xs"
-      }`}
+        }`}
     >
       <div className="flex items-center justify-between gap-1.5">
         <span className={meta.isTitleCol ? "font-semibold text-[var(--heading-color)]" : ""}>

@@ -21,7 +21,7 @@ export default function TableGrid({
           <col style={{ width: "15%" }} />
         </colgroup>
         <thead>
-          <tr className="border-b border-[var(--match-border)] font-bold text-[var(--match-text)] bg-[var(--table-header-bg)] backdrop-blur-sm">
+          <tr className="border-b border-[var(--match-border)] font-bold text-[var(--match-text)] bg-[var(--table-header-bg)]">
             <th className="py-2.5 px-3 uppercase tracking-wider text-[10px] border-r border-[var(--border-visible)]">Field</th>
             <th className="py-2.5 px-3 uppercase tracking-wider text-[10px] border-r border-[var(--border-visible)]">Value in Evidence</th>
             <th className="py-2.5 px-3 uppercase tracking-wider text-[10px] border-r border-[var(--border-visible)]">Value in Ariba</th>

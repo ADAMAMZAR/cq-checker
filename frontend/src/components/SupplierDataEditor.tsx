@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useDeferredValue } from "react";
 import {
   IconChevronLeft,
   IconLoader2,
@@ -43,7 +43,6 @@ export default function SupplierDataEditor({ onRefreshLogs }: SupplierDataEditor
   const [formSuccessMessage, setFormSuccessMessage] = useState<string | null>(null);
   const [formErrorMessage, setFormErrorMessage] = useState<string | null>(null);
 
-  // Initial Load: Fetch list of suppliers via audit-registry summary list
   const loadRegistry = useCallback(async () => {
     setIsRegistryLoading(true);
     try {
@@ -72,12 +71,14 @@ export default function SupplierDataEditor({ onRefreshLogs }: SupplierDataEditor
     );
   }, [registryLogs]);
 
+  const deferredSupplierSearchQuery = useDeferredValue(supplierSearchQuery);
+
   // Filtered suppliers memoization to avoid search thrashing
   const filteredSuppliers = useMemo(() => {
-    const q = supplierSearchQuery.trim().toLowerCase();
+    const q = deferredSupplierSearchQuery.trim().toLowerCase();
     if (!q) return uniqueSuppliers;
     return uniqueSuppliers.filter((s) => s.supplier_name.toLowerCase().includes(q));
-  }, [uniqueSuppliers, supplierSearchQuery]);
+  }, [uniqueSuppliers, deferredSupplierSearchQuery]);
 
   // Click Supplier: Fetch lightweight certificate evidence summaries using supplier_id
   const handleSelectSupplier = async (supplier: SupplierItem) => {

@@ -20,7 +20,7 @@ export default function RestrictedAccessModal({ item, onClose }: RestrictedAcces
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 animate-fade-in"
       role="dialog"
       aria-modal="true"
       aria-labelledby="modal-title"
@@ -54,7 +54,7 @@ export default function RestrictedAccessModal({ item, onClose }: RestrictedAcces
           <div className="mt-3 flex items-center justify-center gap-3 w-full">
             <button
               onClick={onClose}
-              className="px-5 py-2 rounded-lg text-xs font-semibold text-[var(--text-secondary)] hover:text-white border border-slate-700 hover:bg-slate-800 transition-all cursor-pointer"
+              className="px-5 py-2 rounded-lg text-xs font-semibold text-[var(--text-secondary)] hover:text-white border border-slate-700 hover:bg-slate-800 transition-colors cursor-pointer"
             >
               Close
             </button>

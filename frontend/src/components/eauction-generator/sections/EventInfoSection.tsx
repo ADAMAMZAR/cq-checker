@@ -2,6 +2,7 @@
 
 import { IconChevronDown, IconChevronRight, IconArrowRight } from "@tabler/icons-react";
 import type { EventType } from "../types";
+import { formatMalaysiaDate } from "@/lib/dateUtils";
 
 interface EventInfoSectionProps {
   isOpen: boolean;
@@ -188,6 +189,11 @@ export default function EventInfoSection({
             <div>
               <label className="text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider block mb-1.5">
                 Bidding Date <span className="text-[var(--mismatch-text)]">*</span>
+                {biddingDate && (
+                  <span className="text-[10px] text-emerald-500 font-mono font-medium ml-2">
+                    ({formatMalaysiaDate(biddingDate)})
+                  </span>
+                )}
               </label>
               <input
                 type="date"
@@ -366,6 +372,11 @@ export default function EventInfoSection({
               <div className="md:col-span-4 animate-fade-in">
                 <label className="text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider block mb-1.5">
                   Email Reference Date <span className="text-[var(--mismatch-text)]">*</span>
+                  {ceilingPriceDate && (
+                    <span className="text-[10px] text-emerald-500 font-mono font-medium ml-2">
+                      ({formatMalaysiaDate(ceilingPriceDate)})
+                    </span>
+                  )}
                 </label>
                 <input
                   type="date"

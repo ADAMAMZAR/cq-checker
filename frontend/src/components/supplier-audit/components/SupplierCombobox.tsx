@@ -45,7 +45,7 @@ export default function SupplierCombobox({
   };
 
   return (
-    <section className="rounded-2xl border border-[var(--border-visible)] bg-[var(--bg-card)] p-6 shadow-xl backdrop-blur-2xl">
+    <section className="rounded-2xl border border-[var(--border-visible)] bg-[var(--bg-card)] p-6 shadow-sm">
       <div className="flex items-center gap-3 mb-5">
         <div className="p-2.5 rounded-xl bg-[var(--accent-success-soft)] border border-[var(--accent-success-border)] text-[var(--accent-success-text)]">
           <IconCertificate className="w-5 h-5" />

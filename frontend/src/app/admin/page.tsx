@@ -7,6 +7,7 @@ import type { AdminTab } from "@/components/AdminTabs";
 import AdminSidebar from "@/components/AdminSidebar";
 
 // Heavy admin components — dynamic imports keep the /admin route snappy.
+const UserManagement = dynamic(() => import("@/components/UserManagement"), { ssr: false });
 const CostAnalytics = dynamic(() => import("@/components/CostAnalytics"), { ssr: false });
 const DatabasePreview = dynamic(() => import("@/components/DatabasePreview"), { ssr: false });
 const SchemaViewer = dynamic(() => import("@/components/SchemaViewer"), { ssr: false });
@@ -19,14 +20,14 @@ const IngestTestPlayground = dynamic(() => import("@/components/IngestTestPlaygr
 const ComparisonMatrix = dynamic(() => import("@/components/ComparisonMatrix"), { ssr: false });
 const RetrievalPlayground = dynamic(() => import("@/components/RetrievalPlayground"), { ssr: false });
 
-const VALID_TABS: AdminTab[] = ["database", "matrix", "costs", "schema", "playground", "ingest", "ingest-test", "retrieval"];
+const VALID_TABS: AdminTab[] = ["users", "database", "matrix", "costs", "schema", "playground", "ingest", "ingest-test", "retrieval"];
 const STORAGE_KEY = "admin_active_tab";
 
 function AdminPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
-  const [activeTab, setActiveTab] = useState<AdminTab>("database");
+  const [activeTab, setActiveTab] = useState<AdminTab>("users");
   const [isInitialized, setIsInitialized] = useState(false);
 
   // Synchronize active tab with URL query parameter & localStorage fallback
@@ -56,7 +57,7 @@ function AdminPageContent() {
         setActiveTab(savedTab);
         router.replace(`/admin?tab=${savedTab}`, { scroll: false });
       } else {
-        setActiveTab("database");
+        setActiveTab("users");
       }
     }
     setIsInitialized(true);
@@ -82,6 +83,7 @@ function AdminPageContent() {
 
       {/* Main Content Area */}
       <main className="flex-1 flex flex-col min-w-0 bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded-2xl p-3 md:p-5 shadow-xs">
+        {activeTab === "users" && <UserManagement />}
         {activeTab === "database" && <DatabasePreview />}
         {activeTab === "retrieval" && <RetrievalPlayground />}
         {activeTab === "matrix" && <ComparisonMatrix />}

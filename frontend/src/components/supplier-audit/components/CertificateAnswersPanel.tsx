@@ -12,7 +12,7 @@ export default function CertificateAnswersPanel({
   onRunVerification,
 }: CertificateAnswersPanelProps) {
   return (
-    <section className="rounded-2xl border border-[var(--border-visible)] bg-[var(--bg-card)] p-6 shadow-xl backdrop-blur-2xl space-y-5 animate-fade-in">
+    <section className="rounded-2xl border border-[var(--border-visible)] bg-[var(--bg-card)] p-6 shadow-sm space-y-5">
       <div className="flex items-center justify-between border-b border-[var(--border-subtle)] pb-4">
         <div className="flex items-center gap-3">
           <div className="p-2 rounded-lg bg-[var(--accent-success-soft)] border border-[var(--accent-success-border)] text-[var(--match-text)]">

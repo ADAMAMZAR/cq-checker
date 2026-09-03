@@ -3,29 +3,32 @@
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import {
-  getStoredRoleName,
   isFeatureAllowedForRole,
-  ROLE_CHANGED_EVENT,
   DEFAULT_ROLES,
   fetchRolesAndFeaturesCached,
   mergeRoles,
 } from "@/lib/roleStore";
 import { RoleInfo } from "@/types";
 import { PORTAL_FEATURES, PortalModule } from "@/config/portalFeatures";
+import dynamic from "next/dynamic";
 import HeroBanner from "./hero/HeroBanner";
 import PortalFeatureCard from "./cards/PortalFeatureCard";
-import RestrictedAccessModal from "./modals/RestrictedAccessModal";
+import { useAuth } from "@/context/AuthContext";
+
+const RestrictedAccessModal = dynamic(() => import("./modals/RestrictedAccessModal"), { ssr: false });
 
 export default function LandingPage() {
   const router = useRouter();
+  const { session } = useAuth();
 
-  const [activeRoleName, setActiveRoleName] = useState<string>("all");
   const [roles, setRoles] = useState<RoleInfo[]>(DEFAULT_ROLES);
   const [restrictedModalItem, setRestrictedModalItem] = useState<PortalModule | null>(null);
 
-  useEffect(() => {
-    setActiveRoleName(getStoredRoleName());
+  const userRoles = useMemo(() => {
+    return session?.roles && session.roles.length > 0 ? session.roles : ["user"];
+  }, [session]);
 
+  useEffect(() => {
     async function loadRoles() {
       try {
         const res = await fetchRolesAndFeaturesCached();
@@ -37,34 +40,24 @@ export default function LandingPage() {
       }
     }
     loadRoles();
-
-    const handleRoleChange = (e: Event) => {
-      const customEv = e as CustomEvent;
-      if (customEv.detail?.roleName) {
-        setActiveRoleName(customEv.detail.roleName);
-      }
-    };
-
-    window.addEventListener(ROLE_CHANGED_EVENT, handleRoleChange);
-    return () => window.removeEventListener(ROLE_CHANGED_EVENT, handleRoleChange);
   }, []);
 
-  // Performance Optimization: Compute allowed features set once per role/roles change
-  const allowedFeatureIds = useMemo(() => {
-    return new Set(
-      PORTAL_FEATURES.filter((item) =>
-        isFeatureAllowedForRole(item.id, activeRoleName, roles)
-      ).map((item) => item.id)
+  // Filter features based on live SSO RBAC role permissions
+  const visibleFeatures = useMemo(() => {
+    return PORTAL_FEATURES.filter((item) =>
+      isFeatureAllowedForRole(item.id, userRoles, roles)
     );
-  }, [activeRoleName, roles]);
+  }, [userRoles, roles]);
+
+  const getGridColsClass = (count: number) => {
+    if (count >= 5) return "grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5";
+    if (count === 4) return "grid-cols-1 sm:grid-cols-2 lg:grid-cols-4";
+    if (count === 3) return "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3";
+    if (count === 2) return "grid-cols-1 md:grid-cols-2";
+    return "grid-cols-1";
+  };
 
   const handleSelectFeature = (item: PortalModule) => {
-    const isAllowed = allowedFeatureIds.has(item.id);
-    if (!isAllowed) {
-      setRestrictedModalItem(item);
-      return;
-    }
-
     if (!item.isExternal && item.routePath) {
       router.push(item.routePath);
     }
@@ -75,13 +68,13 @@ export default function LandingPage() {
       {/* Hero Banner Section */}
       <HeroBanner />
 
-      {/* Grid of Portal Modules */}
-      <section className="w-full grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 sm:gap-6">
-        {PORTAL_FEATURES.map((item) => (
+      {/* Dynamic Grid of Allowed Portal Modules (Full Width Layout) */}
+      <section className={`w-full grid gap-4 sm:gap-6 pt-10 ${getGridColsClass(visibleFeatures.length)}`}>
+        {visibleFeatures.map((item) => (
           <PortalFeatureCard
             key={item.id}
             item={item}
-            isAllowed={allowedFeatureIds.has(item.id)}
+            isAllowed={true}
             onSelect={handleSelectFeature}
           />
         ))}

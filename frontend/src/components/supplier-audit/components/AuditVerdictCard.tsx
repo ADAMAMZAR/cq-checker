@@ -18,11 +18,10 @@ export default function AuditVerdictCard({
       <div className="flex items-center justify-between gap-3 border-b border-[var(--border-subtle)] pb-4">
         <div className="flex items-center gap-3">
           <div
-            className={`p-2.5 rounded-xl ${
-              isMatch
+            className={`p-2.5 rounded-xl ${isMatch
                 ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
                 : "bg-amber-500/10 text-amber-600 dark:text-amber-400"
-            }`}
+              }`}
           >
             <IconFileCheck className="w-6 h-6" />
           </div>
@@ -37,11 +36,10 @@ export default function AuditVerdictCard({
         </div>
 
         <div
-          className={`px-3 py-1.5 rounded-full text-xs font-extrabold uppercase tracking-wide border ${
-            isMatch
+          className={`px-3 py-1.5 rounded-full text-xs font-extrabold uppercase tracking-wide border ${isMatch
               ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400"
-              : "bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400"
-          }`}
+              : "bg-red-500/10 border-red-500/30 text-red-600 dark:text-red-400"
+            }`}
         >
           {isMatch ? "PASS / MATCH" : "MISMATCH DETECTED"}
         </div>

@@ -93,7 +93,7 @@ export default function LegacyComparisonTables({ log, table, tables }: LegacyCom
                 <col style={{ width: "15%" }} />
               </colgroup>
               <thead>
-                <tr className="border-b border-[var(--match-border)] font-bold text-[var(--match-text)] bg-[var(--table-header-bg)] backdrop-blur-sm">
+                <tr className="border-b border-[var(--match-border)] font-bold text-[var(--match-text)] bg-[var(--table-header-bg)]">
                   {t.headers.map((h, i) => (
                     <th
                       key={i}

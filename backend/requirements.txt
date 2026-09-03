@@ -6,6 +6,11 @@ pydantic-settings>=2.14.2
 python-multipart==0.0.32
 python-dotenv==1.2.2
 requests==2.34.2
+pydantic[email]
+
+# ── SSO (Microsoft Entra ID) ────────────────────────────────
+authlib==1.7.2
+itsdangerous==2.2.0
 
 # ── Database (Neon / pgvector) ───────────────────────────────────
 asyncpg==0.31.0
@@ -20,16 +25,6 @@ google-cloud-storage==3.10.0
 google-genai==2.16.0
 google-cloud-aiplatform==1.163.0
 pymupdf==1.26.0
-
-# ── Document parsing (Docling — IBM OSS) ────────────────────────
-# Single-call OCR + layout + table extraction for PDF, image, DOCX, XLSX, PPTX, HTML.
-docling>=2.118.0
-# Optional Docling backends (kept on separate lines so they can be removed
-# one at a time if a deploy target doesn't need them).
-python-docx>=1.2.0
-openpyxl>=3.1.5
-python-pptx>=1.0.2
-Pillow>=11.2.1
 
 # ── Testing ──────────────────────────────────────────────────────
 pytest==8.4.2

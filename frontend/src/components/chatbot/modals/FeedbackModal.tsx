@@ -33,7 +33,7 @@ export default function FeedbackModal({ messageId, onClose, onSubmit }: Feedback
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75"
       onClick={onClose}
     >
       <div
@@ -42,7 +42,7 @@ export default function FeedbackModal({ messageId, onClose, onSubmit }: Feedback
       >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="p-1.5 rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20">
+            <div className="p-1.5 rounded-lg bg-red-500/10 text-red-400 border border-red-500/20">
               <IconThumbDown className="w-4 h-4" />
             </div>
             <h3 className="font-sans text-sm font-bold text-[var(--heading-color)]">
@@ -65,11 +65,10 @@ export default function FeedbackModal({ messageId, onClose, onSubmit }: Feedback
           {FEEDBACK_REASONS.map((r) => (
             <label
               key={r}
-              className={`flex items-center gap-2.5 px-3 py-2 rounded-xl border text-xs cursor-pointer transition-all ${
-                reason === r
+              className={`flex items-center gap-2.5 px-3 py-2 rounded-xl border text-xs cursor-pointer transition-all ${reason === r
                   ? "bg-[var(--accent-primary-soft)] border-[var(--accent-primary-border)] text-[var(--accent-primary-text)] font-semibold"
                   : "bg-[var(--bg-surface)] border-[var(--border-subtle)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface-hover)]"
-              }`}
+                }`}
             >
               <input
                 type="radio"

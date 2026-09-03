@@ -16,23 +16,62 @@ from app.models.tables import Role, UserRole, Feature, RoleFeature, User
 
 ROLES = [
     {"name": "admin", "display_name": "Admin", "description": "Full system access including admin console"},
-    {"name": "manager", "display_name": "Manager", "description": "Strategic sourcing oversight (Features 1, 2, 3, 5)"},
-    {"name": "gpo", "display_name": "GPO", "description": "GPO operations team (Features 2, 3, 4, 5)"},
+    {"name": "gpo_admin", "display_name": "GPO Admin", "description": "GPO management, all features"},
+    {"name": "management", "display_name": "Management", "description": "Management oversight (Strategic Insights, Assistant, Supplier Visibility, E-Auction)"},
+    {"name": "manager", "display_name": "Manager", "description": "Strategic sourcing oversight"},
+    {"name": "gpo", "display_name": "GPO", "description": "GPO operations team (Assistant, Visibility, Checker, E-Auction)"},
     {"name": "gpo_lead", "display_name": "GPO Lead", "description": "GPO management, all features"},
-    {"name": "user", "display_name": "User", "description": "Standard user access (Features 2, 3, 5)"},
+    {"name": "user", "display_name": "User", "description": "Standard employee access (Assistant, Visibility, E-Auction)"},
 ]
 
 FEATURES = [
-    {"id": "strategic_insights", "display_name": "Real-Time Strategic Insights", "description": "Financial breakdown, cost impact analysis, and compliance cost metrics portal.", "route_path": "https://app.powerbi.com/groups/me/apps/3df7b712-6082-4f44-80ec-f8ce1adf648c/reports/18a05110-1a5c-47ba-895d-a8a35b769a9c/3d71ecbf3319379490fa?ctid=3661835b-b3f4-4a97-b533-2461d689290c&experience=power-bi", "is_external": "1", "sort_order": 1},
-    {"id": "procurement_assistant", "display_name": "Procurement Assistant", "description": "SAP Ariba Procurement Assistant for Vendor Onboarding and Sourcing.", "route_path": "/assistant", "is_external": "0", "sort_order": 2},
-    {"id": "supplier_visibility", "display_name": "Real-Time Supplier Visibility", "description": "Deep audit engine, certificate cross-checks, and real-time vendor risk monitoring.", "route_path": "https://app.powerbi.com/groups/me/apps/3df7b712-6082-4f44-80ec-f8ce1adf648c/reports/18a05110-1a5c-47ba-895d-a8a35b769a9c/3d71ecbf3319379490fa?ctid=3661835b-b3f4-4a97-b533-2461d689290c&experience=power-bi", "is_external": "1", "sort_order": 3},
-    {"id": "certificate_checker", "display_name": "Certificate Checker", "description": "Manage, update, and resolve supplier certificate data and audit findings.", "route_path": "/checker", "is_external": "0", "sort_order": 4},
-    {"id": "e_auction_generator", "display_name": "E-Auction Generator", "description": "Issue and generate official E-Auction Event Information documents & lot structures.", "route_path": "/auction", "is_external": "0", "sort_order": 5},
+    {
+        "id": "strategic_insights",
+        "display_name": "Automating Real-Time Strategic Insights",
+        "description": "Financial breakdown, cost impact analysis, and compliance cost metrics portal.",
+        "route_path": "https://app.powerbi.com/groups/me/apps/3df7b712-6082-4f44-80ec-f8ce1adf648c/reports/18a05110-1a5c-47ba-895d-a8a35b769a9c/3d71ecbf3319379490fa?ctid=3661835b-b3f4-4a97-b533-2461d689290c&experience=power-bi",
+        "is_external": "1",
+        "sort_order": 1,
+    },
+    {
+        "id": "procurement_assistant",
+        "display_name": "24/7 Autonomous Procurement Assistant",
+        "description": "SAP Ariba Procurement Assistant for Vendor Onboarding and Sourcing.",
+        "route_path": "https://notebook.google.com/notebook/4bf27118-ca6c-413b-ba77-17b381d3679a?pli=1",
+        "is_external": "1",
+        "sort_order": 2,
+    },
+    {
+        "id": "supplier_visibility",
+        "display_name": "Providing Real-Time Supplier Visibility",
+        "description": "Deep audit engine, certificate cross-checks, and real-time vendor risk monitoring.",
+        "route_path": "https://app.powerbi.com/groups/me/apps/3df7b712-6082-4f44-80ec-f8ce1adf648c/reports/18a05110-1a5c-47ba-895d-a8a35b769a9c/3d71ecbf3319379490fa?ctid=3661835b-b3f4-4a97-b533-2461d689290c&experience=power-bi",
+        "is_external": "1",
+        "sort_order": 3,
+    },
+    {
+        "id": "certificate_checker",
+        "display_name": "Automating Supplier Compliance Audits",
+        "description": "Manage, update, and resolve supplier certificate data and audit findings.",
+        "route_path": "https://chromewebstore.google.com/detail/lhcookcbhcmgbohajfncncpcihdjnjbo?utm_source=item-share-cb",
+        "is_external": "1",
+        "sort_order": 4,
+    },
+    {
+        "id": "e_auction_generator",
+        "display_name": "E-Auction Generator",
+        "description": "Issue and generate official E-Auction Event Information documents & lot structures.",
+        "route_path": "/auction",
+        "is_external": "0",
+        "sort_order": 5,
+    },
 ]
 
 # Role -> list of feature IDs they can access
 ROLE_FEATURES = {
     "admin":            ["strategic_insights", "procurement_assistant", "supplier_visibility", "certificate_checker", "e_auction_generator"],
+    "gpo_admin":        ["strategic_insights", "procurement_assistant", "supplier_visibility", "certificate_checker", "e_auction_generator"],
+    "management":       ["strategic_insights", "procurement_assistant", "supplier_visibility", "e_auction_generator"],
     "manager":          ["strategic_insights", "procurement_assistant", "supplier_visibility", "e_auction_generator"],
     "gpo":              ["procurement_assistant", "supplier_visibility", "certificate_checker", "e_auction_generator"],
     "gpo_lead":         ["strategic_insights", "procurement_assistant", "supplier_visibility", "certificate_checker", "e_auction_generator"],
@@ -40,11 +79,12 @@ ROLE_FEATURES = {
 }
 
 TEST_USERS = [
-    {"email": "admin@gmail.com", "display_name": "Admin", "roles": ["admin"]},
-    {"email": "manager@gmail.com", "display_name": "Manager", "roles": ["manager"]},
-    {"email": "gpo@gmail.com", "display_name": "GPO", "roles": ["gpo"]},
-    {"email": "gpolead@gmail.com", "display_name": "GPO Lead", "roles": ["gpo_lead"]},
-    {"email": "user@gmail.com", "display_name": "User", "roles": ["user"]},
+    {"email": "adamamzar@gamuda.com.my", "display_name": "Adam Amzar", "roles": ["admin"]},
+    {"email": "admin@gmail.com", "display_name": "Admin User", "roles": ["admin"]},
+    {"email": "gpo_admin@gamuda.com.my", "display_name": "GPO Admin", "roles": ["gpo_admin"]},
+    {"email": "management@gamuda.com.my", "display_name": "Management", "roles": ["management"]},
+    {"email": "gpo@gmail.com", "display_name": "GPO Operations", "roles": ["gpo"]},
+    {"email": "user@gmail.com", "display_name": "Standard User", "roles": ["user"]},
 ]
 
 

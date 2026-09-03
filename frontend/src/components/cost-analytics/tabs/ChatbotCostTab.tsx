@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import type { ChatbotCostTabProps } from "../types";
 import { KpiCard, SkeletonKpiCard } from "../components/KpiCard";
+import { formatMalaysiaDateTime } from "@/lib/dateUtils";
 
 export default function ChatbotCostTab({ isLoading, chatData, searchQuery }: ChatbotCostTabProps) {
   const filteredLogs = useMemo(() => {
@@ -105,7 +106,7 @@ export default function ChatbotCostTab({ isLoading, chatData, searchQuery }: Cha
                       className="hover:bg-[var(--bg-surface)] transition-colors duration-200"
                     >
                       <td className="py-3 px-4 text-[var(--text-tertiary)] font-mono whitespace-nowrap">
-                        {log.created_at}
+                        {formatMalaysiaDateTime(log.created_at)}
                       </td>
                       <td
                         className="py-3 px-4 font-medium text-[var(--heading-color)] max-w-xs truncate"

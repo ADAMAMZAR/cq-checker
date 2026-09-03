@@ -109,7 +109,7 @@ export default function MarkdownViewer({
         // Single unified data loader for both citation clicks & system sources list
         const data = documentId
           ? await fetchDocumentContent(documentId)
-          : await fetch(fileUrl).then(async (res) => {
+          : await authFetch(fileUrl).then(async (res) => {
               const text = await res.text();
               return { page_count: 1, pages: [{ page_number: 1, content: text }] };
             });

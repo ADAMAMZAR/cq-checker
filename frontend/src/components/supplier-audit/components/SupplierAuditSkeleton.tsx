@@ -5,7 +5,7 @@ import { IconLoader2 } from "@tabler/icons-react";
 export default function SupplierAuditSkeleton() {
   return (
     <div className="flex flex-col gap-8 max-w-5xl mx-auto w-full py-2 animate-fade-in">
-      <section className="rounded-2xl border border-[var(--border-visible)] bg-[var(--bg-card)] p-6 shadow-xl backdrop-blur-2xl space-y-6">
+      <section className="rounded-2xl border border-[var(--border-visible)] bg-[var(--bg-card)] p-6 shadow-sm space-y-6">
         {/* Header Skeleton */}
         <div className="flex items-center gap-3">
           <div className="p-2.5 rounded-xl bg-[var(--bg-input)] border border-[var(--border-subtle)] animate-pulse shrink-0">

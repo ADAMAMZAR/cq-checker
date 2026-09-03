@@ -8,6 +8,11 @@ const isStaticExport = process.env.STATIC_EXPORT === "1";
 
 const nextConfig: NextConfig = {
   trailingSlash: true,
+  images: {
+    formats: ["image/avif", "image/webp"],
+    minimumCacheTTL: 2592000,
+    unoptimized: isStaticExport ? true : false,
+  },
   experimental: {
     proxyClientMaxBodySize: "100mb",
     serverActions: {

@@ -1,4 +1,5 @@
 import type { EventType, LotItem } from "../types";
+import { formatMalaysiaDate } from "@/lib/dateUtils";
 
 export interface CompilePayloadParams {
   eventType: EventType;
@@ -92,30 +93,10 @@ export function compileAuctionPayload(params: CompilePayloadParams) {
     }
   });
 
-  // Formatted Ordinal Date for Email Reference Date
+  // Formatted Date for Email Reference Date (DD/MM/YYYY)
   let ceilingRefValue = params.ceilingPriceRef.trim();
   if (isTrafficLightEmail && params.ceilingPriceDate) {
-    const d = new Date(params.ceilingPriceDate);
-    const day = d.getDate();
-    let suffix = "th";
-    if (day < 11 || day > 13) {
-      switch (day % 10) {
-        case 1:
-          suffix = "st";
-          break;
-        case 2:
-          suffix = "nd";
-          break;
-        case 3:
-          suffix = "rd";
-          break;
-      }
-    }
-    const months = [
-      "January", "February", "March", "April", "May", "June",
-      "July", "August", "September", "October", "November", "December"
-    ];
-    const formattedEmailDate = `${day}${suffix} ${months[d.getMonth()]} ${d.getFullYear()}`;
+    const formattedEmailDate = formatMalaysiaDate(params.ceilingPriceDate);
     ceilingRefValue = `${ceilingRefValue}, dated: ${formattedEmailDate}`;
   }
 
@@ -126,7 +107,7 @@ export function compileAuctionPayload(params: CompilePayloadParams) {
       ? `1 Lot, ${totalLines} Line Items`
       : `${params.lots.length} ${params.lots.length === 1 ? "Lot" : "Lots"}`,
     lotDescription: lotDescriptionString.trim(),
-    biddingDate: params.biddingDate,
+    biddingDate: formatMalaysiaDate(params.biddingDate),
     startTime: compiledStartTimeStr,
     scheduledBiddingCloseTime: compiledCloseTimeStr,
     bidCurrency: params.bidCurrency,

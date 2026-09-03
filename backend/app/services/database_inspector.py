@@ -478,7 +478,7 @@ def _stringify(value: Any) -> str:
         except Exception:
             return str(value)
     if hasattr(value, "isoformat"):
-        return to_malaysia(value).strftime("%Y-%m-%d %H:%M:%S")
+        return to_malaysia(value).strftime("%d/%m/%Y, %H:%M:%S")
     val_str = str(value)
     # Format tsvector display strings cleanly without truncating body text
     if len(val_str) > 500 and "'english'" in val_str:

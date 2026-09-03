@@ -15,11 +15,11 @@ export default function ConfirmDeleteModal({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md rounded-2xl border border-rose-500/30 bg-[var(--bg-card)] p-5 shadow-2xl space-y-4"
+        className="w-full max-w-md rounded-2xl border border-red-500/30 bg-[var(--bg-card)] p-5 shadow-2xl space-y-4"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
-          <div className="flex items-center gap-2 text-rose-400">
+          <div className="flex items-center gap-2 text-red-400">
             <IconTrash className="w-4 h-4" />
             <h3 className="font-sans text-sm font-bold text-[var(--heading-color)]">
               Confirm Row Deletion
@@ -60,7 +60,7 @@ export default function ConfirmDeleteModal({
           <button
             onClick={onExecuteDelete}
             disabled={deletingRow !== null}
-            className="px-4 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-xs font-bold text-white shadow-md transition-all cursor-pointer disabled:opacity-50"
+            className="px-4 py-1.5 rounded-xl bg-red-600 hover:bg-red-700 text-xs font-bold text-white shadow-md transition-all cursor-pointer disabled:opacity-50"
           >
             {deletingRow !== null ? "Deleting..." : "Delete Row"}
           </button>

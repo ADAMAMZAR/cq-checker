@@ -2,6 +2,9 @@ import type { Metadata, Viewport } from "next";
 import { Inter, Playfair_Display, Lora } from "next/font/google";
 import "./globals.css";
 import ThemeProvider from "@/components/ThemeProvider";
+import SecurityGuard from "@/components/SecurityGuard";
+import AutoTranslateEngine from "@/components/AutoTranslateEngine";
+import { AuthProvider } from "@/context/AuthContext";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -60,9 +63,14 @@ export default function RootLayout({
             __html: `(function(){try{var t=localStorage.getItem('theme');if(t!=='light'&&t!=='dark'){t=(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark';}document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','dark');}})();`,
           }}
         />
-        <ThemeProvider>
-          {children}
-        </ThemeProvider>
+        <AuthProvider>
+          <ThemeProvider>
+            <SecurityGuard>
+              {children}
+            </SecurityGuard>
+            <AutoTranslateEngine />
+          </ThemeProvider>
+        </AuthProvider>
       </body>
     </html>
   );

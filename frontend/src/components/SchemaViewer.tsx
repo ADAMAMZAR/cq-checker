@@ -234,9 +234,8 @@ export default function SchemaViewer() {
 
   return (
     <div
-      className={`flex-1 flex flex-col gap-4 animate-fade-in ${
-        isFullscreen ? "fixed inset-0 z-50 bg-[var(--bg-page)] p-4" : ""
-      }`}
+      className={`flex-1 flex flex-col gap-4 animate-fade-in ${isFullscreen ? "fixed inset-0 z-50 bg-[var(--bg-page)] p-4" : ""
+        }`}
     >
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -427,8 +426,8 @@ function SchemaCanvas({
 }) {
   const visibleRels = focused
     ? schema.relationships.filter(
-        (r) => r.from_table === focused || r.to_table === focused
-      )
+      (r) => r.from_table === focused || r.to_table === focused
+    )
     : schema.relationships;
 
   const edges = visibleRels
@@ -564,19 +563,17 @@ function TableCard({
         transform: focused ? "scale(1.02)" : "scale(1)",
         touchAction: "none", // prevent the browser from hijacking drag for scrolling
       }}
-      className={`rounded-xl border select-none ${
-        focused
+      className={`rounded-xl border select-none ${focused
           ? "border-[var(--accent-primary)] shadow-[0_0_0_2px_var(--accent-primary-soft)]"
           : "border-[var(--border-visible)] hover:border-[var(--accent-primary-border)]"
-      } bg-[var(--bg-card)] overflow-hidden`}
+        } bg-[var(--bg-card)] overflow-hidden`}
     >
       {/* Header — the drag handle */}
       <div
-        className={`flex items-center justify-between gap-2 px-3 py-2 border-b cursor-grab active:cursor-grabbing ${
-          focused
+        className={`flex items-center justify-between gap-2 px-3 py-2 border-b cursor-grab active:cursor-grabbing ${focused
             ? "bg-[var(--accent-primary-soft)] border-[var(--accent-primary-border)]"
             : "bg-[var(--bg-elevated)] border-[var(--border-subtle)]"
-        }`}
+          }`}
       >
         <div className="flex items-center gap-2 min-w-0">
           <IconGripVertical className="w-3.5 h-3.5 shrink-0 text-[var(--text-tertiary)]" />
@@ -646,7 +643,7 @@ function ColumnRow({ col, isReferenced }: { col: DbColumnMeta; isReferenced: boo
       <span className="text-[var(--text-tertiary)] text-[10px] shrink-0">{col.type_display}</span>
       {!col.nullable && (
         <span
-          className="text-rose-400 text-[9px] font-bold shrink-0"
+          className="text-red-400 text-[9px] font-bold shrink-0"
           title="NOT NULL"
         >
           NN
