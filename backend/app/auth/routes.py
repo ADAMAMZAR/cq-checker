@@ -84,7 +84,7 @@ async def callback(request: Request, db: AsyncSession = Depends(get_db)):
     )
     await db.commit()
 
-    frontend_redirect = settings.allowed_origins.split(",")[0] or "http://localhost:3000"
+    frontend_redirect = (settings.allowed_origins.split(",")[0] or "http://localhost:3000").rstrip("/") + "/"
     return RedirectResponse(url=frontend_redirect)
 
 

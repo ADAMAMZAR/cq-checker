@@ -117,48 +117,6 @@ class DocumentPage(Base):
     )
 
 
-# ── Certificate Verification ─────────────────────────────────────────────────
-
-class CertificateVerification(Base):
-    __tablename__ = "certificate_verifications"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
-    object_id = Column(UUID(as_uuid=True), ForeignKey("object_storage.id", ondelete="SET NULL"), nullable=True, index=True)
-    extracted_data = Column(JSONB, nullable=False)
-    status = Column(String(50), nullable=False)  # PASS, FAIL, REQUIRES_HUMAN_REVIEW
-    reasoning_trace = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    object_storage = relationship("ObjectStorage")
-
-    @property
-    def file_url(self) -> str:
-        return self.object_storage.file_url if self.object_storage else ""
-
-    @property
-    def file_hash(self) -> Optional[str]:
-        return self.object_storage.checksum if self.object_storage else None
-
-    __table_args__ = (
-        CheckConstraint(
-            "status IN ('PASS', 'FAIL', 'REQUIRES_HUMAN_REVIEW')",
-            name="chk_certificate_verifications_status",
-        ),
-    )
-
-
-# ── Semantic Query Cache ─────────────────────────────────────────────────────
-
-class QueryCache(Base):
-    __tablename__ = "query_cache"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
-    query_text = Column(Text, nullable=False)
-    query_embedding = Column(Vector(1536), nullable=True)
-    cached_response = Column(Text, nullable=False)
-    hit_count = Column(Integer, nullable=False, default=0)
-    last_hit_at = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 # ── Chat: sessions, messages, cost logs ──────────────────────────────────────
@@ -231,47 +189,6 @@ class RoleFeature(Base):
     feature_id = Column(String(50), ForeignKey("features.id", ondelete="CASCADE"), primary_key=True)
 
 
-class ChatSession(Base):
-    __tablename__ = "chat_sessions"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
-    session_id = Column(String(100), nullable=False, unique=True, index=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    user = relationship("User")
-
-
-class ChatMessage(Base):
-    __tablename__ = "chat_messages"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
-    session_id = Column(String(100), ForeignKey("chat_sessions.session_id", ondelete="CASCADE"), nullable=False, index=True)
-    role = Column(String(20), nullable=False)  # "user" | "assistant"
-    content = Column(Text, nullable=False)
-    sources = Column(JSONB, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    __table_args__ = (
-        CheckConstraint("role IN ('user', 'assistant')", name="chk_chat_messages_role"),
-    )
-
-
-class ChatFeedback(Base):
-    __tablename__ = "chat_feedback"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
-    message_id = Column(UUID(as_uuid=True), ForeignKey("chat_messages.id", ondelete="CASCADE"), nullable=False, index=True)
-    session_id = Column(String(100), nullable=False, index=True)
-    rating = Column(String(20), nullable=False)
-    reason = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    message = relationship("ChatMessage")
-
-    __table_args__ = (
-        CheckConstraint("rating IN ('satisfied', 'not_satisfied')", name="chk_chat_feedback_rating"),
-    )
 
 
 class ChatLog(Base):
@@ -283,12 +200,10 @@ class ChatLog(Base):
     output_tokens = Column(Integer, nullable=False, default=0)
     cost_usd = Column(Numeric(12, 6), nullable=False, default=0)
     cache_hit = Column(Integer, nullable=False, default=0)  # 0/1
-    cached_query_id = Column(UUID(as_uuid=True), ForeignKey("query_cache.id", ondelete="SET NULL"), nullable=True, index=True)
+    cached_query_id = Column(UUID(as_uuid=True), nullable=True, index=True)
     cached_query_text = Column(Text, nullable=True)
     latency_ms = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    cached_query = relationship("QueryCache")
 
 
 # ── Object Storage Metadata (Phase 8 GCS migration readiness) ────────────────

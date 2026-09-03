@@ -1,13 +1,13 @@
 import type { NextConfig } from "next";
 
-// Next.js 16 static export (output: "export") forbids rewrites, so the two are
-// mutually exclusive. Dev mode keeps rewrites so /api/* proxies to the local
-// FastAPI backend; static export builds (Phase 8: `STATIC_EXPORT=1`) drop them
-// and instead reach the backend through NEXT_PUBLIC_API_URL baked at build time.
+// Next.js static export (output: "export") forbids rewrites, so the two are
+// mutually exclusive. Dev mode keeps rewrites so /api/* and /auth/* proxy to
+// the local FastAPI backend.
 const isStaticExport = process.env.STATIC_EXPORT === "1";
 
 const nextConfig: NextConfig = {
-  trailingSlash: true,
+  trailingSlash: isStaticExport ? true : false,
+  skipTrailingSlashRedirect: true,
   images: {
     formats: ["image/avif", "image/webp"],
     minimumCacheTTL: 2592000,
@@ -22,11 +22,24 @@ const nextConfig: NextConfig = {
   ...(isStaticExport
     ? { output: "export" as const }
     : {
+        async redirects() {
+          return [
+            {
+              source: "/dashboard",
+              destination: "/",
+              permanent: false,
+            },
+          ];
+        },
         async rewrites() {
           return [
             {
               source: "/api/:path*",
               destination: "http://127.0.0.1:8000/api/:path*",
+            },
+            {
+              source: "/auth/:path*",
+              destination: "http://127.0.0.1:8000/auth/:path*",
             },
           ];
         },

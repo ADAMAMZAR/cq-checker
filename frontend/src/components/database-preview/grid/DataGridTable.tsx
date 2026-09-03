@@ -2,17 +2,14 @@
 
 import { useMemo } from "react";
 import { IconLoader2, IconTrash } from "@tabler/icons-react";
-import type { DbTableData, DocumentFolder } from "@/types";
+import type { DbTableData } from "@/types";
 import type { ColumnMeta, EditingCell, ExpandedCell } from "../types";
 
 import DataGridCell from "./DataGridCell";
-import FolderSelectCell from "./custom-cells/FolderSelectCell";
-import RegionSelectCell from "./custom-cells/RegionSelectCell";
 
 interface DataGridTableProps {
   selectedTable: string;
   data: DbTableData;
-  folders: DocumentFolder[];
   updatingCell: boolean;
   deletingRow: number | null;
   editingCell: EditingCell | null;
@@ -22,14 +19,10 @@ interface DataGridTableProps {
   onSaveCell: (rIdx: number, colName: string, val: string) => void;
   onPromptDeleteRow: (rIdx: number) => void;
   onSetExpandedCell: (cell: ExpandedCell | null) => void;
-  onFolderChange: (docId: string, folderId: string) => void;
-  onRegionChange: (docId: string, region: string) => void;
 }
 
 export default function DataGridTable({
-  selectedTable,
   data,
-  folders,
   updatingCell,
   deletingRow,
   editingCell,
@@ -39,8 +32,6 @@ export default function DataGridTable({
   onSaveCell,
   onPromptDeleteRow,
   onSetExpandedCell,
-  onFolderChange,
-  onRegionChange,
 }: DataGridTableProps) {
   // Pre-compute column metadata outside the 2,000-cell loop to eliminate render bottlenecks
   const columnsMeta: ColumnMeta[] = useMemo(() => {
@@ -67,10 +58,6 @@ export default function DataGridTable({
     });
   }, [data.columns, data.primary_keys]);
 
-  const docIdColIdx = useMemo(() => {
-    return data.columns.findIndex((c) => c.toLowerCase() === "id");
-  }, [data.columns]);
-
   return (
     <table className="w-full text-left text-xs font-sans text-[var(--text-primary)] border-collapse">
       <thead className="sticky top-0 z-10 bg-[var(--bg-card)]">
@@ -93,8 +80,6 @@ export default function DataGridTable({
       </thead>
       <tbody>
         {data.rows.map((row, rIdx) => {
-          const docId = docIdColIdx !== -1 ? row[docIdColIdx] : null;
-
           return (
             <tr
               key={rIdx}
@@ -107,40 +92,6 @@ export default function DataGridTable({
                 const meta = columnsMeta[cIdx];
                 if (!meta) return null;
 
-                // Handle documents table custom folder selector
-                if (
-                  selectedTable === "documents" &&
-                  (meta.normName === "folder_id" ||
-                    meta.normName === "folder" ||
-                    meta.normName === "folder_name")
-                ) {
-                  return (
-                    <FolderSelectCell
-                      key={cIdx}
-                      cell={cell}
-                      docId={docId}
-                      updatingCell={updatingCell}
-                      folders={folders}
-                      onFolderChange={onFolderChange}
-                      normCol={meta.normName}
-                    />
-                  );
-                }
-
-                // Handle documents table custom region selector
-                if (selectedTable === "documents" && meta.normName === "region") {
-                  return (
-                    <RegionSelectCell
-                      key={cIdx}
-                      cell={cell}
-                      docId={docId}
-                      updatingCell={updatingCell}
-                      onRegionChange={onRegionChange}
-                    />
-                  );
-                }
-
-                // Handle generic editable/expandable table cell
                 return (
                   <DataGridCell
                     key={cIdx}

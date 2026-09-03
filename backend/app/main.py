@@ -21,12 +21,9 @@ logger = logging.getLogger(__name__)
 API_TAGS = [
     {"name": "System / Health", "description": "Service health check."},
     {"name": "Supplier Audit — Full Run & Comparison", "description": "Gemini extraction — full audit run and comparison phase."},
-    {"name": "Supplier Audit — Single Phase Waterfall", "description": "Live SAP Ariba supplier fetching, questionnaires & attachment download."},
-    {"name": "Supplier Audit — Read / Update", "description": "Legacy audit logs, registry, evidence, and supplier assets."},
+    {"name": "Supplier Audit — Read / Update", "description": "Audit logs and supplier compliance run history."},
     {"name": "Cost Analytics", "description": "Aggregated cost/usage analytics across audits."},
-    {"name": "Certificate Verification", "description": "Phase 4 — Gemini extraction + deterministic rules pipeline."},
-    {"name": "Document Ingestion / RAG", "description": "Phase 5 — manual ingestion: parse, chunk, embed, store."},
-    {"name": "RAG Chatbot", "description": "Phase 6 — semantic cache + hybrid retrieval + Gemini generation."},
+    {"name": "Document Ingestion / RAG", "description": "Document ingestion, OCR, chunking, and embeddings."},
     {"name": "File Serving", "description": "Serve uploaded files (local disk and legacy Supabase proxy)."},
     {"name": "Database Browser", "description": "Read-only and editing database grid browser."},
     {"name": "Auth & RBAC", "description": "Role-based access control and system permissions."},
@@ -50,6 +47,7 @@ app = FastAPI(
     version="1.0.0",
     openapi_tags=API_TAGS,
     lifespan=lifespan,
+    redirect_slashes=False,
     docs_url=None if is_prod else "/docs",
     redoc_url=None if is_prod else "/redoc",
     openapi_url=None if is_prod else "/openapi.json",
@@ -108,7 +106,7 @@ async def verify_internal_secret_header(request: Request, call_next):
 
 # Configure CORS strictly for trusted web origins
 raw_origins = [o.strip() for o in settings.allowed_origins.split(",") if o.strip()]
-cors_origins = raw_origins if raw_origins else ["http://localhost:3000"]
+cors_origins = list(set(raw_origins + ["http://localhost:3000", "http://127.0.0.1:3000"]))
 
 app.add_middleware(
     CORSMiddleware,

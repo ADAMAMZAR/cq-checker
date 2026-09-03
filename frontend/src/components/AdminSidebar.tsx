@@ -17,7 +17,17 @@ import {
   IconSparkles,
   IconUsers,
 } from "@tabler/icons-react";
-import type { AdminTab } from "./AdminTabs";
+
+export type AdminTab =
+  | "users"
+  | "database"
+  | "matrix"
+  | "costs"
+  | "schema"
+  | "playground"
+  | "ingest"
+  | "ingest-test"
+  | "retrieval";
 
 interface AdminSidebarProps {
   active: AdminTab;
@@ -27,13 +37,6 @@ interface AdminSidebarProps {
 const tabs: { key: AdminTab; label: string; icon: typeof IconDatabase }[] = [
   { key: "users", label: "User Management", icon: IconUsers },
   { key: "database", label: "Database", icon: IconDatabase },
-  { key: "retrieval", label: "Chunk Retrieval Test", icon: IconSparkles },
-  { key: "matrix", label: "Comparison Matrix", icon: IconTable },
-  { key: "costs", label: "Cost Analytics", icon: IconCoin },
-  { key: "schema", label: "Schema", icon: IconSchema },
-  { key: "playground", label: "Playground", icon: IconPlaylist },
-  { key: "ingest", label: "Document Ingest", icon: IconUpload },
-  { key: "ingest-test", label: "OCR Sandbox", icon: IconFlask },
 ];
 
 export default function AdminSidebar({ active, onChange }: AdminSidebarProps) {

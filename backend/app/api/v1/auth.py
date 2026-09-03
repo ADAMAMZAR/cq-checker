@@ -14,7 +14,9 @@ _cached_roles_features_response = None
 
 
 @router.get("/api/v1/auth/roles", tags=["Auth & RBAC"])
+@router.get("/api/v1/auth/roles/", tags=["Auth & RBAC"])
 @router.get("/api/auth/roles", tags=["Auth & RBAC"])
+@router.get("/api/auth/roles/", tags=["Auth & RBAC"])
 async def get_roles_and_features():
     global _cached_roles_features_response
     if _cached_roles_features_response is not None:

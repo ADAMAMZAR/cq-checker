@@ -3,24 +3,13 @@
 import { useState, useEffect, useCallback, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
-import type { AdminTab } from "@/components/AdminTabs";
+import type { AdminTab } from "@/components/AdminSidebar";
 import AdminSidebar from "@/components/AdminSidebar";
 
-// Heavy admin components — dynamic imports keep the /admin route snappy.
-const UserManagement = dynamic(() => import("@/components/UserManagement"), { ssr: false });
-const CostAnalytics = dynamic(() => import("@/components/CostAnalytics"), { ssr: false });
-const DatabasePreview = dynamic(() => import("@/components/DatabasePreview"), { ssr: false });
-const SchemaViewer = dynamic(() => import("@/components/SchemaViewer"), { ssr: false });
-const ComparisonPlayground = dynamic(
-  () => import("@/components/ComparisonPlayground"),
-  { ssr: false }
-);
-const DocumentIngest = dynamic(() => import("@/components/DocumentIngest"), { ssr: false });
-const IngestTestPlayground = dynamic(() => import("@/components/IngestTestPlayground"), { ssr: false });
-const ComparisonMatrix = dynamic(() => import("@/components/ComparisonMatrix"), { ssr: false });
-const RetrievalPlayground = dynamic(() => import("@/components/RetrievalPlayground"), { ssr: false });
+import UserManagement from "@/components/UserManagement";
+import DatabasePreview from "@/components/DatabasePreview";
 
-const VALID_TABS: AdminTab[] = ["users", "database", "matrix", "costs", "schema", "playground", "ingest", "ingest-test", "retrieval"];
+const VALID_TABS: AdminTab[] = ["users", "database"];
 const STORAGE_KEY = "admin_active_tab";
 
 function AdminPageContent() {
@@ -85,13 +74,6 @@ function AdminPageContent() {
       <main className="flex-1 flex flex-col min-w-0 bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded-2xl p-3 md:p-5 shadow-xs">
         {activeTab === "users" && <UserManagement />}
         {activeTab === "database" && <DatabasePreview />}
-        {activeTab === "retrieval" && <RetrievalPlayground />}
-        {activeTab === "matrix" && <ComparisonMatrix />}
-        {activeTab === "costs" && <CostAnalytics />}
-        {activeTab === "schema" && <SchemaViewer />}
-        {activeTab === "playground" && <ComparisonPlayground />}
-        {activeTab === "ingest" && <DocumentIngest />}
-        {activeTab === "ingest-test" && <IngestTestPlayground />}
       </main>
     </div>
   );

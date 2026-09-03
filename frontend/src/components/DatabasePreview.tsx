@@ -9,16 +9,12 @@ import {
   IconEraser,
   IconX,
 } from "@tabler/icons-react";
-import type { DbTableMeta, DbTableData, DocumentFolder } from "@/types";
+import type { DbTableMeta, DbTableData } from "@/types";
 import {
   fetchDbTables,
   fetchDbTable,
   updateDbCell,
   deleteDbRow,
-  fetchFolders,
-  moveDocumentFolder,
-  updateDocumentRegion,
-  clearChatCache,
 } from "@/lib/api";
 
 import type { EditingCell, ExpandedCell, ConfirmDeleteState } from "./database-preview/types";
@@ -49,22 +45,8 @@ export default function DatabasePreview() {
   const [editingCell, setEditingCell] = useState<EditingCell | null>(null);
   const [editingValue, setEditingValue] = useState("");
   const [updatingCell, setUpdatingCell] = useState(false);
-  const [folders, setFolders] = useState<DocumentFolder[]>([]);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [confirmDeleteState, setConfirmDeleteState] = useState<ConfirmDeleteState | null>(null);
-
-  const loadFolders = useCallback(async () => {
-    try {
-      const res = await fetchFolders();
-      setFolders(res);
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
-  useEffect(() => {
-    loadFolders();
-  }, [loadFolders]);
 
   const fetched = useRef(false);
 
@@ -115,48 +97,6 @@ export default function DatabasePreview() {
   const handleRefresh = () => {
     loadTables();
     if (selectedTable) loadTableData(selectedTable, page * PAGE_SIZE, rowSearch);
-  };
-
-  const handleClearCache = async () => {
-    setClearingCache(true);
-    setError(null);
-    try {
-      const cleared = await clearChatCache();
-      setError(null);
-      setClearingCache(false);
-      setToastMsg(`Cleared ${cleared} cached query entr${cleared === 1 ? "y" : "ies"}.`);
-      setTimeout(() => setToastMsg(null), 4000);
-      handleRefresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to clear cache.");
-      setClearingCache(false);
-    }
-  };
-
-  const handleFolderChange = async (docId: string, newFolderId: string) => {
-    try {
-      setUpdatingCell(true);
-      await moveDocumentFolder(docId, newFolderId || null);
-      loadFolders();
-      handleRefresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update document folder.");
-    } finally {
-      setUpdatingCell(false);
-    }
-  };
-
-  const handleRegionChange = async (docId: string, newRegion: string) => {
-    setUpdatingCell(true);
-    setError(null);
-    try {
-      await updateDocumentRegion(docId, newRegion);
-      handleRefresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update document region.");
-    } finally {
-      setUpdatingCell(false);
-    }
   };
 
   const handleSaveCell = async (rIdx: number, colName: string, newValue: string) => {
@@ -248,16 +188,7 @@ export default function DatabasePreview() {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleClearCache}
-            disabled={clearingCache}
-            title="Clear the RAG semantic query cache (query_cache table)"
-            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-visible)] text-[var(--text-secondary)] hover:text-[var(--heading-color)] hover:bg-[var(--bg-surface-hover)] text-xs font-semibold transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <IconEraser className="w-4 h-4" />
-            {clearingCache ? "Clearing…" : "Clear cache"}
-          </button>
+        <div className="flex items-center">
           <button
             onClick={handleRefresh}
             className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-primary-hover)] text-white text-xs font-semibold transition-all cursor-pointer"
@@ -325,7 +256,6 @@ export default function DatabasePreview() {
                   <DataGridTable
                     selectedTable={selectedTable}
                     data={data}
-                    folders={folders}
                     updatingCell={updatingCell}
                     deletingRow={deletingRow}
                     editingCell={editingCell}
@@ -335,8 +265,6 @@ export default function DatabasePreview() {
                     onSaveCell={handleSaveCell}
                     onPromptDeleteRow={handlePromptDeleteRow}
                     onSetExpandedCell={setExpandedCell}
-                    onFolderChange={handleFolderChange}
-                    onRegionChange={handleRegionChange}
                   />
                 ) : data ? (
                   <div className="flex items-center justify-center py-10 text-xs text-[var(--text-tertiary)]">

@@ -26,7 +26,9 @@ class CreateUserSchema(BaseModel):
 
 
 @router.get("/api/admin/users", response_model=dict)
+@router.get("/api/admin/users/", response_model=dict)
 @router.get("/admin/users", response_model=dict)
+@router.get("/admin/users/", response_model=dict)
 async def list_users(db: AsyncSession = Depends(get_db)):
     """List all registered and pre-seeded users with their roles."""
     result = await db.execute(select(User).order_by(User.created_at.desc()))

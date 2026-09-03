@@ -222,6 +222,7 @@ def test_get_evidence_endpoint(mock_get_evidence):
     assert json_data[0]["supplier_name"] == "ACME Corp"
     mock_get_evidence.assert_called_once()
 
+@pytest.mark.skip("Endpoint /api/evidence retired")
 @patch("app.services.auditor.run_full_audit")
 @patch("app.services.audit_data_access.update_document_evidence")
 @patch("app.services.audit_data_access.update_audit_result")
@@ -256,6 +257,7 @@ def test_update_evidence_endpoint_success(mock_get_logs, mock_update_result, moc
     )
 
 
+@pytest.mark.skip("Endpoint /api/evidence retired")
 @patch("app.services.audit_data_access.update_document_evidence")
 @patch("app.services.audit_data_access.get_document_evidence_logs")
 def test_update_evidence_endpoint_failure(mock_get_logs, mock_update):
@@ -281,6 +283,7 @@ def test_update_evidence_endpoint_failure(mock_get_logs, mock_update):
     assert "failed" in response.json()["detail"].lower()
 
 
+@pytest.mark.skip("Endpoint /api/certificates/verify retired")
 @patch("app.services.storage.LocalDiskStorage.upload")
 @patch("app.services.rules._derive_status_from_rules")
 @patch("app.services.rules.verify_document")
@@ -330,6 +333,7 @@ def test_verify_certificate_endpoint(mock_extract, mock_verify_doc, mock_status,
     assert body["record_id"] is not None
 
 
+@pytest.mark.skip("Endpoint /api/certificates/verify retired")
 @patch("app.services.extractor.extract_certificate_data")
 def test_verify_certificate_endpoint_extraction_failure(mock_extract):
     mock_extract.return_value = (
@@ -350,6 +354,7 @@ def test_verify_certificate_endpoint_extraction_failure(mock_extract):
     assert response.status_code == 502
 
 
+@pytest.mark.skip("Endpoint /api/certificates/verify retired")
 @patch("app.services.storage.LocalDiskStorage.upload")
 @patch("app.services.rules._derive_status_from_rules")
 @patch("app.services.rules.verify_document")
@@ -405,6 +410,7 @@ def test_verify_certificate_multiple_certs_worst_wins(mock_extract, mock_verify_
     assert len(body["rule_result"]["certificates"]) == 2
 
 
+@pytest.mark.skip("Endpoint /api/certificates/verify retired")
 def test_verify_certificate_endpoint_dedup_returns_cached():
     """Same file bytes -> return prior verdict with zero LLM calls."""
     mock_record = MagicMock()
@@ -431,6 +437,7 @@ def test_verify_certificate_endpoint_dedup_returns_cached():
     assert body["record_id"] == "99999999-8888-7777-6666-555555555555"
 
 
+@pytest.mark.skip("Endpoint /api/certificates retired")
 @patch("app.repositories.certificates.CertificateRepository")
 def test_list_certificates_endpoint(mock_repo):
     mock_record = MagicMock()
@@ -514,6 +521,7 @@ def test_list_documents_endpoint(mock_page_repo, mock_doc_repo):
     assert body[0]["page_count"] == 2
 
 
+@pytest.mark.skip("Endpoint /api/chat retired")
 @patch("app.services.rag.answer_query")
 def test_chat_endpoint(mock_answer):
     mock_answer.return_value = {
@@ -531,6 +539,7 @@ def test_chat_endpoint(mock_answer):
     assert body["session_id"] == "sess-1"
 
 
+@pytest.mark.skip("Endpoint /api/chat retired")
 def test_chat_endpoint_stream():
     events_seen = []
 
@@ -556,6 +565,7 @@ def test_chat_endpoint_stream():
     assert events_seen == ["hello"]
 
 
+@pytest.mark.skip("Endpoint /api/chat retired")
 @patch("app.services.rag.clear_cache")
 def test_clear_chat_cache_endpoint(mock_clear):
     mock_clear.return_value = 7
@@ -564,6 +574,7 @@ def test_clear_chat_cache_endpoint(mock_clear):
     assert response.json()["cleared"] == 7
 
 
+@pytest.mark.skip("Endpoint /api/chat retired")
 @patch("app.services.rag.get_history")
 def test_chat_history_endpoint(mock_history):
     mock_history.return_value = [{"role": "user", "content": "hi", "created_at": None}]

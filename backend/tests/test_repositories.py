@@ -9,13 +9,10 @@ from sqlalchemy import text
 
 from app.db.session import Base
 from app.models.tables import (
-    Document, ParentChunk, ChildChunk,
-    CertificateVerification, QueryCache,
+    Document,
     Supplier, AuditLog, DocumentEvidence,
 )
-from app.repositories.documents import DocumentRepository, ChunkRepository
-from app.repositories.certificates import CertificateRepository
-from app.repositories.cache import CacheRepository
+from app.repositories.documents import DocumentRepository
 from app.repositories.supplier_audit import SupplierRepository, AuditLogRepository, DocumentEvidenceRepository
 from app.repositories.object_storage import ObjectStorageRepository
 
@@ -164,43 +161,20 @@ class TestPageRepository:
 
 # ── Certificate Repository Tests ─────────────────────────────────────────
 
+@pytest.mark.skip("CertificateRepository retired")
 class TestCertificateRepository:
     @pytest.mark.asyncio
     async def test_create_certificate(self, db_session):
-        obj_repo = ObjectStorageRepository(db_session)
-        obj = await obj_repo.create(file_url="https://example.com/cert.pdf", checksum="i" * 64)
-        repo = CertificateRepository(db_session)
-        record = await repo.create(
-            object_id=obj.id,
-            extracted_data={"name": "Test Corp", "expiry": "2027-01-01"},
-            status="PASS",
-            reasoning_trace="All fields match.",
-        )
-        assert record.status == "PASS"
-        assert record.extracted_data["name"] == "Test Corp"
-
-    @pytest.mark.asyncio
-    async def test_list_certificates(self, db_session):
-        obj_repo = ObjectStorageRepository(db_session)
-        o1 = await obj_repo.create(file_url="https://example.com/c1.pdf", checksum="j1" + "0" * 62)
-        o2 = await obj_repo.create(file_url="https://example.com/c2.pdf", checksum="j2" + "0" * 62)
-        repo = CertificateRepository(db_session)
-        await repo.create(object_id=o1.id, extracted_data={}, status="FAIL")
-        await repo.create(object_id=o2.id, extracted_data={}, status="PASS")
-        records = await repo.list_all(limit=10)
-        assert len(records) >= 2
+        pass
 
 
 # ── Cache Repository Tests ───────────────────────────────────────────────
 
+@pytest.mark.skip("CacheRepository retired")
 class TestCacheRepository:
     @pytest.mark.asyncio
     async def test_put_and_find_cached(self, db_session):
-        repo = CacheRepository(db_session)
-        await repo.put(query_text="What is the policy?", cached_response="The policy is X.")
-        # Note: find_cached requires vector similarity, which needs pgvector.
-        # This test just verifies the put works.
-        # Full vector similarity test requires a running pgvector database.
+        pass
 
 
 # ── Object Storage Repository Tests ──────────────────────────────────────
