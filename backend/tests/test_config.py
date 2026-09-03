@@ -1,8 +1,8 @@
 import os
+import sys
 import pytest
 
 # Ensure backend root is in sys.path
-import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 # Force pure Python protobuf before importing config
@@ -15,11 +15,7 @@ class TestSettingsDefaults:
 
     def _fresh_settings(self, monkeypatch):
         """Create a Settings instance that reads ONLY from env vars, not .env file."""
-        for key in [
-            "NEON_DATABASE_URL", "GEMINI_API_KEY", "MINIMAX_API_KEY",
-            "UPLOAD_DIR",
-            "SUPABASE_URL", "SUPABASE_KEY", "VERTEX_PROJECT", "VERTEX_LOCATION",
-        ]:
+        for key in ["NEON_DATABASE_URL", "ENTRA_TENANT_ID", "SESSION_SECRET"]:
             monkeypatch.delenv(key, raising=False)
         from app.config import Settings
         from pydantic_settings import SettingsConfigDict
@@ -37,23 +33,11 @@ class TestSettingsDefaults:
         s = self._fresh_settings(monkeypatch)
         assert s.neon_database_url == ""
 
-    def test_ai_keys_default_empty(self, monkeypatch):
+    def test_entra_settings_default(self, monkeypatch):
         s = self._fresh_settings(monkeypatch)
-        assert s.gemini_api_key == ""
-        assert s.minimax_api_key == ""
-        assert s.gemini_chat_model == "gemini-3.5-flash-lite"
-
-    def test_deprecated_fields_present(self, monkeypatch):
-        """Deprecated Supabase fields still exist for migration."""
-        s = self._fresh_settings(monkeypatch)
-        assert hasattr(s, "supabase_url")
-        assert hasattr(s, "supabase_key")
-        assert hasattr(s, "vertex_project")
-        assert hasattr(s, "vertex_location")
-
-    def test_upload_dir_default(self, monkeypatch):
-        s = self._fresh_settings(monkeypatch)
-        assert s.upload_dir == "uploads"
+        assert s.entra_tenant_id == ""
+        assert s.entra_client_id == ""
+        assert s.entra_client_secret == ""
 
 
 class TestSettingsFromEnv:
@@ -65,18 +49,8 @@ class TestSettingsFromEnv:
         s = Settings()
         assert s.neon_database_url == "postgresql+asyncpg://user:pass@host:5432/db"
 
-    def test_ai_keys_from_env(self, monkeypatch):
-        monkeypatch.setenv("GEMINI_API_KEY", "gemini-123")
-        monkeypatch.setenv("MINIMAX_API_KEY", "minimax-456")
-        monkeypatch.setenv("GEMINI_CHAT_MODEL", "gemini-3.5-flash-lite")
+    def test_entra_settings_from_env(self, monkeypatch):
+        monkeypatch.setenv("ENTRA_TENANT_ID", "test-tenant-123")
         from app.config import Settings
         s = Settings()
-        assert s.gemini_api_key == "gemini-123"
-        assert s.minimax_api_key == "minimax-456"
-        assert s.gemini_chat_model == "gemini-3.5-flash-lite"
-
-    def test_upload_dir_from_env(self, monkeypatch):
-        monkeypatch.setenv("UPLOAD_DIR", "/tmp/test-uploads")
-        from app.config import Settings
-        s = Settings()
-        assert s.upload_dir == "/tmp/test-uploads"
+        assert s.entra_tenant_id == "test-tenant-123"

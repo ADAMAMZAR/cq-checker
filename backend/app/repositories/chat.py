@@ -1,1 +1,0 @@
-"""Deprecated: Chat repositories retired."""

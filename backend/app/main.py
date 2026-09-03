@@ -20,11 +20,6 @@ logger = logging.getLogger(__name__)
 
 API_TAGS = [
     {"name": "System / Health", "description": "Service health check."},
-    {"name": "Supplier Audit — Full Run & Comparison", "description": "Gemini extraction — full audit run and comparison phase."},
-    {"name": "Supplier Audit — Read / Update", "description": "Audit logs and supplier compliance run history."},
-    {"name": "Cost Analytics", "description": "Aggregated cost/usage analytics across audits."},
-    {"name": "Document Ingestion / RAG", "description": "Document ingestion, OCR, chunking, and embeddings."},
-    {"name": "File Serving", "description": "Serve uploaded files (local disk and legacy Supabase proxy)."},
     {"name": "Database Browser", "description": "Read-only and editing database grid browser."},
     {"name": "Auth & RBAC", "description": "Role-based access control and system permissions."},
 ]

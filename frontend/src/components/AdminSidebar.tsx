@@ -20,14 +20,7 @@ import {
 
 export type AdminTab =
   | "users"
-  | "database"
-  | "matrix"
-  | "costs"
-  | "schema"
-  | "playground"
-  | "ingest"
-  | "ingest-test"
-  | "retrieval";
+  | "database";
 
 interface AdminSidebarProps {
   active: AdminTab;

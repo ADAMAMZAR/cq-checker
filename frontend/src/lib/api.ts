@@ -92,70 +92,6 @@ export async function authFetch(input: RequestInfo | URL, init: RequestInit = {}
   return res;
 }
 
-export function buildFileUrl(url?: string | null): string {
-  if (!url) return "";
-  if (url.startsWith("/api/")) return `${API_BASE}${url.slice("/api".length)}`;
-  if (/^https?:\/\//.test(url)) return url;
-  return url;
-}
-
-// ── DTO Type Definitions ──────────────────────────────────────────────────────
-
-export interface MoveDocumentFolderResult {
-  status: string;
-  message?: string;
-  document_id?: string;
-  folder_id?: string | null;
-  [key: string]: unknown;
-}
-
-export interface UpdateDocumentRegionResult {
-  status: string;
-  message?: string;
-  document_id?: string;
-  region?: string;
-  [key: string]: unknown;
-}
-
-export interface RetrievalTestPayload {
-  query: string;
-  k?: number;
-  window_size?: number;
-  vector_weight?: number;
-  bm25_weight?: number;
-  region_filter?: string;
-}
-
-export interface RetrievalTestResult {
-  query: string;
-  results: Array<{
-    document_id: string;
-    chunk_id: string;
-    content: string;
-    score: number;
-    metadata?: Record<string, unknown>;
-  }>;
-  [key: string]: unknown;
-}
-
-export interface TestIngestDocumentResult {
-  status: string;
-  filename: string;
-  title?: string;
-  total_pages?: number;
-  pages?: Array<{ page_number: number; markdown: string }>;
-  [key: string]: unknown;
-}
-
-export interface CommitIngestPagesResult {
-  status: string;
-  document_id?: string;
-  message?: string;
-  [key: string]: unknown;
-}
-
-// ── Database Browser ─────────────────────────────────────────────────────────
-
 export async function fetchDbTables(): Promise<DbTableMeta[]> {
   const res = await authFetch(`${API_BASE}/db/tables`);
   if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
@@ -197,46 +133,6 @@ export async function updateDbCell(
     body: JSON.stringify({ pk, column, value }),
   });
   if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
-}
-
-export async function fetchDbSchema(): Promise<DbSchema> {
-  const res = await authFetch(`${API_BASE}/db/schema`);
-  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
-  return res.json();
-}
-
-export async function testIngestDocument(
-  file: File,
-  mode: "single" | "all" = "single",
-  pageNumber: number = 1,
-  title?: string
-): Promise<TestIngestDocumentResult> {
-  const form = new FormData();
-  form.append("file", file);
-  form.append("mode", mode);
-  form.append("page_number", pageNumber.toString());
-  if (title) form.append("title", title);
-
-  const res = await authFetch(`${UPLOAD_API_BASE}/documents/test-ingest`, {
-    method: "POST",
-    body: form,
-  });
-  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
-  return res.json();
-}
-
-export async function commitIngestPages(
-  filename: string,
-  title: string,
-  pages: { page_number: number; markdown: string }[]
-): Promise<CommitIngestPagesResult> {
-  const res = await authFetch(`${API_BASE}/documents/commit-pages`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ filename, title, pages }),
-  });
-  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
-  return res.json();
 }
 
 export async function fetchRolesAndFeatures(): Promise<RolesAndFeaturesResponse> {

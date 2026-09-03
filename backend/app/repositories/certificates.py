@@ -1,1 +1,0 @@
-"""Deprecated: CertificateRepository retired."""
