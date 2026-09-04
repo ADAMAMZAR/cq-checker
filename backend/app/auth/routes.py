@@ -1,7 +1,7 @@
 """Authentication routes: login, callback, logout, me."""
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.responses import RedirectResponse, JSONResponse
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -85,7 +85,17 @@ async def callback(request: Request, db: AsyncSession = Depends(get_db)):
     await db.commit()
 
     frontend_redirect = (settings.allowed_origins.split(",")[0] or "http://localhost:3000").rstrip("/") + "/"
-    return RedirectResponse(url=frontend_redirect)
+    response = RedirectResponse(url=frontend_redirect)
+    response.set_cookie(
+        key="cq_logged_in",
+        value="1",
+        max_age=settings.session_max_age_seconds,
+        httponly=False,
+        samesite="lax",
+        secure=settings.environment.lower() == "production",
+        path="/",
+    )
+    return response
 
 
 @router.post("/logout")
@@ -117,18 +127,34 @@ async def logout(request: Request):
         f"https://login.microsoftonline.com/{settings.entra_tenant_id}/oauth2/v2.0/logout"
         f"?post_logout_redirect_uri={post_logout}"
     )
-    return {"status": "success", "message": "Logged out", "logout_url": end_session_url}
+    response = JSONResponse(
+        content={"status": "success", "message": "Logged out", "logout_url": end_session_url}
+    )
+    response.delete_cookie(key="cq_logged_in", path="/")
+    return response
 
 
 @router.get("/me")
-async def me(request: Request):
+async def me(request: Request, response: Response):
     """Return currently authenticated user directly from cryptographically signed session cookie.
 
     Bypasses PostgreSQL queries completely so Neon DB stays asleep and within the free tier.
     """
     user_id = request.session.get("user_id")
     if not user_id:
+        response.delete_cookie(key="cq_logged_in", path="/")
         return {"authenticated": False, "user": None}
+
+    # Ensure indicator cookie is set when active session is present
+    response.set_cookie(
+        key="cq_logged_in",
+        value="1",
+        max_age=settings.session_max_age_seconds,
+        httponly=False,
+        samesite="lax",
+        secure=settings.environment.lower() == "production",
+        path="/",
+    )
 
     # 1. Fast-path: read verified data directly from signed Starlette session cookie (0 DB queries!)
     if "roles" in request.session and "email" in request.session:
@@ -150,6 +176,7 @@ async def me(request: Request):
         async with factory() as db:
             user = await get_current_user_from_session(request, db)
             if not user:
+                response.delete_cookie(key="cq_logged_in", path="/")
                 return {"authenticated": False, "user": None}
 
             user_roles = [r.name for r in user.roles] if hasattr(user, "roles") and user.roles else ["user"]
@@ -177,6 +204,7 @@ async def me(request: Request):
             }
     except Exception as e:
         logger.error(f"Error resolving legacy user session: {e}")
+        response.delete_cookie(key="cq_logged_in", path="/")
         return {"authenticated": False, "user": None}
 
 

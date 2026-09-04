@@ -2,13 +2,19 @@
 
 import { useEffect, useState } from "react";
 import { IconBrandWindows, IconShieldCheck, IconLockAccess, IconArrowRight } from "@tabler/icons-react";
-import { checkAuthSession, loginWithEntra } from "@/lib/auth";
+import { checkAuthSession, hasSessionIndicator, loginWithEntra } from "@/lib/auth";
+import { getStoredUserEmail } from "@/lib/securityStore";
 
 export default function LoginPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function init() {
+      const hasActiveSession = hasSessionIndicator() || (typeof window !== "undefined" && !!getStoredUserEmail());
+      if (!hasActiveSession) {
+        setLoading(false);
+        return;
+      }
       const session = await checkAuthSession();
       if (session.authenticated) {
         window.location.href = "/";

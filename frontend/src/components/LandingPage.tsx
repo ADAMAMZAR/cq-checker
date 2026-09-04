@@ -6,6 +6,7 @@ import {
   isFeatureAllowedForRole,
   DEFAULT_ROLES,
   fetchRolesAndFeaturesCached,
+  getCachedRoles,
   mergeRoles,
 } from "@/lib/roleStore";
 import { RoleInfo } from "@/types";
@@ -21,7 +22,10 @@ export default function LandingPage() {
   const router = useRouter();
   const { session } = useAuth();
 
-  const [roles, setRoles] = useState<RoleInfo[]>(DEFAULT_ROLES);
+  const [roles, setRoles] = useState<RoleInfo[]>(() => {
+    const cached = getCachedRoles();
+    return cached && cached.length > 0 ? mergeRoles(cached) : DEFAULT_ROLES;
+  });
   const [restrictedModalItem, setRestrictedModalItem] = useState<PortalModule | null>(null);
 
   const userRoles = useMemo(() => {

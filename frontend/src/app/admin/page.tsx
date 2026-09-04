@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import dynamic from "next/dynamic";
+import { IconLoader2 } from "@tabler/icons-react";
 import type { AdminTab } from "@/components/AdminSidebar";
 import AdminSidebar from "@/components/AdminSidebar";
 
@@ -16,23 +16,29 @@ function AdminPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
-  const [activeTab, setActiveTab] = useState<AdminTab>("users");
-  const [isInitialized, setIsInitialized] = useState(false);
+  const rawParam = searchParams.get("tab");
+  const paramTab = rawParam && VALID_TABS.includes(rawParam as AdminTab) ? (rawParam as AdminTab) : null;
+
+  // Initialize synchronously with URL param if present, or fallback
+  const [activeTab, setActiveTab] = useState<AdminTab>(() => paramTab || "users");
+  const [visitedTabs, setVisitedTabs] = useState<Set<AdminTab>>(() => new Set([paramTab || "users"]));
+  const [isInitialized, setIsInitialized] = useState<boolean>(() => !!paramTab);
 
   // Synchronize active tab with URL query parameter & localStorage fallback
   useEffect(() => {
-    const rawParam = searchParams.get("tab");
-    const paramTab = rawParam && VALID_TABS.includes(rawParam as AdminTab) ? (rawParam as AdminTab) : null;
+    const raw = searchParams.get("tab");
+    const validParam = raw && VALID_TABS.includes(raw as AdminTab) ? (raw as AdminTab) : null;
 
-    if (paramTab) {
-      setActiveTab(paramTab);
+    if (validParam) {
+      setActiveTab(validParam);
+      setVisitedTabs((prev) => (prev.has(validParam) ? prev : new Set(prev).add(validParam)));
       try {
-        localStorage.setItem(STORAGE_KEY, paramTab);
+        localStorage.setItem(STORAGE_KEY, validParam);
       } catch (err) {
         // Ignore localStorage quota/permission issues
       }
     } else {
-      let savedTab: AdminTab | null = null;
+      let savedTab: AdminTab = "users";
       try {
         const stored = localStorage.getItem(STORAGE_KEY);
         if (stored && VALID_TABS.includes(stored as AdminTab)) {
@@ -42,12 +48,9 @@ function AdminPageContent() {
         // Ignore localStorage errors
       }
 
-      if (savedTab) {
-        setActiveTab(savedTab);
-        router.replace(`/admin?tab=${savedTab}`, { scroll: false });
-      } else {
-        setActiveTab("users");
-      }
+      setActiveTab(savedTab);
+      setVisitedTabs((prev) => (prev.has(savedTab) ? prev : new Set(prev).add(savedTab)));
+      router.replace(`/admin?tab=${savedTab}`, { scroll: false });
     }
     setIsInitialized(true);
   }, [searchParams, router]);
@@ -55,6 +58,7 @@ function AdminPageContent() {
   const handleTabChange = useCallback(
     (newTab: AdminTab) => {
       setActiveTab(newTab);
+      setVisitedTabs((prev) => (prev.has(newTab) ? prev : new Set(prev).add(newTab)));
       try {
         localStorage.setItem(STORAGE_KEY, newTab);
       } catch (err) {
@@ -65,6 +69,19 @@ function AdminPageContent() {
     [router]
   );
 
+  // If tab has not been determined yet (e.g. no URL param on cold visit), wait for localStorage resolution
+  if (!isInitialized && !paramTab) {
+    return (
+      <div className="flex-1 flex flex-col md:flex-row w-full p-2 md:p-4 gap-4 md:gap-5">
+        <AdminSidebar active="users" onChange={handleTabChange} />
+        <main className="flex-1 flex flex-col min-w-0 bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded-2xl p-8 items-center justify-center text-[var(--text-tertiary)] min-h-[400px]">
+          <IconLoader2 className="w-5 h-5 animate-spin mb-2 text-[var(--accent-primary-text)]" />
+          <span className="text-xs font-medium">Loading admin panel...</span>
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="flex-1 flex flex-col md:flex-row w-full p-2 md:p-4 gap-4 md:gap-5">
       {/* Left-Rail Sidebar Navigation */}
@@ -72,8 +89,16 @@ function AdminPageContent() {
 
       {/* Main Content Area */}
       <main className="flex-1 flex flex-col min-w-0 bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded-2xl p-3 md:p-5 shadow-xs">
-        {activeTab === "users" && <UserManagement />}
-        {activeTab === "database" && <DatabasePreview />}
+        {visitedTabs.has("users") && (
+          <div className={activeTab === "users" ? "flex-1 flex flex-col min-w-0 w-full" : "hidden"}>
+            <UserManagement />
+          </div>
+        )}
+        {visitedTabs.has("database") && (
+          <div className={activeTab === "database" ? "flex-1 flex flex-col min-w-0 w-full" : "hidden"}>
+            <DatabasePreview />
+          </div>
+        )}
       </main>
     </div>
   );

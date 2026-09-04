@@ -39,8 +39,4 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-
 settings = Settings()
-
-# Ensure upload directory exists
-os.makedirs(settings.upload_dir, exist_ok=True)

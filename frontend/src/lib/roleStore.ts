@@ -100,6 +100,48 @@ export async function fetchRolesAndFeaturesCached(): Promise<RolesAndFeaturesRes
   return pendingRolesFetch;
 }
 
+/**
+ * Synchronously retrieve cached roles from memory or localStorage (if valid TTL).
+ */
+export function getCachedRoles(): RoleInfo[] | null {
+  if (cachedRolesResponse && cachedRolesResponse.roles && cachedRolesResponse.roles.length > 0) {
+    return cachedRolesResponse.roles;
+  }
+  if (typeof window !== "undefined") {
+    try {
+      const stored = localStorage.getItem(ROLES_CACHE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored) as { timestamp: number; data: RolesAndFeaturesResponse };
+        if (parsed.timestamp && Date.now() - parsed.timestamp < ROLES_CACHE_TTL_MS && parsed.data?.roles) {
+          cachedRolesResponse = parsed.data;
+          return parsed.data.roles;
+        }
+      }
+    } catch {
+      // Ignore
+    }
+  }
+  return null;
+}
+
+/**
+ * Prime the roles & features cache directly without making an HTTP request.
+ */
+export function setRolesCache(data: RolesAndFeaturesResponse): void {
+  if (!data || !data.roles || data.roles.length === 0) return;
+  cachedRolesResponse = data;
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.setItem(
+        ROLES_CACHE_KEY,
+        JSON.stringify({ timestamp: Date.now(), data })
+      );
+    } catch {
+      // Ignore
+    }
+  }
+}
+
 export function clearRolesCache(): void {
   cachedRolesResponse = null;
   if (typeof window !== "undefined") {

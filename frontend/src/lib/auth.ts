@@ -1,4 +1,4 @@
-/** Frontend authentication client for Microsoft Entra ID SSO. */
+import { setStoredUserEmail } from "./securityStore";
 
 export interface UserSession {
   id: string;
@@ -14,9 +14,25 @@ export interface AuthMeResponse {
   user: UserSession | null;
 }
 
-import { clearRolesCache } from "./roleStore";
-
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+export const SESSION_INDICATOR_COOKIE = "cq_logged_in";
+
+/**
+ * Check if the indicator cookie exists in the browser.
+ */
+export function hasSessionIndicator(): boolean {
+  if (typeof document === "undefined") return false;
+  return document.cookie.split(";").some((c) => c.trim().startsWith(`${SESSION_INDICATOR_COOKIE}=`));
+}
+
+/**
+ * Manually delete the indicator cookie in the frontend.
+ */
+export function clearSessionIndicator(): void {
+  if (typeof document === "undefined") return;
+  document.cookie = `${SESSION_INDICATOR_COOKIE}=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+}
 
 /**
  * Redirect browser to backend Microsoft Entra ID login endpoint.
@@ -39,10 +55,15 @@ export async function checkAuthSession(): Promise<AuthMeResponse> {
     });
 
     if (!response.ok) {
+      clearSessionIndicator();
       return { authenticated: false, user: null };
     }
 
-    return await response.json();
+    const data: AuthMeResponse = await response.json();
+    if (!data.authenticated) {
+      clearSessionIndicator();
+    }
+    return data;
   } catch (error) {
     console.error("Failed to verify session:", error);
     return { authenticated: false, user: null };
@@ -53,7 +74,8 @@ export async function checkAuthSession(): Promise<AuthMeResponse> {
  * Logout current session and redirect to Entra ID end-session URL.
  */
 export async function logoutFromEntra(): Promise<void> {
-  clearRolesCache();
+  clearSessionIndicator();
+  setStoredUserEmail("");
   try {
     const response = await fetch(`${API_BASE_URL}/auth/logout`, {
       method: "POST",

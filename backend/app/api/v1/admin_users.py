@@ -1,7 +1,7 @@
 """Admin API endpoints for User Management and Role Assignments."""
 import logging
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -101,6 +101,7 @@ async def create_or_preseed_user(
 async def update_user_roles(
     user_id: str,
     body: UserRoleUpdateSchema,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """Update assigned roles for an existing user."""
@@ -121,6 +122,11 @@ async def update_user_roles(
 
     await db.commit()
     logger.info(f"Updated roles for user '{user.email}' to {body.roles}")
+
+    # If the user is editing their own account, update the session cookie in-place (0 extra requests!)
+    current_uid = request.session.get("user_id")
+    if current_uid and current_uid == str(user.id):
+        request.session["roles"] = body.roles
 
     return {"status": "success", "message": f"Roles updated for user '{user.email}'."}
 

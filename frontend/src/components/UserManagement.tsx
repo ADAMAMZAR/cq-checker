@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import {
   IconUserPlus,
   IconTrash,
@@ -10,6 +10,7 @@ import {
   IconSearch,
   IconLoader2,
   IconUserCheck,
+  IconRefresh,
 } from "@tabler/icons-react";
 import {
   fetchAdminUsers,
@@ -19,6 +20,7 @@ import {
   AdminUserItem,
 } from "@/lib/api";
 import { formatMalaysiaDate, formatMalaysiaDateTime } from "@/lib/dateUtils";
+import { useAuth } from "@/context/AuthContext";
 
 const ALL_ROLES = [
   { name: "admin", label: "Admin", desc: "Full system access" },
@@ -29,9 +31,11 @@ const ALL_ROLES = [
 ];
 
 export default function UserManagement() {
+  const { session, updateSessionRoles } = useAuth();
   const [users, setUsers] = useState<AdminUserItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const fetched = useRef(false);
 
   // Modal States
   const [showAddModal, setShowAddModal] = useState(false);
@@ -46,7 +50,10 @@ export default function UserManagement() {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    loadUsers();
+    if (!fetched.current) {
+      fetched.current = true;
+      loadUsers();
+    }
   }, []);
 
   async function loadUsers() {
@@ -103,6 +110,10 @@ export default function UserManagement() {
     setErrorMsg(null);
     try {
       await updateAdminUserRoles(selectedUser.id, [selectedRole]);
+      // If editing own account, update React session state immediately in-memory (0 extra requests!)
+      if (session && String(selectedUser.id) === String(session.id)) {
+        updateSessionRoles([selectedRole]);
+      }
       setSuccessMsg(`Updated role for ${selectedUser.email} to '${selectedRole}'`);
       setShowEditModal(false);
       await loadUsers();
@@ -147,14 +158,25 @@ export default function UserManagement() {
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={handleOpenAdd}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[var(--accent-primary)] hover:bg-[var(--accent-primary-hover)] text-white font-semibold text-xs transition-all shadow-sm cursor-pointer shrink-0"
-        >
-          <IconUserPlus className="w-4 h-4" />
-          <span>Pre-seed User & Roles</span>
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => loadUsers()}
+            disabled={loading}
+            title="Refresh users list"
+            className="inline-flex items-center justify-center p-2 rounded-xl border border-[var(--border-visible)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-card)] text-[var(--text-secondary)] hover:text-[var(--heading-color)] transition-all shadow-sm cursor-pointer disabled:opacity-50"
+          >
+            <IconRefresh className={`w-4 h-4 ${loading ? "animate-spin text-[var(--accent-primary-text)]" : ""}`} />
+          </button>
+          <button
+            type="button"
+            onClick={handleOpenAdd}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[var(--accent-primary)] hover:bg-[var(--accent-primary-hover)] text-white font-semibold text-xs transition-all shadow-sm cursor-pointer shrink-0"
+          >
+            <IconUserPlus className="w-4 h-4" />
+            <span>Pre-seed User & Roles</span>
+          </button>
+        </div>
       </div>
 
       {/* Notifications */}
