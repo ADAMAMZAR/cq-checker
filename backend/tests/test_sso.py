@@ -1,7 +1,7 @@
 """Unit and Integration Tests for SSO, JIT Provisioning, RBAC, and Admin User APIs."""
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from fastapi import HTTPException, PermissionError
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.auth.provisioning import get_or_create_user
