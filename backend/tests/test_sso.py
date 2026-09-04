@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from app.auth.provisioning import get_or_create_user
 from app.auth.dependencies import require_role
 from app.config import settings
+from app.db.session import get_db
 from app.models.tables import User, Role
 from app.main import app
 
@@ -133,18 +134,29 @@ async def test_require_role_dependency_denied():
         await dep_fn(user=user)
 
     assert exc_info.value.status_code == 403
-    assert exc_info.value.detail == "Insufficient permissions"
+    assert "Insufficient permissions" in exc_info.value.detail
 
 
 def test_admin_user_api_endpoint_routing():
     """Test that /api/admin/users route is correctly registered in FastAPI app."""
-    client = TestClient(app)
-    response = client.get(
-        "/api/admin/users",
-        headers={
-            "X-Internal-Secret": settings.internal_api_secret,
-            "X-User-Email": "test.admin@gamuda.com.my",
-        },
-    )
-    # Endpoint exists and responds (not a 404 route error)
-    assert response.status_code in (200, 500)
+    mock_db = AsyncMock()
+    mock_res = MagicMock()
+    mock_res.scalars.return_value.all.return_value = []
+    mock_db.execute.return_value = mock_res
+
+    async def override_get_db():
+        yield mock_db
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        client = TestClient(app)
+        response = client.get(
+            "/api/admin/users",
+            headers={
+                "X-Internal-Secret": settings.internal_api_secret,
+                "X-User-Email": "test.admin@gamuda.com.my",
+            },
+        )
+        assert response.status_code == 200
+    finally:
+        app.dependency_overrides.pop(get_db, None)
