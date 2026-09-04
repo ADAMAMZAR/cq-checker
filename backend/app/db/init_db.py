@@ -4,6 +4,7 @@ from app.db.session import get_session_factory
 
 logger = logging.getLogger(__name__)
 
+
 async def init_db_tables():
     """Ensure document_folders table, RBAC tables, and documents schema exist on startup."""
     factory = get_session_factory()
@@ -64,5 +65,3 @@ async def init_db_tables():
             );
         """))
         await session.commit()
-
-

@@ -94,7 +94,6 @@ async def sync_roles_from_groups(user: User, entra_group_ids: list[str], db: Asy
     # Fetch role records for desired role names
     role_res = await db.execute(select(Role).where(Role.name.in_(desired_role_names)))
     desired_roles = role_res.scalars().all()
-    desired_role_ids = {r.id for r in desired_roles}
 
     # Fetch current roles
     current_role_ids = {r.id for r in user.roles} if user.roles else set()

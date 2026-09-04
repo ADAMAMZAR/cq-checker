@@ -9,7 +9,7 @@ import os
 # Add project root to path so we can import app.*
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
-from sqlalchemy import select, delete, text
+from sqlalchemy import select, delete
 from app.db.session import get_session_factory
 from app.models.tables import Role, UserRole, Feature, RoleFeature, User
 
@@ -69,13 +69,13 @@ FEATURES = [
 
 # Role -> list of feature IDs they can access
 ROLE_FEATURES = {
-    "admin":            ["strategic_insights", "procurement_assistant", "supplier_visibility", "certificate_checker", "e_auction_generator"],
-    "gpo_admin":        ["strategic_insights", "procurement_assistant", "supplier_visibility", "certificate_checker", "e_auction_generator"],
-    "management":       ["strategic_insights", "procurement_assistant", "supplier_visibility", "e_auction_generator"],
-    "manager":          ["strategic_insights", "procurement_assistant", "supplier_visibility", "e_auction_generator"],
-    "gpo":              ["procurement_assistant", "supplier_visibility", "certificate_checker", "e_auction_generator"],
-    "gpo_lead":         ["strategic_insights", "procurement_assistant", "supplier_visibility", "certificate_checker", "e_auction_generator"],
-    "user":             ["procurement_assistant", "supplier_visibility", "e_auction_generator"],
+    "admin": ["strategic_insights", "procurement_assistant", "supplier_visibility", "certificate_checker", "e_auction_generator"],
+    "gpo_admin": ["strategic_insights", "procurement_assistant", "supplier_visibility", "certificate_checker", "e_auction_generator"],
+    "management": ["strategic_insights", "procurement_assistant", "supplier_visibility", "e_auction_generator"],
+    "manager": ["strategic_insights", "procurement_assistant", "supplier_visibility", "e_auction_generator"],
+    "gpo": ["procurement_assistant", "supplier_visibility", "certificate_checker", "e_auction_generator"],
+    "gpo_lead": ["strategic_insights", "procurement_assistant", "supplier_visibility", "certificate_checker", "e_auction_generator"],
+    "user": ["procurement_assistant", "supplier_visibility", "e_auction_generator"],
 }
 
 TEST_USERS = [

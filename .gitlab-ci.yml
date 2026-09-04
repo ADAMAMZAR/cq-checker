@@ -11,7 +11,7 @@ lint_backend:
     - cd backend
     - pip install --no-cache-dir flake8
   script:
-    - flake8 app/ tests/ --max-line-length=120 --ignore=E501,W503
+    - flake8 app/ tests/ --max-line-length=120 --ignore=E501,W503,E402
 
 # ── Test: FastAPI Python Backend (unit tests, no DB) ─────────────
 test_backend:

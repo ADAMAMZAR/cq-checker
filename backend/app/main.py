@@ -91,7 +91,7 @@ async def verify_internal_secret_header(request: Request, call_next):
         return JSONResponse(
             status_code=403,
             content={
-                "detail": f"Access Denied: Only Gamudian are allowed to access this system.",
+                "detail": "Access Denied: Only Gamudian are allowed to access this system.",
                 "provided_email": user_email or "None",
             },
         )

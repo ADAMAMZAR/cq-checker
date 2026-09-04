@@ -456,7 +456,6 @@ async def update_cell(table: str, pk: Dict[str, Any], column: str, value: Any) -
         return result.rowcount or 0
 
 
-
 def _stringify(value: Any) -> str:
     """Render a cell value as a display string, flattening JSON/dates/vectors."""
     if value is None:

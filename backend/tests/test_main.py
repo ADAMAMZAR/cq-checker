@@ -6,7 +6,6 @@ import os
 # Force pure Python implementation of Protobuf to bypass Python 3.14 C-extension incompatibilities
 os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 
-import pytest
 from fastapi.testclient import TestClient
 from app.main import app
 

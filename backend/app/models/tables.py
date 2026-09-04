@@ -3,24 +3,19 @@
 import os
 import time
 import uuid
-from datetime import datetime, timezone
 
 from sqlalchemy import (
     Column,
     String,
     Text,
     Integer,
-    Numeric,
     DateTime,
     Boolean,
     ForeignKey,
-    Computed,
-    CheckConstraint,
     func,
 )
-from sqlalchemy.dialects.postgresql import UUID, JSONB, TSVECTOR
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
-from pgvector.sqlalchemy import Vector
 
 from app.db.session import Base
 
@@ -50,6 +45,7 @@ def uuid7() -> uuid.UUID:
 
 
 _new_uuid = uuid7
+
 
 class User(Base):
     __tablename__ = "users"
@@ -113,4 +109,4 @@ class RoleFeature(Base):
     __tablename__ = "role_features"
 
     role_id = Column(UUID(as_uuid=True), ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True)
-    feature_id = Column(String(50), ForeignKey("features.id", ondelete="CASCADE"), primary_key=True)
+    feature_id = Column(String(50), ForeignKey("features.id", ondelete="CASCADE"), primary_key=True)

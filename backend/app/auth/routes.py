@@ -2,7 +2,6 @@
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse, JSONResponse
-from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user_from_session
@@ -10,7 +9,7 @@ from app.auth.oauth import oauth
 from app.auth.provisioning import get_or_create_user
 from app.config import settings
 from app.db.session import get_db, get_session_factory
-from app.models.tables import AuthEvent, User, Role, UserRole
+from app.models.tables import AuthEvent
 from app.services.timezones import to_malaysia
 
 logger = logging.getLogger(__name__)
@@ -36,7 +35,7 @@ async def callback(request: Request, db: AsyncSession = Depends(get_db)):
     try:
         token = await oauth.entra.authorize_access_token(request)
         userinfo = dict(token.get("userinfo") or {})
-        
+
         # Prominently print raw Microsoft Entra ID claims to terminal stdout
         print("\n" + "=" * 80)
         print("🔑 RAW RESPONSE RETURNED BY MICROSOFT ENTRA ID SSO:")
