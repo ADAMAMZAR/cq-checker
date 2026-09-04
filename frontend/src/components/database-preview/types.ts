@@ -1,4 +1,4 @@
-import type { DbTableMeta, DbTableData, DocumentFolder } from "@/types";
+import type { DbTableMeta, DbTableData } from "@/types";
 
 export interface EditingCell {
   rIdx: number;

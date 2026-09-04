@@ -16,7 +16,7 @@ class Settings(BaseSettings):
 
     # ── Session Management ─────────────────────────────────────────
     session_secret: str = Field(default="cq-checker-dev-session-secret-change-in-prod-1234567890", validation_alias="SESSION_SECRET")
-    session_cookie_name: str = Field(default="cq_session", validation_alias="SESSION_COOKIE_NAME")
+    session_cookie_name: str = Field(default="__session", validation_alias="SESSION_COOKIE_NAME")
     session_max_age_seconds: int = Field(default=28800, validation_alias="SESSION_MAX_AGE_SECONDS")  # 8 hours
 
     # ── Role Group Mappings (Entra Group Object ID -> App Role) ────

@@ -57,7 +57,6 @@ class User(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
     email = Column(String(255), nullable=False, unique=True, index=True)
     display_name = Column(String(255), nullable=True)
-    role = Column(String(50), nullable=False, default="employee")
     sso_subject = Column(String(255), nullable=True, unique=True, index=True)
     sso_provider = Column(String(50), nullable=True, default="entra")
     sso_tenant_id = Column(String(100), nullable=True)
@@ -73,8 +72,7 @@ class AuthEvent(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    actor_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    event_type = Column(String(50), nullable=False)  # login_success, login_failure, logout, impersonate_start, impersonate_stop
+    event_type = Column(String(50), nullable=False)  # login_success, login_failure, logout
     ip_address = Column(String(45), nullable=True)
     user_agent = Column(Text, nullable=True)
     details = Column(JSONB, nullable=True)

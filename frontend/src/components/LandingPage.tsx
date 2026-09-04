@@ -33,6 +33,7 @@ export default function LandingPage() {
   }, [session]);
 
   useEffect(() => {
+    if (!session) return;
     async function loadRoles() {
       try {
         const res = await fetchRolesAndFeaturesCached();
@@ -44,7 +45,7 @@ export default function LandingPage() {
       }
     }
     loadRoles();
-  }, []);
+  }, [session]);
 
   // Filter features based on live SSO RBAC role permissions
   const visibleFeatures = useMemo(() => {

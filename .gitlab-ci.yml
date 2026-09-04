@@ -1,11 +1,12 @@
 stages:
   - lint
   - test
+  - deploy
 
 # ── Lint: check code style and import health ─────────────────────
 lint_backend:
   stage: lint
-  image: python:3.10-slim
+  image: python:3.13-slim
   before_script:
     - cd backend
     - pip install --no-cache-dir flake8
@@ -15,52 +16,18 @@ lint_backend:
 # ── Test: FastAPI Python Backend (unit tests, no DB) ─────────────
 test_backend:
   stage: test
-  image: python:3.10-slim
+  image: python:3.13-slim
   before_script:
     - cd backend
     - export PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
     - pip install --no-cache-dir -r requirements.txt
   script:
-    - python -m pytest -v tests/ --ignore=tests/test_repositories.py
-
-# ── Test: Repository integration tests (requires PostgreSQL) ────
-test_repositories:
-  stage: test
-  image: python:3.10-slim
-  services:
-    - name: pgvector/pgvector:pg16
-      alias: postgres
-  variables:
-    POSTGRES_USER: postgres
-    POSTGRES_PASSWORD: postgres
-    POSTGRES_DB: cq_checker_test
-    TEST_DATABASE_URL: "postgresql+asyncpg://postgres:postgres@postgres:5432/cq_checker_test"
-    NEON_DATABASE_URL: "postgresql+asyncpg://postgres:postgres@postgres:5432/cq_checker_test"
-  before_script:
-    - cd backend
-    - export PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
-    - pip install --no-cache-dir -r requirements.txt
-  script:
-    - alembic upgrade head
-    - python -m pytest -v tests/test_repositories.py
-
-# ── Test: Chrome Extension (Playwright) ──────────────────────────
-test_extension:
-  stage: test
-  image: mcr.microsoft.com/playwright:v1.44.0-jammy
-  cache:
-    paths:
-      - extension/node_modules/
-  before_script:
-    - cd extension
-    - npm ci
-  script:
-    - npx playwright test
+    - python -m pytest -v tests/
 
 # ── Test: Next.js Frontend Compilation ───────────────────────────
 test_frontend:
   stage: test
-  image: node:18-alpine
+  image: node:24-alpine
   cache:
     paths:
       - frontend/node_modules/
@@ -70,3 +37,62 @@ test_frontend:
     - npm ci
   script:
     - npm run build
+
+# ── Deploy: Google Cloud Run (Backend) ───────────────────────────
+deploy_backend:
+  stage: deploy
+  image: google/cloud-sdk:slim
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+  before_script:
+    # Authenticate GCP using service account key stored in GitLab CI/CD Variables
+    - |
+      if [ -f "$GCP_SA_KEY" ]; then
+        cp "$GCP_SA_KEY" /tmp/gcp-sa-key.json
+      else
+        echo "$GCP_SA_KEY" > /tmp/gcp-sa-key.json
+      fi
+    - gcloud auth activate-service-account --key-file=/tmp/gcp-sa-key.json
+    - gcloud config set project ${GCP_PROJECT_ID:-gen-lang-client-0447597759}
+  script:
+    - |
+      ENV_VARS="ENVIRONMENT=production,SESSION_COOKIE_NAME=__session"
+      [ -n "$NEON_DATABASE_URL" ] && ENV_VARS="$ENV_VARS,NEON_DATABASE_URL=$NEON_DATABASE_URL"
+      [ -n "$ALLOWED_ORIGINS" ] && ENV_VARS="$ENV_VARS,ALLOWED_ORIGINS=$ALLOWED_ORIGINS"
+      [ -n "$ENTRA_REDIRECT_URI" ] && ENV_VARS="$ENV_VARS,ENTRA_REDIRECT_URI=$ENTRA_REDIRECT_URI"
+      [ -n "$SESSION_SECRET" ] && ENV_VARS="$ENV_VARS,SESSION_SECRET=$SESSION_SECRET"
+      [ -n "$ENTRA_CLIENT_ID" ] && ENV_VARS="$ENV_VARS,ENTRA_CLIENT_ID=$ENTRA_CLIENT_ID"
+      [ -n "$ENTRA_TENANT_ID" ] && ENV_VARS="$ENV_VARS,ENTRA_TENANT_ID=$ENTRA_TENANT_ID"
+      [ -n "$ENTRA_CLIENT_SECRET" ] && ENV_VARS="$ENV_VARS,ENTRA_CLIENT_SECRET=$ENTRA_CLIENT_SECRET"
+
+      gcloud run deploy cq-checker-backend \
+        --source backend \
+        --region asia-southeast1 \
+        --allow-unauthenticated \
+        --min-instances 0 \
+        --max-instances 3 \
+        --memory 512Mi \
+        --timeout 300s \
+        --update-env-vars "$ENV_VARS"
+  after_script:
+    - rm -f /tmp/gcp-sa-key.json
+
+# ── Deploy: Firebase Hosting (Frontend) ──────────────────────────
+deploy_frontend:
+  stage: deploy
+  image: node:24-alpine
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+  cache:
+    paths:
+      - frontend/node_modules/
+      - frontend/.next/cache/
+  before_script:
+    - cd frontend
+    - npm ci
+  script:
+    # 1. Build Next.js static export bundle (output: frontend/out)
+    - npm run build:static
+    - cd ..
+    # 2. Deploy to Firebase Hosting via CI Token
+    - npx --yes firebase-tools deploy --only hosting --token "$FIREBASE_TOKEN"

@@ -56,7 +56,6 @@ async def init_db_tables():
             CREATE TABLE IF NOT EXISTS auth_events (
                 id UUID PRIMARY KEY,
                 user_id UUID REFERENCES users(id) ON DELETE SET NULL,
-                actor_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
                 event_type VARCHAR(50) NOT NULL,
                 ip_address VARCHAR(45),
                 user_agent TEXT,
