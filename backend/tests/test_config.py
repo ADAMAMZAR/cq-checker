@@ -10,11 +10,18 @@ os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 
 
 class TestSettingsDefaults:
-    """Verify Settings loads with empty/missing env vars (dev defaults)."""
-
     def _fresh_settings(self, monkeypatch):
         """Create a Settings instance that reads ONLY from env vars, not .env file."""
-        for key in ["NEON_DATABASE_URL", "ENTRA_TENANT_ID", "SESSION_SECRET"]:
+        keys_to_clear = [
+            "NEON_DATABASE_URL",
+            "ENTRA_TENANT_ID",
+            "ENTRA_CLIENT_ID",
+            "ENTRA_CLIENT_SECRET",
+            "ENTRA_REDIRECT_URI",
+            "SESSION_SECRET",
+            "ALLOWED_ORIGINS",
+        ]
+        for key in keys_to_clear:
             monkeypatch.delenv(key, raising=False)
         from app.config import Settings
         from pydantic_settings import SettingsConfigDict
