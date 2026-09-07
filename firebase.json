@@ -1,5 +1,6 @@
 {
   "hosting": {
+    "site": "gpodeck",
     "public": "frontend/out",
     "ignore": [
       "firebase.json",

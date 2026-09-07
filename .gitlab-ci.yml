@@ -1,7 +1,8 @@
 stages:
   - lint
   - test
-  - deploy
+  - deploy_backend
+  - deploy_frontend
 
 # ── Lint: check code style and import health ─────────────────────
 lint_backend:
@@ -52,7 +53,7 @@ test_frontend:
 
 # ── Deploy: Google Cloud Run (Backend) ───────────────────────────
 deploy_backend:
-  stage: deploy
+  stage: deploy_backend
   image: google/cloud-sdk:slim
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
@@ -94,7 +95,7 @@ deploy_backend:
 
 # ── Deploy: Firebase Hosting (Frontend) ──────────────────────────
 deploy_frontend:
-  stage: deploy
+  stage: deploy_frontend
   image: node:24-alpine
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
