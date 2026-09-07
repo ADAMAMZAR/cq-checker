@@ -25,8 +25,8 @@ async def get_current_user_from_session(request: Request, db: AsyncSession) -> U
     return user
 
 
-
 async def get_current_user(
+
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> User:

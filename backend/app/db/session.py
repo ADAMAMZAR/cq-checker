@@ -49,8 +49,8 @@ def get_engine():
     return _engine
 
 
-
 def get_session_factory():
+
     global _session_factory
     if _session_factory is None:
         _session_factory = async_sessionmaker(

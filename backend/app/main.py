@@ -69,10 +69,10 @@ app.add_middleware(
 )
 
 
-
 # Security Middleware: Verify pre-shared internal secret token header & company domain gate before SSO implementation
 @app.middleware("http")
 async def verify_internal_secret_header(request: Request, call_next):
+
     # Allow OPTIONS preflight requests, public health/docs endpoints, and SSO auth routes
     bypassed_paths = {"/", "/docs", "/redoc", "/openapi.json"}
     if request.method == "OPTIONS" or request.url.path in bypassed_paths or request.url.path.startswith("/auth"):

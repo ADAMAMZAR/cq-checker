@@ -70,8 +70,8 @@ async def callback(request: Request, db: AsyncSession = Depends(get_db)):
         if "tenant" in err_str:
             return error_redirect("wrong_tenant")
         return error_redirect("auth_failed")
-
     except ValueError as e:
+
         logger.warning(f"SSO ValueError: {e}")
         if "email" in str(e).lower():
             return error_redirect("missing_email")
