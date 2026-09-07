@@ -147,7 +147,12 @@ export default function UserNav() {
                 type="button"
                 onClick={() => {
                   setIsDropdownOpen(false);
-                  router.push("/admin");
+                  let targetTab = "users";
+                  try {
+                    const saved = localStorage.getItem("admin_active_tab");
+                    if (saved === "database") targetTab = "database";
+                  } catch {}
+                  router.push(`/admin?tab=${targetTab}`);
                 }}
                 className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-[var(--heading-color)] hover:bg-[var(--accent-primary-soft)] hover:text-[var(--accent-primary-text)] transition-colors cursor-pointer"
               >

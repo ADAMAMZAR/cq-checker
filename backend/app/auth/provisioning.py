@@ -24,6 +24,12 @@ async def get_or_create_user(claims: dict, db: AsyncSession) -> User:
     if not email:
         raise ValueError("No email found in Entra ID token claims.")
 
+    if "#ext#" in email.lower():
+        prefix = email.split("#EXT#")[0].split("#ext#")[0]
+        if "_" in prefix:
+            r_idx = prefix.rfind("_")
+            email = prefix[:r_idx] + "@" + prefix[r_idx + 1:]
+
     email = email.lower().strip()
     display_name = claims.get("name") or email.split("@")[0]
 
@@ -41,6 +47,10 @@ async def get_or_create_user(claims: dict, db: AsyncSession) -> User:
     if not user:
         result = await db.execute(select(User).where(User.email == email))
         user = result.scalar_one_or_none()
+
+    if user and not user.is_active:
+        logger.warning(f"Rejecting login for deactivated user: {user.email}")
+        raise PermissionError("Account has been deactivated. Please contact an administrator.")
 
     if not user:
         user = User(

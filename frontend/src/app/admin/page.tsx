@@ -19,10 +19,20 @@ function AdminPageContent() {
   const rawParam = searchParams.get("tab");
   const paramTab = rawParam && VALID_TABS.includes(rawParam as AdminTab) ? (rawParam as AdminTab) : null;
 
-  // Initialize synchronously with URL param if present, or fallback
-  const [activeTab, setActiveTab] = useState<AdminTab>(() => paramTab || "users");
-  const [visitedTabs, setVisitedTabs] = useState<Set<AdminTab>>(() => new Set([paramTab || "users"]));
-  const [isInitialized, setIsInitialized] = useState<boolean>(() => !!paramTab);
+  // Initialize synchronously with URL param or localStorage or default to "users"
+  const getInitialTab = (): AdminTab => {
+    if (paramTab) return paramTab;
+    if (typeof window !== "undefined") {
+      try {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        if (stored && VALID_TABS.includes(stored as AdminTab)) return stored as AdminTab;
+      } catch {}
+    }
+    return "users";
+  };
+
+  const [activeTab, setActiveTab] = useState<AdminTab>(getInitialTab);
+  const [visitedTabs, setVisitedTabs] = useState<Set<AdminTab>>(() => new Set([getInitialTab()]));
 
   // Synchronize active tab with URL query parameter & localStorage fallback
   useEffect(() => {
@@ -30,30 +40,17 @@ function AdminPageContent() {
     const validParam = raw && VALID_TABS.includes(raw as AdminTab) ? (raw as AdminTab) : null;
 
     if (validParam) {
-      setActiveTab(validParam);
-      setVisitedTabs((prev) => (prev.has(validParam) ? prev : new Set(prev).add(validParam)));
+      if (validParam !== activeTab) {
+        setActiveTab(validParam);
+        setVisitedTabs((prev) => (prev.has(validParam) ? prev : new Set(prev).add(validParam)));
+      }
       try {
         localStorage.setItem(STORAGE_KEY, validParam);
-      } catch (err) {
-        // Ignore localStorage quota/permission issues
-      }
+      } catch {}
     } else {
-      let savedTab: AdminTab = "users";
-      try {
-        const stored = localStorage.getItem(STORAGE_KEY);
-        if (stored && VALID_TABS.includes(stored as AdminTab)) {
-          savedTab = stored as AdminTab;
-        }
-      } catch (err) {
-        // Ignore localStorage errors
-      }
-
-      setActiveTab(savedTab);
-      setVisitedTabs((prev) => (prev.has(savedTab) ? prev : new Set(prev).add(savedTab)));
-      router.replace(`/admin?tab=${savedTab}`, { scroll: false });
+      router.replace(`/admin?tab=${activeTab}`, { scroll: false });
     }
-    setIsInitialized(true);
-  }, [searchParams, router]);
+  }, [searchParams, router, activeTab]);
 
   const handleTabChange = useCallback(
     (newTab: AdminTab) => {
@@ -61,26 +58,11 @@ function AdminPageContent() {
       setVisitedTabs((prev) => (prev.has(newTab) ? prev : new Set(prev).add(newTab)));
       try {
         localStorage.setItem(STORAGE_KEY, newTab);
-      } catch (err) {
-        // Ignore localStorage errors
-      }
+      } catch {}
       router.push(`/admin?tab=${newTab}`, { scroll: false });
     },
     [router]
   );
-
-  // If tab has not been determined yet (e.g. no URL param on cold visit), wait for localStorage resolution
-  if (!isInitialized && !paramTab) {
-    return (
-      <div className="flex-1 flex flex-col md:flex-row w-full p-2 md:p-4 gap-4 md:gap-5">
-        <AdminSidebar active="users" onChange={handleTabChange} />
-        <main className="flex-1 flex flex-col min-w-0 bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded-2xl p-8 items-center justify-center text-[var(--text-tertiary)] min-h-[400px]">
-          <IconLoader2 className="w-5 h-5 animate-spin mb-2 text-[var(--accent-primary-text)]" />
-          <span className="text-xs font-medium">Loading admin panel...</span>
-        </main>
-      </div>
-    );
-  }
 
   return (
     <div className="flex-1 flex flex-col md:flex-row w-full p-2 md:p-4 gap-4 md:gap-5">

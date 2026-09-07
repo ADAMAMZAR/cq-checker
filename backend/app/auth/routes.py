@@ -32,29 +32,56 @@ async def login(request: Request):
 @router.get("/callback")
 async def callback(request: Request, db: AsyncSession = Depends(get_db)):
     """Handle OIDC authorization code callback from Microsoft Entra ID."""
+    frontend_base = (settings.allowed_origins.split(",")[0] or "http://localhost:3000").rstrip("/")
+
+    def error_redirect(error_code: str) -> RedirectResponse:
+        resp = RedirectResponse(url=f"{frontend_base}/login?error={error_code}", status_code=302)
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
+        return resp
+
+    # 1. Handle errors returned directly by Microsoft Entra (e.g. user cancelled or consent declined)
+    query_error = request.query_params.get("error")
+    if query_error:
+        error_desc = request.query_params.get("error_description", "")
+        logger.warning(f"Entra ID callback returned error: {query_error} ({error_desc})")
+        if query_error == "access_denied" or "cancel" in error_desc.lower() or "decline" in error_desc.lower():
+            return error_redirect("user_cancelled")
+        return error_redirect("auth_failed")
+
+    # 2. Exchange authorization code for token
     try:
         token = await oauth.entra.authorize_access_token(request)
         userinfo = dict(token.get("userinfo") or {})
-
-        # Prominently print raw Microsoft Entra ID claims to terminal stdout
-        print("\n" + "=" * 80)
-        print("🔑 RAW RESPONSE RETURNED BY MICROSOFT ENTRA ID SSO:")
-        print("Userinfo Claims:", userinfo)
-        print("Token Metadata:", {k: v for k, v in token.items() if k != "userinfo"})
-        print("=" * 80 + "\n", flush=True)
-
-        request.session["raw_entra_claims"] = userinfo
     except Exception as e:
+        err_msg = str(e).lower()
         logger.error(f"OIDC authorization failed: {e}")
-        raise HTTPException(400, f"Authentication failed: {e}")
+        if "mismatching_state" in err_msg or "csrf" in err_msg:
+            return error_redirect("session_expired")
+        if "access_denied" in err_msg:
+            return error_redirect("user_cancelled")
+        return error_redirect("auth_failed")
 
+    # 3. User provisioning and tenant validation
     try:
         user = await get_or_create_user(userinfo, db)
-    except (ValueError, PermissionError) as e:
+    except PermissionError as e:
+        err_str = str(e).lower()
+        logger.warning(f"SSO PermissionError: {e}")
+        if "deactivated" in err_str or "inactive" in err_str:
+            return error_redirect("account_disabled")
+        if "tenant" in err_str:
+            return error_redirect("wrong_tenant")
+        return error_redirect("auth_failed")
+    except ValueError as e:
+        logger.warning(f"SSO ValueError: {e}")
+        if "email" in str(e).lower():
+            return error_redirect("missing_email")
+        return error_redirect("auth_failed")
+    except Exception as e:
         logger.error(f"User provisioning failed: {e}")
-        raise HTTPException(400, f"User provisioning failed: {e}")
+        return error_redirect("database_unavailable")
 
-    # Save session details into cryptographically signed session cookie
+    # 4. Save session details into cryptographically signed session cookie (minimal payload to prevent 4KB overflow)
     user_roles = [r.name for r in user.roles] if hasattr(user, "roles") and user.roles else ["user"]
     last_login_formatted = (
         to_malaysia(user.last_login_at).strftime("%d/%m/%Y, %H:%M:%S")
@@ -72,19 +99,23 @@ async def callback(request: Request, db: AsyncSession = Depends(get_db)):
     # Audit log authentication event
     client_ip = request.client.host if request.client else None
     user_agent = request.headers.get("user-agent")
-    db.add(
-        AuthEvent(
-            user_id=user.id,
-            event_type="login_success",
-            ip_address=client_ip,
-            user_agent=user_agent,
-            details={"provider": "entra"},
+    try:
+        db.add(
+            AuthEvent(
+                user_id=user.id,
+                event_type="login_success",
+                ip_address=client_ip,
+                user_agent=user_agent,
+                details={"provider": "entra"},
+            )
         )
-    )
-    await db.commit()
+        await db.commit()
+    except Exception as e:
+        logger.warning(f"Could not write auth audit event: {e}")
 
-    frontend_redirect = (settings.allowed_origins.split(",")[0] or "http://localhost:3000").rstrip("/") + "/"
-    response = RedirectResponse(url=frontend_redirect)
+    frontend_redirect = f"{frontend_base}/"
+    response = RedirectResponse(url=frontend_redirect, status_code=302)
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
     response.set_cookie(
         key="cq_logged_in",
         value="1",
@@ -139,6 +170,7 @@ async def me(request: Request, response: Response):
 
     Bypasses PostgreSQL queries completely so Neon DB stays asleep and within the free tier.
     """
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
     user_id = request.session.get("user_id")
     if not user_id:
         response.delete_cookie(key="cq_logged_in", path="/")
@@ -209,9 +241,9 @@ async def me(request: Request, response: Response):
 
 @router.get("/debug")
 async def debug_sso_session(request: Request):
-    """Debug endpoint returning raw Microsoft Entra OIDC claims received upon login."""
+    """Debug endpoint returning authenticated session details."""
     return {
-        "raw_microsoft_entra_claims": request.session.get("raw_entra_claims"),
+        "note": "Raw claims omitted from session cookie to prevent exceeding 4KB browser cookie limit.",
         "authenticated_user_in_session": {
             "id": request.session.get("user_id"),
             "email": request.session.get("email"),
