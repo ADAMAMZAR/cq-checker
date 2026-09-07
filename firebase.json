@@ -10,15 +10,15 @@
       {
         "source": "/api/**",
         "run": {
-          "serviceId": "cq-checker-backend",
-          "region": "asia-southeast1"
+          "serviceId": "gpodeck-backend",
+          "region": "us-central1"
         }
       },
       {
         "source": "/auth/**",
         "run": {
-          "serviceId": "cq-checker-backend",
-          "region": "asia-southeast1"
+          "serviceId": "gpodeck-backend",
+          "region": "us-central1"
         }
       },
       {

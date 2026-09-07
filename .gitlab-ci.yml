@@ -7,6 +7,10 @@ stages:
 lint_backend:
   stage: lint
   image: python:3.13-slim
+  rules:
+    - changes:
+        - backend/**/*
+        - .gitlab-ci.yml
   before_script:
     - cd backend
     - pip install --no-cache-dir flake8
@@ -17,6 +21,10 @@ lint_backend:
 test_backend:
   stage: test
   image: python:3.13-slim
+  rules:
+    - changes:
+        - backend/**/*
+        - .gitlab-ci.yml
   before_script:
     - cd backend
     - export PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
@@ -28,6 +36,10 @@ test_backend:
 test_frontend:
   stage: test
   image: node:24-alpine
+  rules:
+    - changes:
+        - frontend/**/*
+        - .gitlab-ci.yml
   cache:
     paths:
       - frontend/node_modules/
@@ -44,6 +56,9 @@ deploy_backend:
   image: google/cloud-sdk:slim
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
+      changes:
+        - backend/**/*
+        - .gitlab-ci.yml
   before_script:
     # Authenticate GCP using service account key stored in GitLab CI/CD Variables
     - |
@@ -65,9 +80,9 @@ deploy_backend:
       [ -n "$ENTRA_TENANT_ID" ] && ENV_VARS="$ENV_VARS,ENTRA_TENANT_ID=$ENTRA_TENANT_ID"
       [ -n "$ENTRA_CLIENT_SECRET" ] && ENV_VARS="$ENV_VARS,ENTRA_CLIENT_SECRET=$ENTRA_CLIENT_SECRET"
 
-      gcloud run deploy cq-checker-backend \
+      gcloud run deploy gpodeck-backend \
         --source backend \
-        --region asia-southeast1 \
+        --region us-central1 \
         --allow-unauthenticated \
         --min-instances 0 \
         --max-instances 3 \
@@ -83,6 +98,11 @@ deploy_frontend:
   image: node:24-alpine
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
+      changes:
+        - frontend/**/*
+        - firebase.json
+        - .firebaserc
+        - .gitlab-ci.yml
   cache:
     paths:
       - frontend/node_modules/
