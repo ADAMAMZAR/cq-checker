@@ -60,6 +60,10 @@ deploy_backend:
       changes:
         - backend/**/*
         - .gitlab-ci.yml
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: manual
+      allow_failure: true
+
   before_script:
     # Authenticate GCP using service account key stored in GitLab CI/CD Variables
     - |
@@ -120,6 +124,10 @@ deploy_frontend:
         - firebase.json
         - .firebaserc
         - .gitlab-ci.yml
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: manual
+      allow_failure: true
+
   cache:
     paths:
       - frontend/node_modules/
