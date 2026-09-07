@@ -1,5 +1,6 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import {
   IconBuilding,
   IconAlertTriangle,
@@ -11,7 +12,18 @@ import { isAuthorizedDomain } from "@/lib/securityStore";
 import { useAuth } from "@/context/AuthContext";
 
 export default function SecurityGuard({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const isLoginPage =
+    pathname === "/login" ||
+    (typeof window !== "undefined" && window.location.pathname.startsWith("/login"));
+
+  // 0. Public route bypass: Allow the dedicated /login page to render its own content & error banners
+  if (isLoginPage) {
+    return <>{children}</>;
+  }
+
   const { session, isAuthenticated, loading } = useAuth();
+
 
   // 1. Loading state during initial cold auth session verification
   if (loading) {

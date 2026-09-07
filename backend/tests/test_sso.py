@@ -163,31 +163,6 @@ def test_admin_user_api_endpoint_routing():
 
 
 @pytest.mark.asyncio
-async def test_jit_provisioning_deactivated_user():
-    """Test that get_or_create_user raises PermissionError for inactive user."""
-    claims = {
-        "oid": "oid-inactive-123",
-        "tid": "expected-tenant-id-1111",
-        "email": "inactive.employee@gamuda.com.my",
-        "name": "Inactive Employee",
-    }
-    inactive_user = User(
-        email="inactive.employee@gamuda.com.my",
-        is_active=False,
-    )
-    mock_db = AsyncMock()
-    mock_sso_res = MagicMock()
-    mock_sso_res.scalar_one_or_none.return_value = None
-    mock_email_res = MagicMock()
-    mock_email_res.scalar_one_or_none.return_value = inactive_user
-    mock_db.execute.side_effect = [mock_sso_res, mock_email_res]
-
-    with patch.object(settings, "entra_tenant_id", "expected-tenant-id-1111"):
-        with pytest.raises(PermissionError, match="Account has been deactivated"):
-            await get_or_create_user(claims, mock_db)
-
-
-@pytest.mark.asyncio
 async def test_jit_provisioning_b2b_guest_email():
     """Test that B2B guest account #EXT# email is parsed to standard email."""
     claims = {

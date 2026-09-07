@@ -41,10 +41,13 @@ def get_engine():
                 settings.neon_database_url or "postgresql+asyncpg://postgres:postgres@localhost:5432/cq_checker"
             ),
             echo=False,
-            pool_size=5,
-            max_overflow=10,
+            pool_size=3,
+            max_overflow=5,
+            pool_recycle=300,
+            pool_pre_ping=True,
         )
     return _engine
+
 
 
 def get_session_factory():

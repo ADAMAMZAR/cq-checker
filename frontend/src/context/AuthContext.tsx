@@ -1,8 +1,13 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
 import { checkAuthSession, hasSessionIndicator, clearSessionIndicator, UserSession } from "@/lib/auth";
-import { getStoredUserEmail, setStoredUserEmail } from "@/lib/securityStore";
+import {
+  getStoredUserEmail,
+  getStoredUserSession,
+  setStoredUserSession,
+  clearStoredUserSession,
+} from "@/lib/securityStore";
 
 interface AuthContextType {
   session: UserSession | null;
@@ -23,47 +28,68 @@ const AuthContext = createContext<AuthContextType>({
 export const UNAUTHORIZED_EVENT = "gpo-unauthorized-session-event";
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [session, setSession] = useState<UserSession | null>(null);
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  const [loading, setLoading] = useState<boolean>(true);
-  const initialCheckDone = React.useRef(false);
+  // Synchronous cache read for instant 0ms hydration on page loads / route switches
+  const initialCache = React.useMemo(() => {
+    if (typeof window === "undefined") return null;
+    const hasActive = hasSessionIndicator() || !!getStoredUserEmail();
+    if (!hasActive) {
+      clearStoredUserSession();
+      return null;
+    }
+    return getStoredUserSession();
+  }, []);
+
+  const [session, setSession] = useState<UserSession | null>(initialCache?.user || null);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(Boolean(initialCache?.user));
+  const [loading, setLoading] = useState<boolean>(!initialCache?.user);
+  const initialCheckDone = useRef(false);
 
   const verifyAuth = useCallback(async (isBackground = false) => {
-    // Check if session indicator cookie exists (or fallback stored email for backward compatibility)
     const hasActiveSession = hasSessionIndicator() || (typeof window !== "undefined" && !!getStoredUserEmail());
     if (!hasActiveSession) {
       setIsAuthenticated(false);
       setSession(null);
-      setStoredUserEmail("");
+      clearStoredUserSession();
+      clearSessionIndicator();
       setLoading(false);
       return;
     }
 
-    // Only show loading spinner on initial cold mount, background checks run silently
-    if (!isBackground && loading) {
+    // 0ms Fast Path: If cache is fresh (< 15 mins), skip /auth/me network call completely!
+    const cached = getStoredUserSession();
+    if (cached && cached.isFresh && !isBackground) {
+      setSession(cached.user);
+      setIsAuthenticated(true);
+      setLoading(false);
+      return;
+    }
+
+    // Only show loading spinner if we have no session at all in memory
+    if (!isBackground && !session) {
       setLoading(true);
     }
+
     try {
       const res = await checkAuthSession();
       setIsAuthenticated(res.authenticated);
       setSession(res.user);
 
       if (res.authenticated && res.user) {
-        if (res.user.email) setStoredUserEmail(res.user.email);
+        setStoredUserSession(res.user);
       } else {
         clearSessionIndicator();
-        setStoredUserEmail("");
+        clearStoredUserSession();
       }
     } catch (err) {
       console.error("Auth verification error:", err);
       clearSessionIndicator();
+      clearStoredUserSession();
       setIsAuthenticated(false);
       setSession(null);
-      setStoredUserEmail("");
     } finally {
       setLoading(false);
     }
-  }, [loading]);
+  }, [session]);
 
   useEffect(() => {
     if (!initialCheckDone.current) {
@@ -74,9 +100,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Auto-invalidate session if API responds with 401 Unauthorized
     const handleUnauthorized = () => {
       clearSessionIndicator();
+      clearStoredUserSession();
       setIsAuthenticated(false);
       setSession(null);
-      setStoredUserEmail("");
     };
 
     window.addEventListener(UNAUTHORIZED_EVENT, handleUnauthorized);
@@ -87,7 +113,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [verifyAuth]);
 
   const updateSessionRoles = useCallback((roles: string[]) => {
-    setSession((prev) => (prev ? { ...prev, roles } : null));
+    setSession((prev) => {
+      if (!prev) return null;
+      const updated = { ...prev, roles };
+      setStoredUserSession(updated);
+      return updated;
+    });
   }, []);
 
   return (
@@ -96,7 +127,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         session,
         isAuthenticated,
         loading,
-        refreshAuth: () => verifyAuth(false),
+        refreshAuth: () => verifyAuth(true),
         updateSessionRoles,
       }}
     >
@@ -108,3 +139,4 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 export function useAuth() {
   return useContext(AuthContext);
 }
+

@@ -1,4 +1,4 @@
-import { setStoredUserEmail } from "./securityStore";
+import { setStoredUserEmail, clearStoredUserSession } from "./securityStore";
 
 export interface UserSession {
   id: string;
@@ -62,16 +62,20 @@ export async function checkAuthSession(): Promise<AuthMeResponse> {
 
     if (!response.ok) {
       clearSessionIndicator();
+      clearStoredUserSession();
       return { authenticated: false, user: null };
     }
 
     const data: AuthMeResponse = await response.json();
     if (!data.authenticated) {
       clearSessionIndicator();
+      clearStoredUserSession();
     }
     return data;
   } catch (error) {
     console.error("Failed to verify session:", error);
+    clearSessionIndicator();
+    clearStoredUserSession();
     return { authenticated: false, user: null };
   }
 }
@@ -81,8 +85,9 @@ export async function checkAuthSession(): Promise<AuthMeResponse> {
  */
 export async function logoutFromEntra(): Promise<void> {
   clearSessionIndicator();
-  setStoredUserEmail("");
+  clearStoredUserSession();
   try {
+
     const response = await fetch(`${API_BASE_URL}/auth/logout`, {
       method: "POST",
       headers: {

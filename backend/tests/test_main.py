@@ -17,3 +17,11 @@ def test_read_root():
     response = client.get("/")
     assert response.status_code == 200
     assert response.json()["status"] == "healthy"
+
+
+def test_gzip_middleware_active():
+    """Verify GZipMiddleware processes requests with Accept-Encoding: gzip without error."""
+    response = client.get("/", headers={"Accept-Encoding": "gzip"})
+    assert response.status_code == 200
+    assert response.json()["status"] == "healthy"
+

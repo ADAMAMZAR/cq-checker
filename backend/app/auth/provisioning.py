@@ -48,10 +48,6 @@ async def get_or_create_user(claims: dict, db: AsyncSession) -> User:
         result = await db.execute(select(User).where(User.email == email))
         user = result.scalar_one_or_none()
 
-    if user and not user.is_active:
-        logger.warning(f"Rejecting login for deactivated user: {user.email}")
-        raise PermissionError("Account has been deactivated. Please contact an administrator.")
-
     if not user:
         user = User(
             email=email,

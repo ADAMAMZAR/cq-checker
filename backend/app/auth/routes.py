@@ -67,11 +67,10 @@ async def callback(request: Request, db: AsyncSession = Depends(get_db)):
     except PermissionError as e:
         err_str = str(e).lower()
         logger.warning(f"SSO PermissionError: {e}")
-        if "deactivated" in err_str or "inactive" in err_str:
-            return error_redirect("account_disabled")
         if "tenant" in err_str:
             return error_redirect("wrong_tenant")
         return error_redirect("auth_failed")
+
     except ValueError as e:
         logger.warning(f"SSO ValueError: {e}")
         if "email" in str(e).lower():

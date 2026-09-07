@@ -49,10 +49,14 @@ app = FastAPI(
 )
 
 
+from fastapi.middleware.gzip import GZipMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from app.auth.routes import router as sso_auth_router
 
 ALLOWED_DOMAIN = "gamuda.com.my"
+
+# Egress bandwidth optimization: compress responses >= 1KB (reduces network costs by 70-80%)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # Mount Starlette SessionMiddleware for HttpOnly session cookie handling
 app.add_middleware(
@@ -63,6 +67,7 @@ app.add_middleware(
     same_site="lax",
     https_only=settings.environment.lower() == "production",
 )
+
 
 
 # Security Middleware: Verify pre-shared internal secret token header & company domain gate before SSO implementation

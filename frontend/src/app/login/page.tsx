@@ -23,12 +23,7 @@ function getErrorMessage(code: string): AuthErrorInfo {
     case "wrong_tenant":
       return {
         title: "Wrong Organization Account",
-        desc: "Please sign in using your official Gamuda corporate account (@gamuda.com.my). Personal or external Microsoft accounts are not authorized.",
-      };
-    case "account_disabled":
-      return {
-        title: "Account Deactivated",
-        desc: "Your account has been deactivated. Please contact the GPO Administrator to restore your access.",
+        desc: "Please sign in using your official Gamuda corporate account. Personal or external Microsoft accounts are not authorized.",
       };
     case "user_cancelled":
       return {
@@ -74,6 +69,13 @@ export default function LoginPage() {
     }
 
     async function init() {
+      const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+      const hasError = Boolean(params && params.get("error"));
+      if (hasError) {
+        setLoading(false);
+        return;
+      }
+
       const hasActiveSession = hasSessionIndicator() || (typeof window !== "undefined" && !!getStoredUserEmail());
       if (!hasActiveSession) {
         setLoading(false);
@@ -88,6 +90,7 @@ export default function LoginPage() {
     }
     init();
   }, []);
+
 
   const handleSignIn = () => {
     if (isSubmitting) return;
@@ -115,17 +118,12 @@ export default function LoginPage() {
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-[#0078d4]/10 blur-3xl rounded-full pointer-events-none" />
 
       <div className="w-full max-w-md p-8 rounded-2xl border border-[var(--border-visible)] bg-[var(--bg-card)] shadow-2xl relative z-10 flex flex-col items-center text-center backdrop-blur-md">
-        {/* Header Badge */}
-        <div className="mb-4 inline-flex items-center gap-2 px-3 py-1 rounded-full border border-[var(--accent-primary-border)] bg-[var(--accent-primary-soft)] text-[var(--accent-primary-text)] text-xs font-semibold">
-          <IconShieldCheck className="w-4 h-4" />
-          <span>Gamuda Single Sign-On</span>
-        </div>
 
         <h1 className="text-2xl font-bold tracking-tight text-[var(--heading-color)] mb-2">
-          CQ Checker
+          Operations Deck
         </h1>
         <p className="text-sm text-[var(--text-secondary)] mb-6">
-          Gamuda Group Procurement Office — Supplier Audit & Certificate Verification Platform
+          Gamuda Group Procurement Office
         </p>
 
         {/* Dynamic Auth Error Notification Banner */}
@@ -140,43 +138,17 @@ export default function LoginPage() {
                 {errorInfo.desc}
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => setAuthError(null)}
-              className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded transition-colors"
-              title="Dismiss"
-            >
-              <IconX className="w-4 h-4" />
-            </button>
           </div>
         )}
 
-        {/* Microsoft SSO Action Card */}
-        <div className="w-full space-y-4">
+        <div className="pt-2">
           <button
             type="button"
-            disabled={isSubmitting}
-            onClick={handleSignIn}
-            className="w-full py-3.5 px-4 rounded-xl border border-[#0078d4] bg-[#0078d4] hover:bg-[#006abc] disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold text-sm flex items-center justify-center gap-3 transition-all shadow-md hover:shadow-lg hover:scale-[1.01] active:scale-[0.99] cursor-pointer"
+            onClick={loginWithEntra}
+            className="w-full inline-flex items-center justify-center gap-2.5 px-4 py-3 rounded-xl border border-[#0078d4]/40 bg-[#0078d4] hover:bg-[#006cc1] text-white text-xs font-bold transition-all shadow-md cursor-pointer"
           >
-            {isSubmitting ? (
-              <>
-                <IconLoader2 className="w-5 h-5 animate-spin" />
-                <span>Redirecting to Microsoft...</span>
-              </>
-            ) : (
-              <>
-                <IconBrandWindows className="w-5 h-5" />
-                <span>Sign in with Microsoft Entra ID</span>
-                <IconArrowRight className="w-4 h-4 ml-auto opacity-70" />
-              </>
-            )}
+            <span>Sign in with Microsoft</span>
           </button>
-
-          <div className="pt-4 border-t border-[var(--border-subtle)] text-xs text-[var(--text-muted)] flex items-center justify-center gap-1.5">
-            <IconLockAccess className="w-3.5 h-3.5 text-[var(--accent-primary-text)]" />
-            <span>Secured with Microsoft Entra OIDC Single Sign-On</span>
-          </div>
         </div>
       </div>
     </div>
