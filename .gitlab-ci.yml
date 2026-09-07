@@ -72,14 +72,14 @@ deploy_backend:
     - gcloud config set project ${GCP_PROJECT_ID:-gen-lang-client-0447597759}
   script:
     - |
-      ENV_VARS="ENVIRONMENT=production,SESSION_COOKIE_NAME=__session"
-      [ -n "$NEON_DATABASE_URL" ] && ENV_VARS="$ENV_VARS,NEON_DATABASE_URL=$NEON_DATABASE_URL"
-      [ -n "$ALLOWED_ORIGINS" ] && ENV_VARS="$ENV_VARS,ALLOWED_ORIGINS=$ALLOWED_ORIGINS"
-      [ -n "$ENTRA_REDIRECT_URI" ] && ENV_VARS="$ENV_VARS,ENTRA_REDIRECT_URI=$ENTRA_REDIRECT_URI"
-      [ -n "$SESSION_SECRET" ] && ENV_VARS="$ENV_VARS,SESSION_SECRET=$SESSION_SECRET"
-      [ -n "$ENTRA_CLIENT_ID" ] && ENV_VARS="$ENV_VARS,ENTRA_CLIENT_ID=$ENTRA_CLIENT_ID"
-      [ -n "$ENTRA_TENANT_ID" ] && ENV_VARS="$ENV_VARS,ENTRA_TENANT_ID=$ENTRA_TENANT_ID"
-      [ -n "$ENTRA_CLIENT_SECRET" ] && ENV_VARS="$ENV_VARS,ENTRA_CLIENT_SECRET=$ENTRA_CLIENT_SECRET"
+      ENV_VARS="^;;^ENVIRONMENT=production;;SESSION_COOKIE_NAME=__session"
+      [ -n "$NEON_DATABASE_URL" ] && ENV_VARS="$ENV_VARS;;NEON_DATABASE_URL=$NEON_DATABASE_URL"
+      [ -n "$ALLOWED_ORIGINS" ] && ENV_VARS="$ENV_VARS;;ALLOWED_ORIGINS=$ALLOWED_ORIGINS"
+      [ -n "$ENTRA_REDIRECT_URI" ] && ENV_VARS="$ENV_VARS;;ENTRA_REDIRECT_URI=$ENTRA_REDIRECT_URI"
+      [ -n "$SESSION_SECRET" ] && ENV_VARS="$ENV_VARS;;SESSION_SECRET=$SESSION_SECRET"
+      [ -n "$ENTRA_CLIENT_ID" ] && ENV_VARS="$ENV_VARS;;ENTRA_CLIENT_ID=$ENTRA_CLIENT_ID"
+      [ -n "$ENTRA_TENANT_ID" ] && ENV_VARS="$ENV_VARS;;ENTRA_TENANT_ID=$ENTRA_TENANT_ID"
+      [ -n "$ENTRA_CLIENT_SECRET" ] && ENV_VARS="$ENV_VARS;;ENTRA_CLIENT_SECRET=$ENTRA_CLIENT_SECRET"
 
       gcloud run deploy gpodeck-backend \
         --source backend \
@@ -90,6 +90,10 @@ deploy_backend:
         --memory 512Mi \
         --timeout 300s \
         --update-env-vars "$ENV_VARS"
+
+      gcloud run services update gpodeck-backend \
+        --region us-central1 \
+        --max-instances 3
   after_script:
     - rm -f /tmp/gcp-sa-key.json
 
