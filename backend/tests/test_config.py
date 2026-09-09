@@ -13,7 +13,8 @@ class TestSettingsDefaults:
     def _fresh_settings(self, monkeypatch):
         """Create a Settings instance that reads ONLY from env vars, not .env file."""
         keys_to_clear = [
-            "NEON_DATABASE_URL",
+            "GCP_PROJECT_ID",
+            "FIRESTORE_DATABASE",
             "ENTRA_TENANT_ID",
             "ENTRA_CLIENT_ID",
             "ENTRA_CLIENT_SECRET",
@@ -35,9 +36,10 @@ class TestSettingsDefaults:
 
         return TestSettings()
 
-    def test_neon_database_url_default(self, monkeypatch):
+    def test_firestore_settings_default(self, monkeypatch):
         s = self._fresh_settings(monkeypatch)
-        assert s.neon_database_url == ""
+        assert s.gcp_project_id == "gen-lang-client-0447597759"
+        assert s.firestore_database == "(default)"
 
     def test_entra_settings_default(self, monkeypatch):
         s = self._fresh_settings(monkeypatch)
@@ -49,11 +51,13 @@ class TestSettingsDefaults:
 class TestSettingsFromEnv:
     """Verify Settings reads values from environment variables."""
 
-    def test_neon_database_url_from_env(self, monkeypatch):
-        monkeypatch.setenv("NEON_DATABASE_URL", "postgresql+asyncpg://user:pass@host:5432/db")
+    def test_firestore_settings_from_env(self, monkeypatch):
+        monkeypatch.setenv("GCP_PROJECT_ID", "custom-gcp-project")
+        monkeypatch.setenv("FIRESTORE_DATABASE", "custom-db")
         from app.config import Settings
         s = Settings()
-        assert s.neon_database_url == "postgresql+asyncpg://user:pass@host:5432/db"
+        assert s.gcp_project_id == "custom-gcp-project"
+        assert s.firestore_database == "custom-db"
 
     def test_entra_settings_from_env(self, monkeypatch):
         monkeypatch.setenv("ENTRA_TENANT_ID", "test-tenant-123")

@@ -3,8 +3,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    # ── Database ──────────────────────────────────────────────────
-    neon_database_url: str = Field(default="", validation_alias="NEON_DATABASE_URL")
+    # ── Database (Firebase Firestore) ─────────────────────────────
+    gcp_project_id: str = Field(default="gen-lang-client-0447597759", validation_alias="GCP_PROJECT_ID")
+    firestore_database: str = Field(default="(default)", validation_alias="FIRESTORE_DATABASE")
 
     # ── Microsoft Entra ID (SSO) ──────────────────────────────────
     entra_tenant_id: str = Field(default="", validation_alias="ENTRA_TENANT_ID")
@@ -39,4 +40,4 @@ class Settings(BaseSettings):
     )
 
 
-settings = Settings()
+settings = Settings()

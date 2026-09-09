@@ -1,112 +1,117 @@
-"""SQLAlchemy ORM models for Neon PostgreSQL + pgvector."""
-
-import os
-import time
-import uuid
-
-from sqlalchemy import (
-    Column,
-    String,
-    Text,
-    Integer,
-    DateTime,
-    Boolean,
-    ForeignKey,
-    func,
-)
-from sqlalchemy.dialects.postgresql import UUID, JSONB
-from sqlalchemy.orm import relationship
-
-from app.db.session import Base
+"""Domain models for Firebase Firestore collections."""
+from dataclasses import dataclass, field
+from typing import List, Optional, Any, Dict
 
 
-def uuid7() -> uuid.UUID:
-    """Generate a UUIDv7 (RFC 9562).
+@dataclass
+class User:
+    email: str
+    display_name: Optional[str] = None
+    roles: List[str] = field(default_factory=lambda: ["user"])
+    sso_subject: Optional[str] = None
+    is_active: bool = True
+    last_login_at: Optional[Any] = None
+    created_at: Optional[Any] = None
 
-    Uses native `uuid.uuid7()` on Python 3.14+, or pure-Python fallback on older versions.
-    """
-    if hasattr(uuid, "uuid7"):
-        return uuid.uuid7()  # type: ignore[attr-defined]
+    @property
+    def id(self) -> str:
+        return self.email
 
-    ms = int(time.time() * 1000)
-    rand_bytes = os.urandom(10)
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "email": self.email,
+            "display_name": self.display_name,
+            "roles": self.roles,
+            "sso_subject": self.sso_subject,
+            "is_active": self.is_active,
+            "last_login_at": self.last_login_at,
+            "created_at": self.created_at,
+        }
 
-    time_high = (ms >> 16) & 0xFFFFFFFF
-    time_low = ms & 0xFFFF
-
-    rand_a = int.from_bytes(rand_bytes[:2], "big") & 0x0FFF
-    ver_and_rand_a = 0x7000 | rand_a
-
-    rand_b = int.from_bytes(rand_bytes[2:], "big") & 0x3FFFFFFFFFFFFFFF
-    var_and_rand_b = 0x8000000000000000 | rand_b
-
-    uuid_int = (time_high << 96) | (time_low << 80) | (ver_and_rand_a << 64) | var_and_rand_b
-    return uuid.UUID(int=uuid_int)
-
-
-_new_uuid = uuid7
-
-
-class User(Base):
-    __tablename__ = "users"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
-    email = Column(String(255), nullable=False, unique=True, index=True)
-    display_name = Column(String(255), nullable=True)
-    sso_subject = Column(String(255), nullable=True, unique=True, index=True)
-    sso_provider = Column(String(50), nullable=True, default="entra")
-    sso_tenant_id = Column(String(100), nullable=True)
-    last_login_at = Column(DateTime(timezone=True), nullable=True)
-    is_active = Column(Boolean, nullable=False, default=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    roles = relationship("Role", secondary="user_roles", lazy="selectin")
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any], doc_id: Optional[str] = None) -> "User":
+        email = data.get("email") or doc_id or ""
+        return cls(
+            email=email.lower().strip(),
+            display_name=data.get("display_name"),
+            roles=data.get("roles") or ["user"],
+            sso_subject=data.get("sso_subject"),
+            is_active=data.get("is_active", True),
+            last_login_at=data.get("last_login_at"),
+            created_at=data.get("created_at"),
+        )
 
 
-class AuthEvent(Base):
-    __tablename__ = "auth_events"
+@dataclass
+class Role:
+    name: str
+    display_name: str
+    features: List[str] = field(default_factory=list)
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    event_type = Column(String(50), nullable=False)  # login_success, login_failure, logout
-    ip_address = Column(String(45), nullable=True)
-    user_agent = Column(Text, nullable=True)
-    details = Column(JSONB, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    @property
+    def id(self) -> str:
+        return self.name
 
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "name": self.name,
+            "display_name": self.display_name,
+            "features": self.features,
+        }
 
-class Role(Base):
-    __tablename__ = "roles"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
-    name = Column(String(50), unique=True, nullable=False)
-    display_name = Column(String(100), nullable=False)
-    description = Column(Text, nullable=True)
-
-    features = relationship("Feature", secondary="role_features", lazy="selectin")
-
-
-class UserRole(Base):
-    __tablename__ = "user_roles"
-
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
-    role_id = Column(UUID(as_uuid=True), ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True)
-    granted_at = Column(DateTime(timezone=True), server_default=func.now())
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any], doc_id: Optional[str] = None) -> "Role":
+        name = data.get("name") or doc_id or ""
+        return cls(
+            name=name,
+            display_name=data.get("display_name") or name.capitalize(),
+            features=data.get("features") or [],
+        )
 
 
-class Feature(Base):
-    __tablename__ = "features"
+@dataclass
+class Feature:
+    id: str
+    display_name: str
 
-    id = Column(String(50), primary_key=True)
-    display_name = Column(String(100), nullable=False)
-    description = Column(Text, nullable=True)
-    route_path = Column(Text, nullable=True)
-    is_external = Column(String(1), nullable=False, default="0")  # SQLite compat for boolean
-    sort_order = Column(Integer, nullable=False, default=0)
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "display_name": self.display_name,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any], doc_id: Optional[str] = None) -> "Feature":
+        fid = data.get("id") or doc_id or ""
+        return cls(
+            id=fid,
+            display_name=data.get("display_name") or fid,
+        )
 
 
-class RoleFeature(Base):
-    __tablename__ = "role_features"
+@dataclass
+class AuthEvent:
+    event_type: str
+    user_email: Optional[str] = None
+    ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
+    created_at: Optional[Any] = None
 
-    role_id = Column(UUID(as_uuid=True), ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True)
-    feature_id = Column(String(50), ForeignKey("features.id", ondelete="CASCADE"), primary_key=True)
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "user_email": self.user_email,
+            "event_type": self.event_type,
+            "ip_address": self.ip_address,
+            "user_agent": self.user_agent,
+            "created_at": self.created_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "AuthEvent":
+        return cls(
+            event_type=data.get("event_type", ""),
+            user_email=data.get("user_email") or data.get("user_id"),
+            ip_address=data.get("ip_address"),
+            user_agent=data.get("user_agent"),
+            created_at=data.get("created_at"),
+        )

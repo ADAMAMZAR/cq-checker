@@ -1,77 +1,51 @@
-"""Async database session factory for Neon PostgreSQL."""
+"""Async database client factory for Google Cloud Firestore."""
 
-from urllib.parse import urlsplit, urlunsplit, parse_qsl
+import logging
+from typing import Optional
 
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
-from sqlalchemy.orm import DeclarativeBase
+import google.auth
+from google.auth.credentials import AnonymousCredentials
+from google.cloud.firestore_v1.async_client import AsyncClient
 
 from app.config import settings
 
+logger = logging.getLogger(__name__)
 
-class Base(DeclarativeBase):
-    """Base class for all SQLAlchemy models."""
-    pass
-
-
-def normalize_database_url(url: str) -> str:
-    """Convert libpq-style URL params to asyncpg-compatible ones.
-
-    Neon's dashboard connection string ships libpq-only params such as
-    ``?sslmode=require`` and ``?channel_binding=require``, which the asyncpg
-    driver rejects. asyncpg only understands ``ssl=require``. We drop all
-    query params and keep just SSL when it was requested.
-    """
-    parts = urlsplit(url)
-    query = dict(parse_qsl(parts.query))
-    params = []
-    if any(k in query for k in ("sslmode", "ssl", "sslcert")) or "ssl" in query:
-        params.append("ssl=require")
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, "&".join(params), parts.fragment))
+_firestore_client: Optional[AsyncClient] = None
 
 
-_engine = None
-_session_factory = None
+def get_firestore_client() -> AsyncClient:
+    """Initialize or return the singleton Firestore AsyncClient."""
+    global _firestore_client
+    if _firestore_client is None:
+        try:
+            _firestore_client = AsyncClient(
+                project=settings.gcp_project_id or None,
+                database=settings.firestore_database if settings.firestore_database != "(default)" else "(default)",
+            )
+            logger.info(f"Initialized Firestore AsyncClient for project: {settings.gcp_project_id}")
+        except google.auth.exceptions.DefaultCredentialsError:
+            logger.warning(
+                "Google Application Default Credentials (ADC) not found. "
+                "Running in unauthenticated fallback mode. "
+                "Run 'gcloud auth application-default login' to connect to live GCP Firestore."
+            )
+            _firestore_client = AsyncClient(
+                project=settings.gcp_project_id or "gen-lang-client-0447597759",
+                credentials=AnonymousCredentials(),
+                database=settings.firestore_database if settings.firestore_database != "(default)" else "(default)",
+            )
+    return _firestore_client
 
 
-def get_engine():
-    global _engine
-    if _engine is None:
-        _engine = create_async_engine(
-            normalize_database_url(
-                settings.neon_database_url or "postgresql+asyncpg://postgres:postgres@localhost:5432/cq_checker"
-            ),
-            echo=False,
-            pool_size=3,
-            max_overflow=5,
-            pool_recycle=300,
-            pool_pre_ping=True,
-        )
-    return _engine
+async def get_db() -> AsyncClient:
+    """FastAPI dependency yielding the Firestore AsyncClient."""
+    return get_firestore_client()
 
 
-def get_session_factory():
-
-    global _session_factory
-    if _session_factory is None:
-        _session_factory = async_sessionmaker(
-            bind=get_engine(),
-            class_=AsyncSession,
-            expire_on_commit=False,
-        )
-    return _session_factory
-
-
-async def get_db() -> AsyncSession:
-    """FastAPI dependency: yield an async session, ensure close on exit."""
-    factory = get_session_factory()
-    async with factory() as session:
-        yield session
-
-
-async def close_engine():
-    """Dispose of the engine pool (useful for test teardown)."""
-    global _engine, _session_factory
-    if _engine is not None:
-        await _engine.dispose()
-        _engine = None
-        _session_factory = None
+async def close_firestore_client():
+    """Close the Firestore client session (for graceful shutdown / tests)."""
+    global _firestore_client
+    if _firestore_client is not None:
+        _firestore_client.close()
+        _firestore_client = None

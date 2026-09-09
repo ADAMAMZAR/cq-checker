@@ -1,3 +1,3 @@
-from app.db.session import Base
+from app.models.tables import User, Role, Feature, AuthEvent
 
-__all__ = ["Base"]
+__all__ = ["User", "Role", "Feature", "AuthEvent"]

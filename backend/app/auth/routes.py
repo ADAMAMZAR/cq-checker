@@ -1,20 +1,34 @@
-"""Authentication routes: login, callback, logout, me."""
+"""Authentication routes: login, callback, logout, me using Firebase Firestore."""
+from datetime import datetime, timezone
 import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from fastapi.responses import RedirectResponse, JSONResponse
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi.responses import JSONResponse, RedirectResponse
+from google.cloud.firestore_v1.async_client import AsyncClient
 
 from app.auth.dependencies import get_current_user_from_session
 from app.auth.oauth import oauth
 from app.auth.provisioning import get_or_create_user
 from app.config import settings
-from app.db.session import get_db, get_session_factory
-from app.models.tables import AuthEvent
+from app.db.session import get_db, get_firestore_client
 from app.services.timezones import to_malaysia
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["Auth & SSO"])
+
+
+def format_login_timestamp(val) -> str | None:
+    if not val:
+        return None
+    try:
+        if isinstance(val, str):
+            dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
+        else:
+            dt = val
+        return to_malaysia(dt).strftime("%d/%m/%Y, %H:%M:%S")
+    except Exception:
+        return str(val)
 
 
 @router.get("/login")
@@ -30,7 +44,7 @@ async def login(request: Request):
 
 
 @router.get("/callback")
-async def callback(request: Request, db: AsyncSession = Depends(get_db)):
+async def callback(request: Request, db: AsyncClient = Depends(get_db)):
     """Handle OIDC authorization code callback from Microsoft Entra ID."""
     frontend_base = (settings.allowed_origins.split(",")[0] or "http://localhost:3000").rstrip("/")
 
@@ -71,7 +85,6 @@ async def callback(request: Request, db: AsyncSession = Depends(get_db)):
             return error_redirect("wrong_tenant")
         return error_redirect("auth_failed")
     except ValueError as e:
-
         logger.warning(f"SSO ValueError: {e}")
         if "email" in str(e).lower():
             return error_redirect("missing_email")
@@ -80,37 +93,30 @@ async def callback(request: Request, db: AsyncSession = Depends(get_db)):
         logger.error(f"User provisioning failed: {e}")
         return error_redirect("database_unavailable")
 
-    # 4. Save session details into cryptographically signed session cookie (minimal payload to prevent 4KB overflow)
-    user_roles = [r.name for r in user.roles] if hasattr(user, "roles") and user.roles else ["user"]
-    last_login_formatted = (
-        to_malaysia(user.last_login_at).strftime("%d/%m/%Y, %H:%M:%S")
-        if user.last_login_at
-        else None
-    )
+    # 4. Save session details into cryptographically signed session cookie
+    user_roles = user.roles if user.roles else ["user"]
+    last_login_formatted = format_login_timestamp(user.last_login_at)
 
-    request.session["user_id"] = str(user.id)
+    request.session["user_id"] = user.email
     request.session["email"] = user.email
     request.session["display_name"] = user.display_name
     request.session["roles"] = user_roles
     request.session["is_active"] = bool(user.is_active)
     request.session["last_login_at"] = last_login_formatted
 
-    # Audit log authentication event
+    # Audit log authentication event in Firestore
     client_ip = request.client.host if request.client else None
     user_agent = request.headers.get("user-agent")
     try:
-        db.add(
-            AuthEvent(
-                user_id=user.id,
-                event_type="login_success",
-                ip_address=client_ip,
-                user_agent=user_agent,
-                details={"provider": "entra"},
-            )
-        )
-        await db.commit()
+        await db.collection("auth_events").add({
+            "user_email": user.email,
+            "event_type": "login_success",
+            "ip_address": client_ip,
+            "user_agent": user_agent,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
     except Exception as e:
-        logger.warning(f"Could not write auth audit event: {e}")
+        logger.warning(f"Could not write auth audit event to Firestore: {e}")
 
     frontend_redirect = f"{frontend_base}/"
     response = RedirectResponse(url=frontend_redirect, status_code=302)
@@ -131,23 +137,20 @@ async def callback(request: Request, db: AsyncSession = Depends(get_db)):
 @router.get("/logout")
 async def logout(request: Request):
     """Clear local user session and return Entra logout URL."""
-    user_id = request.session.get("user_id")
-    if user_id:
+    user_email = request.session.get("email") or request.session.get("user_id")
+    if user_email:
         try:
-            factory = get_session_factory()
-            async with factory() as db:
-                client_ip = request.client.host if request.client else None
-                db.add(
-                    AuthEvent(
-                        user_id=user_id,
-                        event_type="logout",
-                        ip_address=client_ip,
-                        user_agent=request.headers.get("user-agent"),
-                    )
-                )
-                await db.commit()
+            db = get_firestore_client()
+            client_ip = request.client.host if request.client else None
+            await db.collection("auth_events").add({
+                "user_email": user_email,
+                "event_type": "logout",
+                "ip_address": client_ip,
+                "user_agent": request.headers.get("user-agent"),
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
         except Exception as e:
-            logger.warning(f"Could not record logout event: {e}")
+            logger.warning(f"Could not record logout event in Firestore: {e}")
 
     request.session.clear()
 
@@ -167,10 +170,10 @@ async def logout(request: Request):
 async def me(request: Request, response: Response):
     """Return currently authenticated user directly from cryptographically signed session cookie.
 
-    Bypasses PostgreSQL queries completely so Neon DB stays asleep and within the free tier.
+    Bypasses database queries completely for instant 0ms responses.
     """
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
-    user_id = request.session.get("user_id")
+    user_id = request.session.get("user_id") or request.session.get("email")
     if not user_id:
         response.delete_cookie(key="cq_logged_in", path="/")
         return {"authenticated": False, "user": None}
@@ -186,12 +189,12 @@ async def me(request: Request, response: Response):
         path="/",
     )
 
-    # 1. Fast-path: read verified data directly from signed Starlette session cookie (0 DB queries!)
+    # 1. Fast-path: read verified data directly from signed Starlette session cookie
     if "roles" in request.session and "email" in request.session:
         return {
             "authenticated": True,
             "user": {
-                "id": user_id,
+                "id": str(user_id),
                 "email": request.session.get("email"),
                 "display_name": request.session.get("display_name"),
                 "roles": request.session.get("roles") or ["user"],
@@ -200,40 +203,34 @@ async def me(request: Request, response: Response):
             },
         }
 
-    # 2. Fallback path for legacy session cookies created prior to embedding roles
+    # 2. Fallback path for legacy session cookies
     try:
-        factory = get_session_factory()
-        async with factory() as db:
-            user = await get_current_user_from_session(request, db)
-            if not user:
-                response.delete_cookie(key="cq_logged_in", path="/")
-                return {"authenticated": False, "user": None}
+        db = get_firestore_client()
+        user = await get_current_user_from_session(request, db)
+        if not user:
+            response.delete_cookie(key="cq_logged_in", path="/")
+            return {"authenticated": False, "user": None}
 
-            user_roles = [r.name for r in user.roles] if hasattr(user, "roles") and user.roles else ["user"]
-            last_login = (
-                to_malaysia(user.last_login_at).strftime("%d/%m/%Y, %H:%M:%S")
-                if user.last_login_at
-                else None
-            )
+        user_roles = user.roles or ["user"]
+        last_login = format_login_timestamp(user.last_login_at)
 
-            # Upgrade cookie in-place for future zero-DB fast-path requests
-            request.session["roles"] = user_roles
-            request.session["is_active"] = bool(user.is_active)
-            request.session["last_login_at"] = last_login
+        request.session["roles"] = user_roles
+        request.session["is_active"] = bool(user.is_active)
+        request.session["last_login_at"] = last_login
 
-            return {
-                "authenticated": True,
-                "user": {
-                    "id": str(user.id),
-                    "email": user.email,
-                    "display_name": user.display_name,
-                    "roles": user_roles,
-                    "is_active": user.is_active,
-                    "last_login_at": last_login,
-                },
-            }
+        return {
+            "authenticated": True,
+            "user": {
+                "id": user.email,
+                "email": user.email,
+                "display_name": user.display_name,
+                "roles": user_roles,
+                "is_active": user.is_active,
+                "last_login_at": last_login,
+            },
+        }
     except Exception as e:
-        logger.error(f"Error resolving legacy user session: {e}")
+        logger.error(f"Error resolving user session: {e}")
         response.delete_cookie(key="cq_logged_in", path="/")
         return {"authenticated": False, "user": None}
 
@@ -250,5 +247,5 @@ async def debug_sso_session(request: Request):
             "roles": request.session.get("roles"),
             "is_active": request.session.get("is_active"),
             "last_login_at": request.session.get("last_login_at"),
-        }
+        },
     }

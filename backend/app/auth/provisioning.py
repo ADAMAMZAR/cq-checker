@@ -1,18 +1,30 @@
-"""JIT user provisioning and Entra ID group-to-role synchronization."""
+"""JIT user provisioning and Entra ID group-to-role synchronization using Firebase Firestore."""
 import logging
 from datetime import datetime, timezone
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Optional
+
+from google.cloud.firestore_v1.async_client import AsyncClient
 
 from app.auth.config import get_role_mapping
 from app.config import settings
-from app.models.tables import Role, User, UserRole
+from app.models.tables import User
 
 logger = logging.getLogger(__name__)
 
 
-async def get_or_create_user(claims: dict, db: AsyncSession) -> User:
-    """Provision new user or update existing user on Entra ID OIDC login callback."""
+def sync_roles_from_groups(current_roles: list[str], entra_group_ids: list[str]) -> list[str]:
+    """Map Entra Security Group Object IDs to application roles."""
+    group_map = get_role_mapping()
+    roles_set = set(current_roles or ["user"])
+    if group_map and entra_group_ids:
+        for gid in entra_group_ids:
+            if gid in group_map:
+                roles_set.add(group_map[gid])
+    return list(roles_set)
+
+
+async def get_or_create_user(claims: dict, db: AsyncClient) -> User:
+    """Provision new user or update existing user on Entra ID OIDC login callback in Firestore."""
     sso_subject = claims.get("oid") or claims.get("sub")
     tenant_id = claims.get("tid")
     email = (
@@ -38,73 +50,59 @@ async def get_or_create_user(claims: dict, db: AsyncSession) -> User:
         logger.warning(f"Rejecting SSO login from unexpected tenant: {tenant_id}")
         raise PermissionError(f"Token from unexpected Entra tenant: {tenant_id}")
 
-    # Search by SSO subject first, fallback to email match
-    user = None
-    if sso_subject:
-        result = await db.execute(select(User).where(User.sso_subject == sso_subject))
-        user = result.scalar_one_or_none()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    users_coll = db.collection("users")
 
-    if not user:
-        result = await db.execute(select(User).where(User.email == email))
-        user = result.scalar_one_or_none()
+    # 1. Look up user by document ID (email)
+    user_ref = users_coll.document(email)
+    snap = await user_ref.get()
 
-    if not user:
-        user = User(
-            email=email,
-            display_name=display_name,
-            sso_subject=sso_subject,
-            sso_provider="entra",
-            sso_tenant_id=tenant_id,
-            is_active=True,
-        )
-        db.add(user)
-        await db.flush()
+    user_data: Optional[dict] = None
 
-        # Grant default 'user' role for new auto-provisioned users
-        role_res = await db.execute(select(Role).where(Role.name == "user"))
-        default_role = role_res.scalar_one_or_none()
-        if default_role:
-            db.add(UserRole(user_id=user.id, role_id=default_role.id))
-        logger.info(f"Provisioned new SSO user: {email} ({user.id})")
-    else:
-        # Update existing user SSO metadata and sync display name from Entra claims
-        if display_name:
-            user.display_name = display_name
-        if sso_subject and not user.sso_subject:
-            user.sso_subject = sso_subject
-        if tenant_id and not user.sso_tenant_id:
-            user.sso_tenant_id = tenant_id
+    if snap.exists:
+        user_data = snap.to_dict() or {}
+    elif sso_subject:
+        # Fallback: check by sso_subject query
+        sso_query = users_coll.where("sso_subject", "==", sso_subject).limit(1)
+        async for doc in sso_query.stream():
+            user_ref = doc.reference
+            user_data = doc.to_dict() or {}
+            break
 
-    user.last_login_at = datetime.now(timezone.utc)
-
-    # Sync roles from Entra security groups if groups claim present
     entra_group_ids = claims.get("groups", [])
-    if entra_group_ids:
-        await sync_roles_from_groups(user, entra_group_ids, db)
 
-    await db.commit()
-    return user
+    if not user_data:
+        # Auto-provision new user
+        roles = sync_roles_from_groups(["user"], entra_group_ids)
+        user_data = {
+            "email": email,
+            "display_name": display_name,
+            "sso_subject": sso_subject,
+            "roles": roles,
+            "is_active": True,
+            "created_at": now_iso,
+            "last_login_at": now_iso,
+        }
+        await user_ref.set(user_data)
+        logger.info(f"Provisioned new SSO user in Firestore: {email} with roles {roles}")
+    else:
+        # Update existing user metadata and last_login_at
+        updates = {"last_login_at": now_iso}
+        if display_name and user_data.get("display_name") != display_name:
+            updates["display_name"] = display_name
+            user_data["display_name"] = display_name
+        if sso_subject and not user_data.get("sso_subject"):
+            updates["sso_subject"] = sso_subject
+            user_data["sso_subject"] = sso_subject
 
+        if entra_group_ids:
+            updated_roles = sync_roles_from_groups(user_data.get("roles", ["user"]), entra_group_ids)
+            if set(updated_roles) != set(user_data.get("roles", [])):
+                updates["roles"] = updated_roles
+                user_data["roles"] = updated_roles
 
-async def sync_roles_from_groups(user: User, entra_group_ids: list[str], db: AsyncSession):
-    """Map Entra Security Group Object IDs to application roles."""
-    group_map = get_role_mapping()
-    if not group_map:
-        return
+        user_data["last_login_at"] = now_iso
+        await user_ref.update(updates)
+        logger.info(f"Updated login timestamp for existing SSO user: {email}")
 
-    desired_role_names = {"user"}  # everyone gets default user role
-    for gid in entra_group_ids:
-        if gid in group_map:
-            desired_role_names.add(group_map[gid])
-
-    # Fetch role records for desired role names
-    role_res = await db.execute(select(Role).where(Role.name.in_(desired_role_names)))
-    desired_roles = role_res.scalars().all()
-
-    # Fetch current roles
-    current_role_ids = {r.id for r in user.roles} if user.roles else set()
-
-    for role in desired_roles:
-        if role.id not in current_role_ids:
-            db.add(UserRole(user_id=user.id, role_id=role.id))
-            logger.info(f"Granted role '{role.name}' to user '{user.email}' from Entra group sync")
+    return User.from_dict(user_data, doc_id=email)

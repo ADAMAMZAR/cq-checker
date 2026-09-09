@@ -1,22 +1,23 @@
-"""Unit and Integration Tests for SSO, JIT Provisioning, RBAC, and Admin User APIs."""
-import pytest
+"""Unit and Integration Tests for SSO, JIT Provisioning, RBAC, and Admin User APIs with Firestore."""
 from unittest.mock import AsyncMock, MagicMock, patch
+
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+import pytest
 
-from app.auth.provisioning import get_or_create_user
 from app.auth.dependencies import require_role
+from app.auth.provisioning import get_or_create_user
 from app.config import settings
 from app.db.session import get_db
-from app.models.tables import User, Role
 from app.main import app
+from app.models.tables import User
 
 
 @pytest.mark.asyncio
 async def test_jit_provisioning_missing_email():
     """Test that get_or_create_user raises ValueError if claims contain no email."""
     claims = {"oid": "1111-2222", "name": "No Email User"}
-    mock_db = AsyncMock()
+    mock_db = MagicMock()
 
     with pytest.raises(ValueError, match="No email found in Entra ID token claims"):
         await get_or_create_user(claims, mock_db)
@@ -30,7 +31,7 @@ async def test_jit_provisioning_tenant_mismatch():
         "email": "user@gamuda.com.my",
         "tid": "foreign-tenant-id-9999",
     }
-    mock_db = AsyncMock()
+    mock_db = MagicMock()
 
     with patch.object(settings, "entra_tenant_id", "expected-tenant-id-1111"):
         with pytest.raises(PermissionError, match="Token from unexpected Entra tenant"):
@@ -39,7 +40,7 @@ async def test_jit_provisioning_tenant_mismatch():
 
 @pytest.mark.asyncio
 async def test_jit_provisioning_creates_new_user():
-    """Test that a brand new user is auto-provisioned (JIT) with default 'user' role."""
+    """Test that a brand new user is auto-provisioned (JIT) with default 'user' role in Firestore."""
     claims = {
         "oid": "oid-user-123",
         "tid": "expected-tenant-id-1111",
@@ -47,19 +48,20 @@ async def test_jit_provisioning_creates_new_user():
         "name": "New Employee",
     }
 
-    # Mock DB queries returning no existing user
-    mock_db = AsyncMock()
-    mock_scalar_res = MagicMock()
-    mock_scalar_res.scalar_one_or_none.return_value = None
-    mock_db.execute.return_value = mock_scalar_res
+    mock_db = MagicMock()
+    mock_user_ref = MagicMock()
+    mock_snap = MagicMock()
+    mock_snap.exists = False
+    mock_user_ref.get = AsyncMock(return_value=mock_snap)
+    mock_user_ref.set = AsyncMock()
 
-    # Mock role query returning default 'user' role
-    mock_role = Role(name="user", display_name="User")
-    mock_role_res = MagicMock()
-    mock_role_res.scalar_one_or_none.return_value = mock_role
+    mock_db.collection.return_value.document.return_value = mock_user_ref
 
-    # Chain query returns: 1st check by sso_subject (None), 2nd check by email (None), 3rd check role ('user')
-    mock_db.execute.side_effect = [mock_scalar_res, mock_scalar_res, mock_role_res]
+    async def empty_stream():
+        if False:
+            yield None
+
+    mock_db.collection.return_value.where.return_value.limit.return_value.stream = empty_stream
 
     with patch.object(settings, "entra_tenant_id", "expected-tenant-id-1111"):
         user = await get_or_create_user(claims, mock_db)
@@ -67,15 +69,14 @@ async def test_jit_provisioning_creates_new_user():
     assert user.email == "new.employee@gamuda.com.my"
     assert user.display_name == "New Employee"
     assert user.sso_subject == "oid-user-123"
-    assert user.sso_provider == "entra"
+    assert user.roles == ["user"]
     assert user.is_active is True
-    assert mock_db.add.called
-    assert mock_db.commit.called
+    assert mock_user_ref.set.called
 
 
 @pytest.mark.asyncio
 async def test_jit_provisioning_existing_user_update():
-    """Test that logging in an existing user updates sso metadata and last_login_at without duplicate row creation."""
+    """Test that logging in an existing user updates sso metadata and last_login_at in Firestore."""
     claims = {
         "oid": "oid-user-123",
         "tid": "expected-tenant-id-1111",
@@ -83,39 +84,35 @@ async def test_jit_provisioning_existing_user_update():
         "name": "Existing Employee",
     }
 
-    existing_user = User(
-        email="existing.employee@gamuda.com.my",
-        display_name="Existing Employee",
-        sso_subject=None,
-        sso_provider=None,
-        is_active=True,
-    )
+    mock_db = MagicMock()
+    mock_user_ref = MagicMock()
+    mock_snap = MagicMock()
+    mock_snap.exists = True
+    mock_snap.to_dict.return_value = {
+        "email": "existing.employee@gamuda.com.my",
+        "display_name": "Existing Employee",
+        "sso_subject": None,
+        "roles": ["user"],
+        "is_active": True,
+    }
+    mock_user_ref.get = AsyncMock(return_value=mock_snap)
+    mock_user_ref.update = AsyncMock()
 
-    mock_db = AsyncMock()
-    mock_sso_res = MagicMock()
-    mock_sso_res.scalar_one_or_none.return_value = None
-
-    mock_email_res = MagicMock()
-    mock_email_res.scalar_one_or_none.return_value = existing_user
-
-    mock_db.execute.side_effect = [mock_sso_res, mock_email_res]
+    mock_db.collection.return_value.document.return_value = mock_user_ref
 
     with patch.object(settings, "entra_tenant_id", "expected-tenant-id-1111"):
         user = await get_or_create_user(claims, mock_db)
 
     assert user.email == "existing.employee@gamuda.com.my"
     assert user.sso_subject == "oid-user-123"
-    assert user.sso_tenant_id == "expected-tenant-id-1111"
     assert user.last_login_at is not None
-    assert mock_db.commit.called
+    assert mock_user_ref.update.called
 
 
 @pytest.mark.asyncio
 async def test_require_role_dependency_granted():
     """Test RBAC dependency allows execution when user possesses required role."""
-    admin_role = Role(name="admin", display_name="Admin")
-    user = User(email="admin@gamuda.com.my")
-    user.roles = [admin_role]
+    user = User(email="admin@gamuda.com.my", roles=["admin"])
 
     dep_fn = require_role("admin")
     result_user = await dep_fn(user=user)
@@ -125,9 +122,7 @@ async def test_require_role_dependency_granted():
 @pytest.mark.asyncio
 async def test_require_role_dependency_denied():
     """Test RBAC dependency raises 403 Forbidden when user lacks required role."""
-    standard_role = Role(name="user", display_name="User")
-    user = User(email="employee@gamuda.com.my")
-    user.roles = [standard_role]
+    user = User(email="employee@gamuda.com.my", roles=["user"])
 
     dep_fn = require_role("admin", "manager")
     with pytest.raises(HTTPException) as exc_info:
@@ -139,13 +134,16 @@ async def test_require_role_dependency_denied():
 
 def test_admin_user_api_endpoint_routing():
     """Test that /api/admin/users route is correctly registered in FastAPI app."""
-    mock_db = AsyncMock()
-    mock_res = MagicMock()
-    mock_res.scalars.return_value.all.return_value = []
-    mock_db.execute.return_value = mock_res
+    mock_db = MagicMock()
+
+    async def empty_stream():
+        if False:
+            yield None
+
+    mock_db.collection.return_value.stream = empty_stream
 
     async def override_get_db():
-        yield mock_db
+        return mock_db
 
     app.dependency_overrides[get_db] = override_get_db
     try:
@@ -158,6 +156,7 @@ def test_admin_user_api_endpoint_routing():
             },
         )
         assert response.status_code == 200
+        assert "users" in response.json()
     finally:
         app.dependency_overrides.pop(get_db, None)
 
@@ -171,13 +170,20 @@ async def test_jit_provisioning_b2b_guest_email():
         "email": "contractor_partner.com#EXT#@gamuda.onmicrosoft.com",
         "name": "Contractor Partner",
     }
-    mock_db = AsyncMock()
-    mock_scalar_res = MagicMock()
-    mock_scalar_res.scalar_one_or_none.return_value = None
-    mock_role = Role(name="user", display_name="User")
-    mock_role_res = MagicMock()
-    mock_role_res.scalar_one_or_none.return_value = mock_role
-    mock_db.execute.side_effect = [mock_scalar_res, mock_scalar_res, mock_role_res]
+    mock_db = MagicMock()
+    mock_user_ref = MagicMock()
+    mock_snap = MagicMock()
+    mock_snap.exists = False
+    mock_user_ref.get = AsyncMock(return_value=mock_snap)
+    mock_user_ref.set = AsyncMock()
+
+    mock_db.collection.return_value.document.return_value = mock_user_ref
+
+    async def empty_stream():
+        if False:
+            yield None
+
+    mock_db.collection.return_value.where.return_value.limit.return_value.stream = empty_stream
 
     with patch.object(settings, "entra_tenant_id", "expected-tenant-id-1111"):
         user = await get_or_create_user(claims, mock_db)
@@ -191,4 +197,3 @@ def test_callback_error_query_param_redirects():
     response = client.get("/auth/callback?error=access_denied&error_description=User+cancelled")
     assert response.status_code == 302
     assert "/login?error=user_cancelled" in response.headers["location"]
-

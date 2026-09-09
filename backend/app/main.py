@@ -10,9 +10,12 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
+from starlette.middleware.sessions import SessionMiddleware
 
 from app.api.v1.router import api_v1_router
+from app.auth.routes import router as sso_auth_router
 from app.config import settings
 from app.db.init_db import init_db_tables
 
@@ -38,7 +41,7 @@ is_prod = settings.environment.lower() == "production"
 
 app = FastAPI(
     title="GPO Automatic Certificate Auditor API",
-    description="Backend API for auditing certificates and logging results to Neon PostgreSQL",
+    description="Backend API for GPO Deck and RBAC with Firebase Firestore",
     version="1.0.0",
     openapi_tags=API_TAGS,
     lifespan=lifespan,
@@ -47,11 +50,6 @@ app = FastAPI(
     redoc_url=None if is_prod else "/redoc",
     openapi_url=None if is_prod else "/openapi.json",
 )
-
-
-from fastapi.middleware.gzip import GZipMiddleware
-from starlette.middleware.sessions import SessionMiddleware
-from app.auth.routes import router as sso_auth_router
 
 ALLOWED_DOMAIN = "gamuda.com.my"
 
@@ -83,7 +81,9 @@ async def verify_internal_secret_header(request: Request, call_next):
     client_secret = request.headers.get("X-Internal-Secret", "").strip()
 
     if expected_secret and client_secret != expected_secret:
-        logger.warning(f"Unauthorized access attempt to {request.url.path} from {request.client.host if request.client else 'unknown'}")
+        logger.warning(
+            f"Unauthorized access attempt to {request.url.path} from {request.client.host if request.client else 'unknown'}"
+        )
         return JSONResponse(
             status_code=401,
             content={"detail": "Unauthorized access. Missing or invalid internal secret header."},

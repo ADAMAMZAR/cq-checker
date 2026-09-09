@@ -1,7 +1,6 @@
 import logging
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
-from sqlalchemy.exc import IntegrityError
 
 from app.services import database_inspector
 
@@ -30,7 +29,7 @@ async def db_get_table(table_name: str, limit: int = 100, offset: int = 0, q: Op
     valid = await database_inspector.list_tables()
     names = {t["name"] for t in valid}
     if table_name not in names:
-        raise HTTPException(status_code=404, detail=f"Table '{table_name}' not found.")
+        raise HTTPException(status_code=404, detail=f"Collection '{table_name}' not found.")
     return await database_inspector.get_table_data(table_name, limit=limit, offset=offset, search=q)
 
 
@@ -39,7 +38,7 @@ async def db_delete_row(table_name: str, payload: dict):
     valid = await database_inspector.list_tables()
     names = {t["name"] for t in valid}
     if table_name not in names:
-        raise HTTPException(status_code=404, detail=f"Table '{table_name}' not found.")
+        raise HTTPException(status_code=404, detail=f"Collection '{table_name}' not found.")
 
     pk = (payload or {}).get("pk")
     if not isinstance(pk, dict) or not pk:
@@ -49,15 +48,12 @@ async def db_delete_row(table_name: str, payload: dict):
         deleted = await database_inspector.delete_row(table_name, pk)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except IntegrityError as e:
-        logger.error(f"DB delete FK violation on {table_name}: {e}")
-        raise HTTPException(
-            status_code=400,
-            detail="Cannot delete this row — it is referenced by other records (foreign key). Delete those first.",
-        )
+    except Exception as e:
+        logger.error(f"Error deleting row from {table_name}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete document: {e}")
 
     if not deleted:
-        raise HTTPException(status_code=404, detail="Row not found.")
+        raise HTTPException(status_code=404, detail="Document not found.")
     return {"deleted": deleted}
 
 
@@ -66,7 +62,7 @@ async def db_update_row(table_name: str, payload: dict):
     valid = await database_inspector.list_tables()
     names = {t["name"] for t in valid}
     if table_name not in names:
-        raise HTTPException(status_code=404, detail=f"Table '{table_name}' not found.")
+        raise HTTPException(status_code=404, detail=f"Collection '{table_name}' not found.")
 
     pk = (payload or {}).get("pk")
     column = (payload or {}).get("column")
@@ -81,7 +77,10 @@ async def db_update_row(table_name: str, payload: dict):
         updated = await database_inspector.update_cell(table_name, pk, column, value)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error updating cell in {table_name}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update document: {e}")
 
     if not updated:
-        raise HTTPException(status_code=404, detail="Row not found or no changes made.")
+        raise HTTPException(status_code=404, detail="Document not found or no changes made.")
     return {"updated": updated}

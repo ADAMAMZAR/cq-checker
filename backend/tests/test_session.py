@@ -1,20 +1,18 @@
 import pytest
-from app.db.session import get_engine, close_engine
+from app.db.session import get_firestore_client, close_firestore_client
+from app.config import settings
 
 
 @pytest.mark.asyncio
-async def test_database_engine_pool_settings():
-    """Verify that SQLAlchemy engine pool is tuned for Neon serverless auto-suspend."""
-    await close_engine()
-    engine = get_engine()
-    pool = engine.pool
+async def test_firestore_client_initialization():
+    """Verify that Firestore AsyncClient initializes with configured GCP project."""
+    await close_firestore_client()
+    client = get_firestore_client()
+    assert client is not None
+    assert client.project == (settings.gcp_project_id or "gen-lang-client-0447597759")
 
-    # Verify right-sized connection count
-    assert pool.size() == 3
-    assert pool._max_overflow == 5
+    # Verify singleton
+    client2 = get_firestore_client()
+    assert client is client2
 
-    # Verify 5-minute auto-suspend recycle and liveness pre-ping
-    assert pool._recycle == 300
-    assert pool._pre_ping is True
-
-    await close_engine()
+    await close_firestore_client()

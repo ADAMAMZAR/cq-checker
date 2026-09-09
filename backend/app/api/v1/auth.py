@@ -1,15 +1,13 @@
 import logging
 from fastapi import APIRouter
-from sqlalchemy import select
 
-from app.auth.seed import FEATURES, ROLE_FEATURES, ROLES, TEST_USERS, seed
-from app.db.session import get_session_factory
-from app.models.tables import Feature, Role, RoleFeature
+from app.auth.seed import FEATURES, ROLES, seed
+from app.db.session import get_firestore_client
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# In-memory cache to avoid continuous PostgreSQL queries for static roles and features
+# In-memory cache to avoid continuous queries for static roles and features
 _cached_roles_features_response = None
 
 
@@ -23,56 +21,49 @@ async def get_roles_and_features():
         return _cached_roles_features_response
 
     try:
-        factory = get_session_factory()
-        async with factory() as session:
-            roles_db = (await session.execute(select(Role))).scalars().all()
-            features_db = (await session.execute(select(Feature))).scalars().all()
-            rf_rows = (await session.execute(select(RoleFeature))).scalars().all()
+        db = get_firestore_client()
+        roles_list = []
+        async for doc in db.collection("roles").stream():
+            data = doc.to_dict() or {}
+            roles_list.append({
+                "id": doc.id,
+                "name": data.get("name", doc.id),
+                "display_name": data.get("display_name", doc.id.capitalize()),
+                "feature_ids": data.get("features", []),
+            })
 
-            if roles_db:
-                role_features_map = {}
-                for rf in rf_rows:
-                    role_features_map.setdefault(str(rf.role_id), []).append(rf.feature_id)
+        features_list = []
+        async for doc in db.collection("features").stream():
+            data = doc.to_dict() or {}
+            features_list.append({
+                "id": doc.id,
+                "display_name": data.get("display_name", doc.id),
+            })
 
-                roles_list = []
-                for r in roles_db:
-                    f_ids = role_features_map.get(str(r.id), ROLE_FEATURES.get(r.name, []))
-                    test_u = next((u["email"] for u in TEST_USERS if r.name in u["roles"]), None)
-                    roles_list.append({
-                        "id": str(r.id),
-                        "name": r.name,
-                        "display_name": r.display_name,
-                        "description": r.description,
-                        "feature_ids": f_ids,
-                        "test_user": test_u,
-                    })
-
-                features_list = [
-                    {
-                        "id": f.id,
-                        "display_name": f.display_name,
-                        "description": f.description,
-                        "route_path": f.route_path,
-                        "is_external": f.is_external == "1",
-                        "sort_order": f.sort_order,
-                    }
-                    for f in features_db
-                ]
-                _cached_roles_features_response = {"roles": roles_list, "features": features_list}
-                return _cached_roles_features_response
+        if roles_list and features_list:
+            _cached_roles_features_response = {"roles": roles_list, "features": features_list}
+            return _cached_roles_features_response
     except Exception as e:
-        logger.warning(f"Error fetching roles from DB: {e}")
+        logger.warning(f"Error fetching roles from Firestore: {e}")
 
-    roles_list = []
-    for r in ROLES:
-        roles_list.append({
+    # Fallback to static definitions
+    roles_list = [
+        {
+            "id": r["name"],
             "name": r["name"],
             "display_name": r["display_name"],
-            "description": r["description"],
-            "feature_ids": ROLE_FEATURES.get(r["name"], []),
-            "test_user": next((u["email"] for u in TEST_USERS if r["name"] in u["roles"]), None),
-        })
-    _cached_roles_features_response = {"roles": roles_list, "features": FEATURES}
+            "feature_ids": r.get("features", []),
+        }
+        for r in ROLES
+    ]
+    features_list = [
+        {
+            "id": f["id"],
+            "display_name": f["display_name"],
+        }
+        for f in FEATURES
+    ]
+    _cached_roles_features_response = {"roles": roles_list, "features": features_list}
     return _cached_roles_features_response
 
 
@@ -82,4 +73,4 @@ async def trigger_seed():
     global _cached_roles_features_response
     await seed()
     _cached_roles_features_response = None
-    return {"status": "success", "message": "Roles, features, and test users seeded successfully"}
+    return {"status": "success", "message": "Roles, features, and test users seeded successfully in Firestore"}

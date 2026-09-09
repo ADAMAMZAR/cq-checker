@@ -77,7 +77,8 @@ deploy_backend:
   script:
     - |
       ENV_VARS="^;;^ENVIRONMENT=production;;SESSION_COOKIE_NAME=__session"
-      [ -n "$NEON_DATABASE_URL" ] && ENV_VARS="$ENV_VARS;;NEON_DATABASE_URL=$NEON_DATABASE_URL"
+      [ -n "$GCP_PROJECT_ID" ] && ENV_VARS="$ENV_VARS;;GCP_PROJECT_ID=$GCP_PROJECT_ID"
+      [ -n "$FIRESTORE_DATABASE" ] && ENV_VARS="$ENV_VARS;;FIRESTORE_DATABASE=$FIRESTORE_DATABASE"
       [ -n "$ALLOWED_ORIGINS" ] && ENV_VARS="$ENV_VARS;;ALLOWED_ORIGINS=$ALLOWED_ORIGINS"
       [ -n "$ENTRA_REDIRECT_URI" ] && ENV_VARS="$ENV_VARS;;ENTRA_REDIRECT_URI=$ENTRA_REDIRECT_URI"
       [ -n "$SESSION_SECRET" ] && ENV_VARS="$ENV_VARS;;SESSION_SECRET=$SESSION_SECRET"
@@ -87,7 +88,7 @@ deploy_backend:
 
       gcloud run deploy gpodeck-backend \
         --source backend \
-        --region us-central1 \
+        --region us-west1 \
         --allow-unauthenticated \
         --min-instances 0 \
         --max-instances 3 \
@@ -98,11 +99,11 @@ deploy_backend:
         --update-env-vars "$ENV_VARS"
 
       gcloud run services update gpodeck-backend \
-        --region us-central1 \
+        --region us-west1 \
         --max-instances 3
 
       # Prune old Artifact Registry container images (keep latest 3 versions to eliminate storage costs)
-      IMAGE_REPO="us-central1-docker.pkg.dev/${GCP_PROJECT_ID}/cloud-run-source-deploy/gpodeck-backend"
+      IMAGE_REPO="us-west1-docker.pkg.dev/${GCP_PROJECT_ID}/cloud-run-source-deploy/gpodeck-backend"
       OLD_DIGESTS=$(gcloud artifacts docker images list "$IMAGE_REPO" --sort-by=~CREATE_TIME --format="value(DIGEST)" 2>/dev/null | tail -n +4) || true
       if [ -n "$OLD_DIGESTS" ]; then
         for digest in $OLD_DIGESTS; do

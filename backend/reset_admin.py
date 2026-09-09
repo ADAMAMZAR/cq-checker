@@ -1,34 +1,30 @@
-"""Script to restore a specific user (or default adamamzar@gamuda.com.my) to the 'admin' role."""
-import sys
+"""Script to restore a specific user (or default adamamzar@gamuda.com.my) to the 'admin' role in Firestore."""
 import asyncio
-from sqlalchemy import select, delete
-from app.db.session import get_session_factory
-from app.models.tables import User, Role, UserRole
+from datetime import datetime, timezone
+import sys
+
+from app.db.session import get_firestore_client
+
 
 async def main(target_email: str):
     target_email = target_email.strip().lower()
-    factory = get_session_factory()
-    async with factory() as db:
-        res = await db.execute(select(User).where(User.email.ilike(target_email)))
-        user = res.scalar_one_or_none()
-        if not user:
-            print(f"User with email '{target_email}' not found in database.")
-            return
+    db = get_firestore_client()
+    user_ref = db.collection("users").document(target_email)
+    snap = await user_ref.get()
+    if not snap.exists:
+        print(f"User with email '{target_email}' not found in Firestore. Creating with 'admin' role...")
+        await user_ref.set({
+            "email": target_email,
+            "display_name": target_email.split("@")[0],
+            "roles": ["admin"],
+            "is_active": True,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "last_login_at": None,
+        })
+    else:
+        await user_ref.update({"roles": ["admin"]})
+    print(f"Successfully granted 'admin' role to '{target_email}' in Firestore!")
 
-        admin_role_res = await db.execute(select(Role).where(Role.name == "admin"))
-        admin_role = admin_role_res.scalar_one_or_none()
-        if not admin_role:
-            print("Admin role 'admin' not found in database.")
-            return
-
-        # Remove current user roles for target user
-        await db.execute(delete(UserRole).where(UserRole.user_id == user.id))
-        
-        # Assign 'admin' role
-        db.add(UserRole(user_id=user.id, role_id=admin_role.id))
-        await db.commit()
-        
-        print(f"Successfully granted 'admin' role to '{user.email}' only!")
 
 if __name__ == "__main__":
     email = sys.argv[1] if len(sys.argv) > 1 else "adamamzar@gamuda.com.my"

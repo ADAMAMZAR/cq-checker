@@ -12,14 +12,14 @@
         "source": "/api/**",
         "run": {
           "serviceId": "gpodeck-backend",
-          "region": "us-central1"
+          "region": "us-west1"
         }
       },
       {
         "source": "/auth/**",
         "run": {
           "serviceId": "gpodeck-backend",
-          "region": "us-central1"
+          "region": "us-west1"
         }
       },
       {
