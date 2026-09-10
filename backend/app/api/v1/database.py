@@ -1,7 +1,8 @@
 import logging
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
+from app.core.limiter import limiter
 from app.services import database_inspector
 
 logger = logging.getLogger(__name__)
@@ -13,19 +14,22 @@ router = APIRouter()
 
 @router.get("/api/db/tables", tags=["Database Browser"])
 @router.get("/api/db/tables/", tags=["Database Browser"])
-async def db_list_tables():
+@limiter.limit("60/minute")
+async def db_list_tables(request: Request):
     return await database_inspector.list_tables()
 
 
 @router.get("/api/db/schema", tags=["Database Browser"])
 @router.get("/api/db/schema/", tags=["Database Browser"])
-async def db_get_schema():
+@limiter.limit("60/minute")
+async def db_get_schema(request: Request):
     return await database_inspector.get_full_schema()
 
 
 @router.get("/api/db/tables/{table_name}", tags=["Database Browser"])
 @router.get("/api/db/tables/{table_name}/", tags=["Database Browser"])
-async def db_get_table(table_name: str, limit: int = 100, offset: int = 0, q: Optional[str] = Query(None)):
+@limiter.limit("60/minute")
+async def db_get_table(request: Request, table_name: str, limit: int = 100, offset: int = 0, q: Optional[str] = Query(None)):
     valid = await database_inspector.list_tables()
     names = {t["name"] for t in valid}
     if table_name not in names:
@@ -34,7 +38,8 @@ async def db_get_table(table_name: str, limit: int = 100, offset: int = 0, q: Op
 
 
 @router.delete("/api/db/tables/{table_name}", tags=["Database Browser"])
-async def db_delete_row(table_name: str, payload: dict):
+@limiter.limit("60/minute")
+async def db_delete_row(request: Request, table_name: str, payload: dict):
     valid = await database_inspector.list_tables()
     names = {t["name"] for t in valid}
     if table_name not in names:
@@ -58,7 +63,8 @@ async def db_delete_row(table_name: str, payload: dict):
 
 
 @router.put("/api/db/tables/{table_name}", tags=["Database Browser"])
-async def db_update_row(table_name: str, payload: dict):
+@limiter.limit("60/minute")
+async def db_update_row(request: Request, table_name: str, payload: dict):
     valid = await database_inspector.list_tables()
     names = {t["name"] for t in valid}
     if table_name not in names:

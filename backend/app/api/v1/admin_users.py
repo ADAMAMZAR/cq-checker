@@ -8,6 +8,7 @@ from google.cloud.firestore_v1.async_client import AsyncClient
 from pydantic import BaseModel, EmailStr
 
 from app.auth.routes import format_login_timestamp
+from app.core.limiter import limiter
 from app.db.session import get_db
 
 logger = logging.getLogger(__name__)
@@ -29,7 +30,8 @@ class CreateUserSchema(BaseModel):
 @router.get("/api/admin/users/", response_model=dict)
 @router.get("/admin/users", response_model=dict)
 @router.get("/admin/users/", response_model=dict)
-async def list_users(db: AsyncClient = Depends(get_db)):
+@limiter.limit("30/minute")
+async def list_users(request: Request, db: AsyncClient = Depends(get_db)):
     """List all registered and pre-seeded users with their roles from Firestore."""
     user_list = []
     async for doc in db.collection("users").stream():
@@ -65,7 +67,9 @@ async def list_users(db: AsyncClient = Depends(get_db)):
 
 @router.post("/api/admin/users", status_code=status.HTTP_201_CREATED)
 @router.post("/admin/users", status_code=status.HTTP_201_CREATED)
+@limiter.limit("10/minute")
 async def create_or_preseed_user(
+    request: Request,
     body: CreateUserSchema,
     db: AsyncClient = Depends(get_db),
 ):
@@ -98,6 +102,7 @@ async def create_or_preseed_user(
 
 @router.put("/api/admin/users/{user_id}/roles")
 @router.put("/admin/users/{user_id}/roles")
+@limiter.limit("10/minute")
 async def update_user_roles(
     user_id: str,
     body: UserRoleUpdateSchema,
@@ -125,7 +130,9 @@ async def update_user_roles(
 
 @router.delete("/api/admin/users/{user_id}")
 @router.delete("/admin/users/{user_id}")
+@limiter.limit("10/minute")
 async def delete_user(
+    request: Request,
     user_id: str,
     db: AsyncClient = Depends(get_db),
 ):

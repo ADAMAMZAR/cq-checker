@@ -10,6 +10,7 @@ from app.auth.dependencies import get_current_user_from_session
 from app.auth.oauth import oauth
 from app.auth.provisioning import get_or_create_user
 from app.config import settings
+from app.core.limiter import limiter
 from app.db.session import get_db, get_firestore_client
 from app.services.timezones import to_malaysia
 
@@ -32,6 +33,7 @@ def format_login_timestamp(val) -> str | None:
 
 
 @router.get("/login")
+@limiter.limit("10/minute")
 async def login(request: Request):
     """Redirect user to Microsoft Entra ID login."""
     if not settings.entra_client_id:
@@ -44,6 +46,7 @@ async def login(request: Request):
 
 
 @router.get("/callback")
+@limiter.limit("10/minute")
 async def callback(request: Request, db: AsyncClient = Depends(get_db)):
     """Handle OIDC authorization code callback from Microsoft Entra ID."""
     frontend_base = (settings.allowed_origins.split(",")[0] or "http://localhost:3000").rstrip("/")
@@ -135,6 +138,7 @@ async def callback(request: Request, db: AsyncClient = Depends(get_db)):
 
 @router.post("/logout")
 @router.get("/logout")
+@limiter.limit("10/minute")
 async def logout(request: Request):
     """Clear local user session and return Entra logout URL."""
     user_email = request.session.get("email") or request.session.get("user_id")
@@ -167,6 +171,7 @@ async def logout(request: Request):
 
 
 @router.get("/me")
+@limiter.limit("60/minute")
 async def me(request: Request, response: Response):
     """Return currently authenticated user directly from cryptographically signed session cookie.
 
@@ -236,6 +241,7 @@ async def me(request: Request, response: Response):
 
 
 @router.get("/debug")
+@limiter.limit("30/minute")
 async def debug_sso_session(request: Request):
     """Debug endpoint returning authenticated session details."""
     return {

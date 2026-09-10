@@ -13,10 +13,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
+from slowapi.errors import RateLimitExceeded
 
 from app.api.v1.router import api_v1_router
 from app.auth.routes import router as sso_auth_router
 from app.config import settings
+from app.core.limiter import limiter, rate_limit_exceeded_handler
 from app.db.init_db import init_db_tables
 
 logger = logging.getLogger(__name__)
@@ -50,6 +52,10 @@ app = FastAPI(
     redoc_url=None if is_prod else "/redoc",
     openapi_url=None if is_prod else "/openapi.json",
 )
+
+# Register slowapi limiter and rate limit exception handler
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 
 ALLOWED_DOMAIN = "gamuda.com.my"
 
@@ -122,7 +128,8 @@ app.include_router(api_v1_router)
 
 
 @app.get("/", tags=["System / Health"])
-async def root_health_check():
+@limiter.limit("60/minute")
+async def root_health_check(request: Request):
     """Health check endpoint confirming API service status."""
     return {
         "status": "healthy",

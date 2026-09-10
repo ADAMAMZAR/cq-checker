@@ -1,7 +1,8 @@
 import logging
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from app.auth.seed import FEATURES, ROLES, seed
+from app.core.limiter import limiter
 from app.db.session import get_firestore_client
 
 logger = logging.getLogger(__name__)
@@ -15,7 +16,8 @@ _cached_roles_features_response = None
 @router.get("/api/v1/auth/roles/", tags=["Auth & RBAC"])
 @router.get("/api/auth/roles", tags=["Auth & RBAC"])
 @router.get("/api/auth/roles/", tags=["Auth & RBAC"])
-async def get_roles_and_features():
+@limiter.limit("60/minute")
+async def get_roles_and_features(request: Request):
     global _cached_roles_features_response
     if _cached_roles_features_response is not None:
         return _cached_roles_features_response
@@ -69,7 +71,8 @@ async def get_roles_and_features():
 
 @router.post("/api/v1/auth/seed", tags=["Auth & RBAC"])
 @router.post("/api/auth/seed", tags=["Auth & RBAC"])
-async def trigger_seed():
+@limiter.limit("5/minute")
+async def trigger_seed(request: Request):
     global _cached_roles_features_response
     await seed()
     _cached_roles_features_response = None

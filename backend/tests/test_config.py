@@ -20,6 +20,7 @@ class TestSettingsDefaults:
             "ENTRA_CLIENT_SECRET",
             "ENTRA_REDIRECT_URI",
             "SESSION_SECRET",
+            "SESSION_MAX_AGE_SECONDS",
             "ALLOWED_ORIGINS",
         ]
         for key in keys_to_clear:
@@ -47,6 +48,10 @@ class TestSettingsDefaults:
         assert s.entra_client_id == ""
         assert s.entra_client_secret == ""
 
+    def test_session_settings_default(self, monkeypatch):
+        s = self._fresh_settings(monkeypatch)
+        assert s.session_max_age_seconds == 604800
+
 
 class TestSettingsFromEnv:
     """Verify Settings reads values from environment variables."""
@@ -64,3 +69,9 @@ class TestSettingsFromEnv:
         from app.config import Settings
         s = Settings()
         assert s.entra_tenant_id == "test-tenant-123"
+
+    def test_session_max_age_from_env(self, monkeypatch):
+        monkeypatch.setenv("SESSION_MAX_AGE_SECONDS", "86400")
+        from app.config import Settings
+        s = Settings()
+        assert s.session_max_age_seconds == 86400
