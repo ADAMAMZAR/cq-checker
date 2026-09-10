@@ -50,10 +50,10 @@ export default function DatabasePreview() {
 
   const fetched = useRef(false);
 
-  const loadTables = useCallback(async () => {
+  const loadTables = useCallback(async (force = false) => {
     setTablesLoading(true);
     try {
-      const list = await fetchDbTables();
+      const list = await fetchDbTables(force);
       setTables(list);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load tables.");
@@ -95,7 +95,7 @@ export default function DatabasePreview() {
   };
 
   const handleRefresh = () => {
-    loadTables();
+    loadTables(true);
     if (selectedTable) loadTableData(selectedTable, page * PAGE_SIZE, rowSearch);
   };
 
@@ -151,7 +151,7 @@ export default function DatabasePreview() {
       await deleteDbRow(tableName, pk);
       setConfirmDeleteState(null);
       loadTableData(tableName, page * PAGE_SIZE);
-      loadTables();
+      loadTables(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete row.");
     } finally {

@@ -6,6 +6,7 @@ import type { NextConfig } from "next";
 const isStaticExport = process.env.STATIC_EXPORT === "1";
 
 const nextConfig: NextConfig = {
+  reactStrictMode: false,
   trailingSlash: isStaticExport ? true : false,
   skipTrailingSlashRedirect: true,
   images: {

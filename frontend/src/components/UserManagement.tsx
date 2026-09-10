@@ -56,10 +56,10 @@ export default function UserManagement() {
     }
   }, []);
 
-  async function loadUsers() {
+  async function loadUsers(force = false) {
     setLoading(true);
     try {
-      const res = await fetchAdminUsers();
+      const res = await fetchAdminUsers(force);
       setUsers(res.users || []);
     } catch (err: any) {
       console.error("Failed to load admin users:", err);
@@ -93,7 +93,7 @@ export default function UserManagement() {
       await createAdminUser(newEmail.trim(), [selectedRole]);
       setSuccessMsg(`Pre-seeded ${newEmail} with role '${selectedRole}'`);
       setShowAddModal(false);
-      await loadUsers();
+      await loadUsers(true);
       setTimeout(() => setSuccessMsg(null), 4000);
     } catch (err: any) {
       setErrorMsg(err.message || "Failed to pre-seed user.");
@@ -116,7 +116,7 @@ export default function UserManagement() {
       }
       setSuccessMsg(`Updated role for ${selectedUser.email} to '${selectedRole}'`);
       setShowEditModal(false);
-      await loadUsers();
+      await loadUsers(true);
       setTimeout(() => setSuccessMsg(null), 4000);
     } catch (err: any) {
       setErrorMsg(err.message || "Failed to update role.");
@@ -131,7 +131,7 @@ export default function UserManagement() {
     try {
       await deleteAdminUser(user.id);
       setSuccessMsg(`Deleted user ${user.email}`);
-      await loadUsers();
+      await loadUsers(true);
       setTimeout(() => setSuccessMsg(null), 4000);
     } catch (err: any) {
       alert(`Failed to delete user: ${err.message}`);
@@ -161,7 +161,7 @@ export default function UserManagement() {
         <div className="flex items-center gap-2 shrink-0">
           <button
             type="button"
-            onClick={() => loadUsers()}
+            onClick={() => loadUsers(true)}
             disabled={loading}
             title="Refresh users list"
             className="inline-flex items-center justify-center p-2 rounded-xl border border-[var(--border-visible)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-card)] text-[var(--text-secondary)] hover:text-[var(--heading-color)] transition-all shadow-sm cursor-pointer disabled:opacity-50"

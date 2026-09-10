@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, Suspense } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
-import { IconLoader2 } from "@tabler/icons-react";
+import { useSearchParams } from "next/navigation";
 import type { AdminTab } from "@/components/AdminSidebar";
 import AdminSidebar from "@/components/AdminSidebar";
 
@@ -14,7 +13,6 @@ const STORAGE_KEY = "admin_active_tab";
 
 function AdminPageContent() {
   const searchParams = useSearchParams();
-  const router = useRouter();
 
   const rawParam = searchParams.get("tab");
   const paramTab = rawParam && VALID_TABS.includes(rawParam as AdminTab) ? (rawParam as AdminTab) : null;
@@ -34,35 +32,54 @@ function AdminPageContent() {
   const [activeTab, setActiveTab] = useState<AdminTab>(getInitialTab);
   const [visitedTabs, setVisitedTabs] = useState<Set<AdminTab>>(() => new Set([getInitialTab()]));
 
-  // Synchronize active tab with URL query parameter & localStorage fallback
+  // 1. Initial URL synchronization without triggering a full page reload or Next.js route transition
   useEffect(() => {
-    const raw = searchParams.get("tab");
-    const validParam = raw && VALID_TABS.includes(raw as AdminTab) ? (raw as AdminTab) : null;
-
-    if (validParam) {
-      if (validParam !== activeTab) {
-        setActiveTab(validParam);
-        setVisitedTabs((prev) => (prev.has(validParam) ? prev : new Set(prev).add(validParam)));
-      }
-      try {
-        localStorage.setItem(STORAGE_KEY, validParam);
-      } catch {}
-    } else {
-      router.replace(`/admin?tab=${activeTab}`, { scroll: false });
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const current = params.get("tab");
+    if (current !== activeTab) {
+      const url = new URL(window.location.href);
+      url.searchParams.set("tab", activeTab);
+      window.history.replaceState({ tab: activeTab }, "", url.toString());
     }
-  }, [searchParams, router, activeTab]);
+  }, [activeTab]);
 
-  const handleTabChange = useCallback(
-    (newTab: AdminTab) => {
-      setActiveTab(newTab);
-      setVisitedTabs((prev) => (prev.has(newTab) ? prev : new Set(prev).add(newTab)));
-      try {
-        localStorage.setItem(STORAGE_KEY, newTab);
-      } catch {}
-      router.push(`/admin?tab=${newTab}`, { scroll: false });
-    },
-    [router]
-  );
+  // 2. Handle browser Back/Forward navigation smoothly
+  useEffect(() => {
+    const handlePopState = () => {
+      if (typeof window === "undefined") return;
+      const params = new URLSearchParams(window.location.search);
+      const raw = params.get("tab");
+      if (raw && VALID_TABS.includes(raw as AdminTab)) {
+        const tab = raw as AdminTab;
+        setActiveTab(tab);
+        setVisitedTabs((prev) => (prev.has(tab) ? prev : new Set(prev).add(tab)));
+        try {
+          localStorage.setItem(STORAGE_KEY, tab);
+        } catch {}
+      }
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  // 3. Tab switching: 0ms latency, zero reload, preserves mounted tab instances
+  const handleTabChange = useCallback((newTab: AdminTab) => {
+    setActiveTab(newTab);
+    setVisitedTabs((prev) => (prev.has(newTab) ? prev : new Set(prev).add(newTab)));
+    try {
+      localStorage.setItem(STORAGE_KEY, newTab);
+    } catch {}
+
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get("tab") !== newTab) {
+        url.searchParams.set("tab", newTab);
+        window.history.pushState({ tab: newTab }, "", url.toString());
+      }
+    }
+  }, []);
 
   return (
     <div className="flex-1 flex flex-col md:flex-row w-full p-2 md:p-4 gap-4 md:gap-5">

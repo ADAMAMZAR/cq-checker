@@ -92,10 +92,36 @@ export async function authFetch(input: RequestInfo | URL, init: RequestInit = {}
   return res;
 }
 
-export async function fetchDbTables(): Promise<DbTableMeta[]> {
-  const res = await authFetch(`${API_BASE}/db/tables`);
-  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
-  return res.json();
+// ── In-Flight Deduplication & In-Memory Cache for Database Preview ───────────
+let inFlightTablesPromise: Promise<DbTableMeta[]> | null = null;
+let cachedTables: DbTableMeta[] | null = null;
+
+export function invalidateAdminTablesCache(): void {
+  cachedTables = null;
+  inFlightTablesPromise = null;
+}
+
+export async function fetchDbTables(forceRefresh = false): Promise<DbTableMeta[]> {
+  if (forceRefresh) {
+    invalidateAdminTablesCache();
+  } else {
+    if (cachedTables) return cachedTables;
+    if (inFlightTablesPromise) return inFlightTablesPromise;
+  }
+
+  inFlightTablesPromise = (async () => {
+    try {
+      const res = await authFetch(`${API_BASE}/db/tables`);
+      if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
+      const data = await res.json();
+      cachedTables = data;
+      return data;
+    } finally {
+      inFlightTablesPromise = null;
+    }
+  })();
+
+  return inFlightTablesPromise;
 }
 
 export async function fetchDbTable(
@@ -119,6 +145,7 @@ export async function deleteDbRow(table: string, pk: Record<string, string>): Pr
     body: JSON.stringify({ pk }),
   });
   if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
+  invalidateAdminTablesCache();
 }
 
 export async function updateDbCell(
@@ -133,6 +160,7 @@ export async function updateDbCell(
     body: JSON.stringify({ pk, column, value }),
   });
   if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
+  invalidateAdminTablesCache();
 }
 
 export async function fetchRolesAndFeatures(): Promise<RolesAndFeaturesResponse> {
@@ -167,10 +195,36 @@ export interface AdminUsersResponse {
   available_roles: Array<{ id: string; name: string; display_name: string }>;
 }
 
-export async function fetchAdminUsers(): Promise<AdminUsersResponse> {
-  const res = await authFetch(`${API_BASE}/admin/users`);
-  if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
-  return res.json();
+// ── In-Flight Deduplication & In-Memory Cache for Admin Users ────────────────
+let inFlightUsersPromise: Promise<AdminUsersResponse> | null = null;
+let cachedUsers: AdminUsersResponse | null = null;
+
+export function invalidateAdminUsersCache(): void {
+  cachedUsers = null;
+  inFlightUsersPromise = null;
+}
+
+export async function fetchAdminUsers(forceRefresh = false): Promise<AdminUsersResponse> {
+  if (forceRefresh) {
+    invalidateAdminUsersCache();
+  } else {
+    if (cachedUsers) return cachedUsers;
+    if (inFlightUsersPromise) return inFlightUsersPromise;
+  }
+
+  inFlightUsersPromise = (async () => {
+    try {
+      const res = await authFetch(`${API_BASE}/admin/users`);
+      if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
+      const data = await res.json();
+      cachedUsers = data;
+      return data;
+    } finally {
+      inFlightUsersPromise = null;
+    }
+  })();
+
+  return inFlightUsersPromise;
 }
 
 export async function createAdminUser(
@@ -184,6 +238,7 @@ export async function createAdminUser(
     body: JSON.stringify({ email, roles, display_name: displayName }),
   });
   if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
+  invalidateAdminUsersCache();
   return res.json();
 }
 
@@ -197,6 +252,7 @@ export async function updateAdminUserRoles(
     body: JSON.stringify({ roles }),
   });
   if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
+  invalidateAdminUsersCache();
   return res.json();
 }
 
@@ -205,5 +261,6 @@ export async function deleteAdminUser(userId: string): Promise<{ status: string;
     method: "DELETE",
   });
   if (!res.ok) throw new ApiError(res.status, res.statusText, await errorDetail(res));
+  invalidateAdminUsersCache();
   return res.json();
 }
